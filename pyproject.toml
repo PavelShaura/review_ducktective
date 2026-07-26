@@ -1,0 +1,199 @@
+[project]
+name = "review-ducktective"
+version = "0.1.0"
+description = "Платформа автоматического code review на LLM с RAG по кодовой базе"
+requires-python = ">=3.12"
+readme = "README.md"
+license = { text = "MIT" }
+
+dependencies = [
+    "ducktective-core",
+    "ducktective-application",
+    "ducktective-storage",
+    "ducktective-observability",
+    "ducktective-api",
+]
+
+[project.scripts]
+ducktective = "ducktective.api.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",
+    "testcontainers[postgres,redis]>=4.9",
+    "httpx>=0.28",
+    "ruff>=0.9",
+    "isort>=5.13",
+    "mypy>=1.14",
+    "import-linter>=2.1",
+    "pre-commit>=4.0",
+    "commitizen>=4.1",
+]
+
+[tool.uv.workspace]
+members = ["packages/*", "apps/api"]
+
+[tool.uv.sources]
+ducktective-core = { workspace = true }
+ducktective-application = { workspace = true }
+ducktective-storage = { workspace = true }
+ducktective-observability = { workspace = true }
+ducktective-api = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+bypass-selection = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["packages/*/src", "apps/*/src"]
+
+# Сортировка импортов вынесена в isort (правило "I" сознательно не включено):
+# ruff не поддерживает force_grid_wrap, а нам нужен стиль
+#   from fastapi import (
+#       FastAPI,
+#   )
+# Порядок прогона: isort . && ruff format . && ruff check --fix .
+
+[tool.ruff.lint]
+select = [
+    "E", "W",      # pycodestyle
+    "F",           # pyflakes
+    "N",           # pep8-naming
+    "UP",          # pyupgrade
+    "B",           # bugbear
+    "SIM",         # simplify
+    "C4",          # comprehensions
+    "RET",         # flake8-return
+    "T20",         # flake8-print
+    "DTZ",         # datetime без таймзоны
+    "PTH",         # pathlib вместо os.path
+    "TC",          # flake8-type-checking
+    "PL",          # pylint (подмножество)
+    "RUF",
+]
+ignore = [
+    "E501",        # длина строки — за неё отвечает форматтер
+    "E712",        # сравнение с True — ложное срабатывание на колонках SQLAlchemy
+    "B008",        # вызовы в значениях по умолчанию — паттерн Depends в FastAPI
+    "PLR0913",     # много аргументов
+    "PLR0911",     # много return
+    "PLR0912",     # много ветвлений
+    "PLR0915",     # много выражений
+    "PLR2004",     # магические значения в сравнениях
+    "RUF001",      # кириллица в строках — проект русскоязычный
+    "RUF002",      # кириллица в docstring
+    "RUF003",      # кириллица в комментариях
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["PLR2004", "S101"]
+"scripts/*" = ["T201"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+skip-magic-trailing-comma = false
+
+[tool.isort]
+profile = "black"
+known_first_party = ["ducktective"]
+src_paths = ["packages", "apps", "tests"]
+force_grid_wrap = 1
+multi_line_output = 3
+include_trailing_comma = true
+line_length = 100
+lines_after_imports = 2
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+disallow_any_explicit = false
+plugins = ["pydantic.mypy"]
+mypy_path = "packages/core/src:packages/application/src:packages/storage/src:packages/observability/src:apps/api/src"
+namespace_packages = true
+explicit_package_bases = true
+
+[[tool.mypy.overrides]]
+module = ["testcontainers.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests", "packages", "apps"]
+python_files = ["test_*.py"]
+addopts = "-q --strict-markers"
+markers = [
+    "integration: требует поднятых контейнеров",
+    "eval: прогон eval-набора, не запускается в общем CI",
+]
+
+[tool.commitizen]
+name = "cz_conventional_commits"
+version_scheme = "semver"
+version_provider = "pep621"
+tag_format = "v$version"
+update_changelog_on_bump = true
+
+[tool.importlinter]
+root_packages = ["ducktective"]
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Слои: интерфейсы → application → домен"
+type = "layers"
+layers = [
+    "ducktective.api",
+    "ducktective.application",
+    "ducktective.core",
+]
+
+[[tool.importlinter.contracts]]
+name = "Домен не знает про инфраструктуру"
+type = "forbidden"
+source_modules = ["ducktective.core"]
+forbidden_modules = [
+    "sqlalchemy",
+    "alembic",
+    "fastapi",
+    "starlette",
+    "redis",
+    "litellm",
+    "langgraph",
+    "langchain",
+    "arq",
+    "httpx",
+]
+
+[[tool.importlinter.contracts]]
+name = "Application не знает про инфраструктуру"
+type = "forbidden"
+source_modules = ["ducktective.application"]
+forbidden_modules = [
+    "sqlalchemy",
+    "alembic",
+    "fastapi",
+    "starlette",
+    "litellm",
+    "langgraph",
+]
+
+[[tool.importlinter.contracts]]
+name = "Storage не зависит от интерфейсов и use cases"
+type = "forbidden"
+source_modules = ["ducktective.storage"]
+forbidden_modules = [
+    "ducktective.api",
+    "ducktective.application",
+]

@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_FROZEN: "1"
+
+jobs:
+  quality:
+    name: Линт, типы, границы слоёв
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Установка зависимостей
+        run: uv sync --all-packages --dev
+
+      - name: Сортировка импортов
+        run: uv run isort --check-only --diff .
+
+      - name: ruff check
+        run: uv run ruff check --output-format=github .
+
+      - name: ruff format
+        run: uv run ruff format --check .
+
+      - name: mypy
+        run: uv run mypy packages apps tests
+
+      - name: Границы слоёв
+        run: uv run lint-imports
+
+  tests:
+    name: Тесты
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Установка зависимостей
+        run: uv sync --all-packages --dev
+
+      - name: pytest
+        run: uv run pytest -m "not eval" --cov --cov-report=term-missing
+
+  security:
+    name: Секреты и лицензии
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Поиск утечек секретов
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Проверка лицензий зависимостей
+        run: |
+          uv sync --all-packages
+          uv run --with pip-licenses pip-licenses \
+            --fail-on="GPL v3;AGPL v3;GNU General Public License v3 (GPLv3)" \
+            --format=markdown
