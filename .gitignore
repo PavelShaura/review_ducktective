@@ -29,7 +29,7 @@ apps/web/.vite/
 *.swp
 .DS_Store
 
-data/
-repos/
-models/
-scratch/
+/data/
+/repos/
+/models/
+/scratch/

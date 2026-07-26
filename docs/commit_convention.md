@@ -40,16 +40,33 @@ feat(storage)!: replace snapshot identity with content hash
 
 ## Области
 
-Область — имя пакета или приложения, чтобы по истории было видно затронутый слой:
+**Область указывается всегда.** По истории должно быть видно, какой слой затронут,
+без открытия диффа.
+
+Пакеты и приложения:
 
 `core`, `application`, `storage`, `indexing`, `retrieval`, `llm`, `review_graph`,
 `vcs`, `analyzers`, `evals`, `observability`, `api`, `indexer`, `reviewer`,
-`mcp`, `web`, `deploy`, `config`, `deps`
+`mcp`, `web`
 
-Область необязательна для изменений, затрагивающих весь репозиторий.
+Инфраструктурные области:
+
+| Область | Что покрывает |
+|---|---|
+| `config` | конфигурация репозитория: `.gitignore`, `pyproject.toml`, настройки линтеров |
+| `packaging` | сборка и дистрибуция пакетов, `py.typed`, точки входа |
+| `deps` | зависимости и `uv.lock` |
+| `deploy` | docker, compose, helm, k8s |
+| `workflows` | GitHub Actions, pre-commit |
+| `docs` | документация и ADR (как область, когда тип не `docs`) |
+| `repo` | изменения, не сводимые ни к одной области выше |
+
+Если изменение затрагивает несколько областей — это, как правило, признак того,
+что коммит надо разбить.
 
 ## Правила
 
+- Область в скобках обязательна: `fix(storage): ...`, а не `fix: ...`.
 - Описание на английском, строчными буквами, без точки в конце.
 - Повелительное наклонение: `add`, `fix`, `remove` — не `added`, не `adds`.
 - Первая строка — до 72 символов.
@@ -65,13 +82,14 @@ feat(storage)!: replace snapshot identity with content hash
 feat(storage): add unit of work with post-commit event publishing
 feat(indexing): build symbol graph from tree-sitter ast
 fix(retrieval): keep lexical hits when rrf scores tie
+fix(config): stop gitignore from excluding storage models package
 perf(indexing): reuse embeddings for chunks with unchanged content hash
 refactor(core): move egress policy into value object
 test(application): cover repository registration use case
 docs(adr): record layered ddd decision
 build(deps): add pgvector and asyncpg
-ci: run isort check before ruff
-chore(config): move host ports to environment variables
+ci(workflows): run isort check before ruff
+chore(deploy): move host ports to environment variables
 ```
 
 ## Для агентов
