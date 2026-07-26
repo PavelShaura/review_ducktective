@@ -1,4 +1,14 @@
-# review_ducktective
+<p align="center">
+  <img src="docs/logo/logo.png" alt="review_ducktective" width="320">
+</p>
+
+<h1 align="center">review_ducktective</h1>
+
+<p align="center">
+  <b>LLM-ревьюер. Видит всё. Цитирует код. Не крякает по пустякам.</b>
+</p>
+
+---
 
 Платформа автоматического code review на LLM: принимает дифф, возвращает находки,
 привязанные к строкам кода, разложенные по уровням критичности и подтверждённые
@@ -41,6 +51,19 @@ docker compose --env-file .env -f deploy/compose/docker-compose.dev.yml up -d
 uv run alembic upgrade head
 
 uv run ducktective serve --reload
+```
+
+Фоновый воркер ревью (в отдельном терминале):
+
+```bash
+uv run arq ducktective.reviewer.worker.WorkerSettings
+```
+
+Ревью из терминала, без API и очереди:
+
+```bash
+uv run ducktective review /path/to/repo --tenant <uuid> --base HEAD~1 --head HEAD
+uv run ducktective review /path/to/repo --tenant <uuid> --json
 ```
 
 Проверка: http://localhost:8000/health, документация API: http://localhost:8000/docs

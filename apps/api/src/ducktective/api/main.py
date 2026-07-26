@@ -5,6 +5,12 @@ from contextlib import (
     asynccontextmanager,
 )
 
+from arq import (
+    create_pool,
+)
+from arq.connections import (
+    RedisSettings,
+)
 from fastapi import (
     FastAPI,
 )
@@ -15,8 +21,9 @@ from redis.asyncio import (
 from ducktective.api.routers import (
     health,
     repositories,
+    reviews,
 )
-from ducktective.api.settings import (
+from ducktective.config.settings import (
     Settings,
 )
 from ducktective.observability.logging import (
@@ -45,11 +52,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         max_overflow=settings.database_pool_max_overflow,
     )
     redis_client = Redis.from_url(settings.redis_url, decode_responses=True)
+    task_queue = await create_pool(RedisSettings.from_dsn(settings.redis_url))
 
     app.state.settings = settings
     app.state.engine = engine
     app.state.session_factory = build_session_factory(engine)
     app.state.redis = redis_client
+    app.state.task_queue = task_queue
 
     logger.info(
         "api.started",
@@ -60,6 +69,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        await task_queue.aclose()
         await redis_client.aclose()
         await engine.dispose()
 
@@ -73,6 +83,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(health.router)
     app.include_router(repositories.router)
+    app.include_router(reviews.router)
     return app
 
 

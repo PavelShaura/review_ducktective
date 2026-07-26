@@ -4,6 +4,14 @@ from ducktective.storage.models.base import (
 from ducktective.storage.models.code_repository import (
     CodeRepositoryModel,
 )
+from ducktective.storage.models.review import (
+    FindingEvidenceModel,
+    FindingFeedbackModel,
+    FindingModel,
+    ReviewFileModel,
+    ReviewHunkModel,
+    ReviewRunModel,
+)
 from ducktective.storage.models.tenancy import (
     TenantModel,
     UserAccountModel,
@@ -13,6 +21,12 @@ from ducktective.storage.models.tenancy import (
 __all__ = [
     "Base",
     "CodeRepositoryModel",
+    "FindingEvidenceModel",
+    "FindingFeedbackModel",
+    "FindingModel",
+    "ReviewFileModel",
+    "ReviewHunkModel",
+    "ReviewRunModel",
     "TenantModel",
     "UserAccountModel",
 ]

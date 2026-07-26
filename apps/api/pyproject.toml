@@ -6,20 +6,28 @@ requires-python = ">=3.12"
 
 dependencies = [
     "ducktective-core",
+    "ducktective-config",
     "ducktective-application",
     "ducktective-storage",
+    "ducktective-vcs",
     "ducktective-observability",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.34",
     "pydantic-settings>=2.7",
     "redis>=5.2",
+    "arq>=0.26",
+    "ducktective-llm",
+    "rich>=13.9",
 ]
 
 [tool.uv.sources]
 ducktective-core = { workspace = true }
+ducktective-config = { workspace = true }
 ducktective-application = { workspace = true }
 ducktective-storage = { workspace = true }
+ducktective-vcs = { workspace = true }
 ducktective-observability = { workspace = true }
+ducktective-llm = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

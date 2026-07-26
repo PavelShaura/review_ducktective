@@ -8,10 +8,14 @@ license = { text = "MIT" }
 
 dependencies = [
     "ducktective-core",
+    "ducktective-config",
     "ducktective-application",
     "ducktective-storage",
+    "ducktective-vcs",
+    "ducktective-llm",
     "ducktective-observability",
     "ducktective-api",
+    "ducktective-reviewer",
 ]
 
 [project.scripts]
@@ -22,7 +26,7 @@ dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
     "pytest-cov>=6.0",
-    "testcontainers[postgres,redis]>=4.9",
+    "testcontainers[postgres]>=4.15",
     "httpx>=0.28",
     "ruff>=0.9",
     "isort>=5.13",
@@ -33,14 +37,18 @@ dev = [
 ]
 
 [tool.uv.workspace]
-members = ["packages/*", "apps/api"]
+members = ["packages/*", "apps/api", "apps/reviewer"]
 
 [tool.uv.sources]
 ducktective-core = { workspace = true }
+ducktective-config = { workspace = true }
 ducktective-application = { workspace = true }
 ducktective-storage = { workspace = true }
+ducktective-vcs = { workspace = true }
+ducktective-llm = { workspace = true }
 ducktective-observability = { workspace = true }
 ducktective-api = { workspace = true }
+ducktective-reviewer = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]
@@ -83,6 +91,7 @@ ignore = [
     "E712",        # сравнение с True — ложное срабатывание на колонках SQLAlchemy
     "B008",        # вызовы в значениях по умолчанию — паттерн Depends в FastAPI
     "PLR0913",     # много аргументов
+    "PLR0917",     # много позиционных аргументов — в хендлерах FastAPI это зависимости
     "PLR0911",     # много return
     "PLR0912",     # много ветвлений
     "PLR0915",     # много выражений
@@ -121,7 +130,7 @@ strict = true
 warn_unreachable = true
 disallow_any_explicit = false
 plugins = ["pydantic.mypy"]
-mypy_path = "packages/core/src:packages/application/src:packages/storage/src:packages/observability/src:apps/api/src"
+mypy_path = "packages/core/src:packages/config/src:packages/application/src:packages/storage/src:packages/vcs/src:packages/llm/src:packages/observability/src:apps/api/src:apps/reviewer/src"
 namespace_packages = true
 explicit_package_bases = true
 
@@ -196,4 +205,24 @@ source_modules = ["ducktective.storage"]
 forbidden_modules = [
     "ducktective.api",
     "ducktective.application",
+]
+
+[[tool.importlinter.contracts]]
+name = "Vcs не зависит от интерфейсов, use cases и хранилища"
+type = "forbidden"
+source_modules = ["ducktective.vcs"]
+forbidden_modules = [
+    "ducktective.api",
+    "ducktective.application",
+    "ducktective.storage",
+]
+
+[[tool.importlinter.contracts]]
+name = "Llm не зависит от интерфейсов, use cases и хранилища"
+type = "forbidden"
+source_modules = ["ducktective.llm"]
+forbidden_modules = [
+    "ducktective.api",
+    "ducktective.application",
+    "ducktective.storage",
 ]

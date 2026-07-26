@@ -1,0 +1,75 @@
+from enum import (
+    StrEnum,
+)
+
+
+class ReviewSource(StrEnum):
+    PULL_REQUEST = "pull_request"
+    LOCAL_DIFF = "local_diff"
+    UPLOAD = "upload"
+
+
+class ReviewStatus(StrEnum):
+    QUEUED = "queued"
+    INDEXING = "indexing"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class Severity(StrEnum):
+    """Уровень находки.
+
+    Определяется по рубрике: находка, которая не может объяснить, что именно
+    сломается, понижается в уровне.
+    """
+
+    CRITICAL = "critical"
+    MAJOR = "major"
+    MINOR = "minor"
+    NITPICK = "nitpick"
+
+
+class FindingCategory(StrEnum):
+    CORRECTNESS = "correctness"
+    SECURITY = "security"
+    PERFORMANCE = "performance"
+    STYLE = "style"
+    TESTS = "tests"
+    ARCHITECTURE = "architecture"
+
+
+class FindingStatus(StrEnum):
+    PROPOSED = "proposed"
+    VERIFIED = "verified"
+    REJECTED = "rejected"
+    PUBLISHED = "published"
+
+
+class FindingProducer(StrEnum):
+    LLM = "llm"
+    STATIC_ANALYZER = "static_analyzer"
+
+
+class FeedbackVerdict(StrEnum):
+    """Оценка находки человеком. Источник данных для eval-набора."""
+
+    USEFUL = "useful"
+    FALSE_POSITIVE = "false_positive"
+    WONTFIX = "wontfix"
+
+
+class EvidenceKind(StrEnum):
+    RETRIEVED_CHUNK = "retrieved_chunk"
+    QUOTED_CODE = "quoted_code"
+    TOOL_OUTPUT = "tool_output"
+
+
+TERMINAL_STATUSES = frozenset(
+    {
+        ReviewStatus.COMPLETED,
+        ReviewStatus.FAILED,
+        ReviewStatus.CANCELLED,
+    }
+)

@@ -17,6 +17,7 @@ ReviewRunId = NewType("ReviewRunId", UUID)
 ReviewFileId = NewType("ReviewFileId", UUID)
 ReviewHunkId = NewType("ReviewHunkId", UUID)
 FindingId = NewType("FindingId", UUID)
+FindingFeedbackId = NewType("FindingFeedbackId", UUID)
 ConversationId = NewType("ConversationId", UUID)
 
 CommitSha = NewType("CommitSha", str)

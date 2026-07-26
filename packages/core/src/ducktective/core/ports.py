@@ -13,6 +13,9 @@ from ducktective.core.code_repository.ports import (
 from ducktective.core.events import (
     DomainEvent,
 )
+from ducktective.core.review.ports import (
+    ReviewRunRepository,
+)
 
 
 @runtime_checkable
@@ -26,6 +29,9 @@ class UnitOfWork(Protocol):
 
     @property
     def code_repositories(self) -> CodeRepositoryRepository: ...
+
+    @property
+    def review_runs(self) -> ReviewRunRepository: ...
 
     async def __aenter__(self) -> Self: ...
 
