@@ -1,6 +1,9 @@
 import type {
+  DiffSide,
   Feedback,
+  FeedbackDigest,
   FeedbackVerdict,
+  FileContext,
   FilePatch,
   Repository,
   ReviewRun,
@@ -8,6 +11,12 @@ import type {
 } from "@/api/types";
 
 const TENANT_ID = import.meta.env.VITE_TENANT_ID ?? "11111111-1111-1111-1111-111111111111";
+
+export interface ContextWindow {
+  side: DiffSide;
+  startLine: number;
+  endLine: number;
+}
 
 export class ApiError extends Error {
   constructor(
@@ -73,6 +82,15 @@ export const api = {
 
   getFilePatch: (runId: string, fileId: string) =>
     request<FilePatch>(`/reviews/${runId}/files/${fileId}/patch?tenant_id=${TENANT_ID}`),
+
+  getFileContext: (runId: string, fileId: string, window: ContextWindow) =>
+    request<FileContext>(
+      `/reviews/${runId}/files/${fileId}/content?tenant_id=${TENANT_ID}` +
+        `&side=${window.side}&start_line=${window.startLine}&end_line=${window.endLine}`,
+    ),
+
+  getFeedbackDigest: (repositoryId: string) =>
+    request<FeedbackDigest>(`/repositories/${repositoryId}/feedback?tenant_id=${TENANT_ID}`),
 
   startReview: (repositoryId: string, base: string, head: string) =>
     request<ReviewRun>(`/repositories/${repositoryId}/reviews`, {

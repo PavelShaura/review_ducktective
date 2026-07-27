@@ -1,5 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { HunkData } from "react-diff-view";
 import {
   Decoration,
@@ -7,12 +7,15 @@ import {
   findChangeByNewLineNumber,
   findChangeByOldLineNumber,
   getChangeKey,
+  getCollapsedLinesCountBetween,
   Hunk,
+  insertHunk,
   parseDiff,
+  textLinesToHunk,
 } from "react-diff-view";
 
 import { api } from "@/api/client";
-import type { Finding, ReviewFile } from "@/api/types";
+import type { DiffSide, Finding, ReviewFile } from "@/api/types";
 import { FindingCard } from "@/components/FindingCard";
 import { SEVERITY_ORDER } from "@/components/SeverityMark";
 
@@ -28,6 +31,11 @@ const CHANGE_LABEL: Record<string, string> = {
   deleted: "удалён",
   renamed: "переименован",
 };
+
+const EXPAND_STEP = 20;
+
+/** Совпадает с MAX_CONTEXT_WINDOW_LINES на сервере: больше он всё равно не отдаст. */
+const MAX_EXPAND_LINES = 400;
 
 export function FileDiff({ runId, file, findings }: Props) {
   const [isOpen, setIsOpen] = useState(findings.length > 0);
@@ -75,16 +83,24 @@ function FileBody({ runId, file, findings }: Props) {
     staleTime: Infinity,
   });
 
+  const patchData = patch.data;
   const parsed = useMemo(() => {
-    if (!patch.data?.patch) {
+    if (!patchData?.patch) {
       return null;
     }
-    return parseDiff(patch.data.patch, { nearbySequences: "zip" })[0] ?? null;
-  }, [patch.data?.patch]);
+    return parseDiff(patchData.patch, { nearbySequences: "zip" })[0] ?? null;
+  }, [patchData?.patch]);
+
+  const { applyTo, expand, isBusy, hasFailed } = useContextExpansion(
+    runId,
+    file.id,
+    patchData?.context_side,
+  );
+  const hunks = useMemo(() => applyTo(parsed?.hunks ?? []), [applyTo, parsed]);
 
   const placement = useMemo(
-    () => placeFindings(runId, findings, parsed?.hunks ?? []),
-    [runId, findings, parsed],
+    () => placeFindings(runId, findings, hunks),
+    [runId, findings, hunks],
   );
 
   if (file.is_too_large) {
@@ -103,7 +119,7 @@ function FileBody({ runId, file, findings }: Props) {
     return <p className="case-label border-t border-tweed-dim px-5 py-4">читаю файл…</p>;
   }
 
-  if (patch.isError || !parsed) {
+  if (patch.isError || !patchData || !parsed) {
     return (
       <p className="border-t border-tweed-dim px-5 py-4 text-[15px] text-critical">
         Не удалось получить дифф этого файла.
@@ -117,20 +133,47 @@ function FileBody({ runId, file, findings }: Props) {
         <Diff
           viewType="unified"
           diffType={parsed.type}
-          hunks={parsed.hunks}
+          hunks={hunks}
           widgets={placement.widgets}
           className="diff"
         >
-          {(hunks) =>
-            hunks.flatMap((hunk) => [
-              <Decoration key={`decoration-${hunk.content}`} className="diff-hunk-header">
-                <span className="diff-hunk-header-content font-mono">{hunk.content}</span>
-              </Decoration>,
-              <Hunk key={hunk.content} hunk={hunk} />,
-            ])
-          }
+          {(rendered) => {
+            const tail = trailingGap(rendered, patchData.context_side, patchData.total_lines);
+
+            return [
+              ...rendered.flatMap((hunk, index) => [
+                <Decoration key={`decoration-${hunk.content}`} className="diff-hunk-header">
+                  <span className="diff-hunk-header-content flex flex-wrap items-center gap-3 font-mono">
+                    <ExpandControls
+                      gap={collapsedGap(rendered[index - 1] ?? null, hunk)}
+                      isBusy={isBusy}
+                      onExpand={expand}
+                    />
+                    <span>{hunk.content}</span>
+                  </span>
+                </Decoration>,
+                <Hunk key={hunk.content} hunk={hunk} />,
+              ]),
+              ...(tail
+                ? [
+                    <Decoration key="tail" className="diff-hunk-header">
+                      <span className="diff-hunk-header-content flex flex-wrap items-center gap-3 font-mono">
+                        <ExpandControls gap={tail} isBusy={isBusy} onExpand={expand} />
+                        <span>до конца файла</span>
+                      </span>
+                    </Decoration>,
+                  ]
+                : []),
+            ];
+          }}
         </Diff>
       </div>
+
+      {hasFailed ? (
+        <p className="border-t border-tweed-dim px-5 py-3 text-[14px] text-critical">
+          Не удалось прочитать файл в этой ревизии — контекст не раскрыт.
+        </p>
+      ) : null}
 
       <DetachedFindings
         runId={runId}
@@ -139,6 +182,182 @@ function FileBody({ runId, file, findings }: Props) {
       />
     </div>
   );
+}
+
+interface Gap {
+  oldStart: number;
+  newStart: number;
+  lines: number;
+}
+
+/**
+ * Свёрнутый участок перед ханком. Границы считаются по старым номерам строк —
+ * так их считает и сама библиотека, — а новые нужны для сборки вставляемого блока.
+ */
+function collapsedGap(previous: HunkData | null, next: HunkData): Gap | null {
+  const lines = getCollapsedLinesCountBetween(previous, next);
+  if (lines <= 0) {
+    return null;
+  }
+
+  return {
+    oldStart: previous ? previous.oldStart + previous.oldLines : 1,
+    newStart: previous ? previous.newStart + previous.newLines : 1,
+    lines,
+  };
+}
+
+/**
+ * Остаток файла после последнего изменения. Из самого диффа его длину узнать
+ * нельзя, поэтому она приходит вместе с патчем: без неё изменение в конце файла
+ * неотличимо от того, за которым идёт ещё код.
+ */
+function trailingGap(hunks: HunkData[], side: DiffSide, totalLines: number | null): Gap | null {
+  const last = hunks[hunks.length - 1];
+  if (!last || totalLines === null) {
+    return null;
+  }
+
+  const oldStart = last.oldStart + last.oldLines;
+  const newStart = last.newStart + last.newLines;
+  const start = side === "old" ? oldStart : newStart;
+  const lines = totalLines - start + 1;
+
+  return lines > 0 ? { oldStart, newStart, lines } : null;
+}
+
+interface ExpandControlsProps {
+  gap: Gap | null;
+  isBusy: boolean;
+  onExpand: (gap: Gap, lines: number, fromEnd: boolean) => void;
+}
+
+/**
+ * Большой пропуск раскрывается шагами с обоих концов: строка, соседняя
+ * с изменением, обычно нужнее той, что лежит в середине пропуска.
+ */
+function ExpandControls({ gap, isBusy, onExpand }: ExpandControlsProps) {
+  if (!gap) {
+    return null;
+  }
+
+  if (gap.lines <= EXPAND_STEP) {
+    return (
+      <ExpandButton
+        label={`показать ${gap.lines}`}
+        isBusy={isBusy}
+        onClick={() => onExpand(gap, gap.lines, false)}
+      />
+    );
+  }
+
+  return (
+    <span className="flex flex-wrap items-center gap-2">
+      <ExpandButton
+        label={`${EXPAND_STEP} сверху`}
+        isBusy={isBusy}
+        onClick={() => onExpand(gap, EXPAND_STEP, false)}
+      />
+      <ExpandButton
+        label={`${EXPAND_STEP} снизу`}
+        isBusy={isBusy}
+        onClick={() => onExpand(gap, EXPAND_STEP, true)}
+      />
+      {gap.lines <= MAX_EXPAND_LINES ? (
+        <ExpandButton
+          label={`все ${gap.lines}`}
+          isBusy={isBusy}
+          onClick={() => onExpand(gap, gap.lines, false)}
+        />
+      ) : null}
+    </span>
+  );
+}
+
+interface ExpandButtonProps {
+  label: string;
+  isBusy: boolean;
+  onClick: () => void;
+}
+
+function ExpandButton({ label, isBusy, onClick }: ExpandButtonProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={isBusy}
+      className="rounded-case border border-tweed-dim px-2.5 py-0.5 text-[12px] tracking-wide text-paper-dim transition-colors hover:border-brass hover:text-brass disabled:opacity-40"
+    >
+      {label}
+    </button>
+  );
+}
+
+interface Expansion {
+  applyTo: (hunks: HunkData[]) => HunkData[];
+  expand: (gap: Gap, lines: number, fromEnd: boolean) => void;
+  isBusy: boolean;
+  hasFailed: boolean;
+}
+
+/**
+ * Раскрытие контекста вокруг изменений. Строки не приходят вместе с патчем:
+ * они читаются из ревизии по требованию и вставляются в дифф отдельными блоками,
+ * чтобы неоткрытые куски файла не грузились никогда.
+ *
+ * Сторону выбирает сервер и присылает вместе с патчем: длина файла посчитана
+ * именно для неё, и разъехаться эти два решения не должны.
+ */
+function useContextExpansion(runId: string, fileId: string, side: DiffSide | undefined): Expansion {
+  const queryClient = useQueryClient();
+  const [insertions, setInsertions] = useState<HunkData[]>([]);
+  const [isBusy, setIsBusy] = useState(false);
+  const [hasFailed, setHasFailed] = useState(false);
+
+  const expand = useCallback(
+    (gap: Gap, lines: number, fromEnd: boolean) => {
+      if (!side) {
+        return;
+      }
+
+      const offset = fromEnd ? gap.lines - lines : 0;
+      const oldStart = gap.oldStart + offset;
+      const newStart = gap.newStart + offset;
+      const startLine = side === "old" ? oldStart : newStart;
+
+      setIsBusy(true);
+      setHasFailed(false);
+
+      queryClient
+        .fetchQuery({
+          queryKey: ["context", runId, fileId, side, startLine, lines],
+          queryFn: () =>
+            api.getFileContext(runId, fileId, {
+              side,
+              startLine,
+              endLine: startLine + lines - 1,
+            }),
+          staleTime: Infinity,
+        })
+        .then((context) => {
+          const hunk = textLinesToHunk(context.lines, oldStart, newStart);
+          if (hunk) {
+            setInsertions((all) => [...all, hunk]);
+          }
+        })
+        .catch(() => setHasFailed(true))
+        .finally(() => setIsBusy(false));
+    },
+    [queryClient, runId, fileId, side],
+  );
+
+  const applyTo = useCallback(
+    (hunks: HunkData[]) =>
+      insertions.reduce((all, insertion) => insertHunk(all, insertion), hunks),
+    [insertions],
+  );
+
+  return { applyTo, expand, isBusy, hasFailed };
 }
 
 interface DetachedProps {

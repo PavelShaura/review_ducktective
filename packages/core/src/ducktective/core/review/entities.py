@@ -191,10 +191,15 @@ class Finding:
         return bool(self.evidence)
 
     @property
-    def latest_verdict(self) -> FeedbackVerdict | None:
+    def latest_feedback(self) -> FindingFeedback | None:
         if not self.feedback:
             return None
-        return max(self.feedback, key=lambda item: item.created_at).verdict
+        return max(self.feedback, key=lambda item: item.created_at)
+
+    @property
+    def latest_verdict(self) -> FeedbackVerdict | None:
+        entry = self.latest_feedback
+        return None if entry is None else entry.verdict
 
     def record_feedback(
         self,

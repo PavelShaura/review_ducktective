@@ -11,8 +11,10 @@ from pydantic import (
 )
 
 from ducktective.application.review.views import (
+    FeedbackDigestView,
     FileContextView,
     FilePatchView,
+    MarkedFindingView,
 )
 from ducktective.core.diff.value_objects import (
     ChangeType,
@@ -97,6 +99,8 @@ class FilePatchResponse(BaseModel):
     is_too_large: bool
     patch_size_bytes: int
     patch: str
+    context_side: DiffSide
+    total_lines: int | None
 
     @classmethod
     def from_view(cls, view: FilePatchView) -> "FilePatchResponse":
@@ -110,6 +114,8 @@ class FilePatchResponse(BaseModel):
             is_too_large=view.is_too_large,
             patch_size_bytes=view.patch_size_bytes,
             patch=view.patch,
+            context_side=view.context_side,
+            total_lines=view.total_lines,
         )
 
 
@@ -154,6 +160,54 @@ class FeedbackResponse(BaseModel):
             verdict=feedback.verdict,
             comment=feedback.comment,
             created_at=feedback.created_at,
+        )
+
+
+class MarkedFindingResponse(BaseModel):
+    run_id: UUID
+    finding_id: UUID
+    file_path: str
+    line_start: int
+    severity: Severity
+    category: FindingCategory
+    title: str
+    producer_name: str
+    verdict: FeedbackVerdict
+    comment: str | None
+    marked_at: datetime
+
+    @classmethod
+    def from_view(cls, view: MarkedFindingView) -> "MarkedFindingResponse":
+        return cls(
+            run_id=view.run_id,
+            finding_id=view.finding_id,
+            file_path=view.file_path,
+            line_start=view.line_start,
+            severity=view.severity,
+            category=view.category,
+            title=view.title,
+            producer_name=view.producer_name,
+            verdict=view.verdict,
+            comment=view.comment,
+            marked_at=view.marked_at,
+        )
+
+
+class FeedbackDigestResponse(BaseModel):
+    marked: list[MarkedFindingResponse]
+    counts: dict[str, int]
+    marked_count: int
+    total_findings: int
+    useful_share: float | None
+
+    @classmethod
+    def from_view(cls, view: FeedbackDigestView) -> "FeedbackDigestResponse":
+        return cls(
+            marked=[MarkedFindingResponse.from_view(item) for item in view.marked],
+            counts=view.counts,
+            marked_count=view.marked_count,
+            total_findings=view.total_findings,
+            useful_share=view.useful_share,
         )
 
 

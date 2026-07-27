@@ -115,6 +115,18 @@ export interface FilePatch {
   is_too_large: boolean;
   patch_size_bytes: number;
   patch: string;
+  context_side: DiffSide;
+  total_lines: number | null;
+}
+
+export interface FileContext {
+  path: string;
+  side: DiffSide;
+  commit_sha: string;
+  start_line: number;
+  end_line: number;
+  total_lines: number;
+  lines: string[];
 }
 
 export interface Feedback {
@@ -122,4 +134,26 @@ export interface Feedback {
   verdict: FeedbackVerdict;
   comment: string | null;
   created_at: string;
+}
+
+export interface MarkedFinding {
+  run_id: string;
+  finding_id: string;
+  file_path: string;
+  line_start: number;
+  severity: Severity;
+  category: FindingCategory;
+  title: string;
+  producer_name: string;
+  verdict: FeedbackVerdict;
+  comment: string | null;
+  marked_at: string;
+}
+
+export interface FeedbackDigest {
+  marked: MarkedFinding[];
+  counts: Record<string, number>;
+  marked_count: number;
+  total_findings: number;
+  useful_share: number | null;
 }

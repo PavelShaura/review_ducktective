@@ -40,6 +40,7 @@ from ducktective.vcs.diff_parser import (
     UnifiedDiffParser,
 )
 from tests.diff_fixtures import (
+    DELETED_PATCH,
     MODIFIED_AND_ADDED_PATCH,
 )
 from tests.fakes import (
@@ -52,7 +53,10 @@ REPOSITORY_PATH = Path("/repos/edussuz")
 SOURCE_FILE = "app/service.py"
 
 
-def prepare(unit_of_work: FakeUnitOfWork) -> tuple[TenantId, ReviewRun]:
+def prepare(
+    unit_of_work: FakeUnitOfWork,
+    patch_text: str = MODIFIED_AND_ADDED_PATCH,
+) -> tuple[TenantId, ReviewRun]:
     tenant_id = TenantId(uuid4())
     repository = CodeRepository.register(
         tenant_id=tenant_id,
@@ -63,7 +67,7 @@ def prepare(unit_of_work: FakeUnitOfWork) -> tuple[TenantId, ReviewRun]:
     unit_of_work.code_repositories.add(repository)
 
     diff = UnifiedDiffParser().parse(
-        MODIFIED_AND_ADDED_PATCH,
+        patch_text,
         base_sha=CommitSha("a" * 40),
         head_sha=CommitSha("b" * 40),
     )
@@ -77,12 +81,17 @@ def prepare(unit_of_work: FakeUnitOfWork) -> tuple[TenantId, ReviewRun]:
     return tenant_id, run
 
 
+def source_of(lines: int, path: str = SOURCE_FILE) -> FakeVcsProvider:
+    content = "\n".join(f"line {number}" for number in range(1, lines + 1))
+    return FakeVcsProvider(file_contents={path: content})
+
+
 async def test_patch_contains_git_header_and_hunk() -> None:
     unit_of_work = FakeUnitOfWork()
     tenant_id, run = prepare(unit_of_work)
     file = run.files[0]
 
-    view = await GetFilePatch(unit_of_work).execute(tenant_id, run.id, file.id)
+    view = await GetFilePatch(unit_of_work, source_of(50)).execute(tenant_id, run.id, file.id)
 
     assert view.path == SOURCE_FILE
     assert view.patch.startswith(f"diff --git a/{SOURCE_FILE} b/{SOURCE_FILE}")
@@ -92,12 +101,57 @@ async def test_patch_contains_git_header_and_hunk() -> None:
     assert view.is_too_large is False
 
 
+async def test_patch_reports_file_length_for_the_new_side() -> None:
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, run = prepare(unit_of_work)
+    file = run.files[0]
+
+    view = await GetFilePatch(unit_of_work, source_of(50)).execute(tenant_id, run.id, file.id)
+
+    assert view.context_side is DiffSide.NEW
+    assert view.total_lines == 50
+
+
+async def test_deleted_file_is_measured_on_the_old_side() -> None:
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, run = prepare(unit_of_work, DELETED_PATCH)
+    file = run.files[0]
+
+    view = await GetFilePatch(unit_of_work, source_of(12, file.path)).execute(
+        tenant_id,
+        run.id,
+        file.id,
+    )
+
+    assert view.context_side is DiffSide.OLD
+    assert view.total_lines == 12
+
+
+async def test_unreadable_content_leaves_length_unknown() -> None:
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, run = prepare(unit_of_work)
+    file = run.files[0]
+
+    view = await GetFilePatch(unit_of_work, FakeVcsProvider(file_contents={})).execute(
+        tenant_id,
+        run.id,
+        file.id,
+    )
+
+    assert view.total_lines is None
+    assert view.patch != ""
+
+
 async def test_added_file_patch_uses_dev_null_as_source() -> None:
     unit_of_work = FakeUnitOfWork()
     tenant_id, run = prepare(unit_of_work)
     added_file = run.files[1]
 
-    view = await GetFilePatch(unit_of_work).execute(tenant_id, run.id, added_file.id)
+    view = await GetFilePatch(unit_of_work, source_of(20, added_file.path)).execute(
+        tenant_id,
+        run.id,
+        added_file.id,
+    )
 
     assert view.patch.splitlines()[1] == "--- /dev/null"
     assert view.patch.splitlines()[2] == "+++ b/app/helpers.py"
@@ -109,11 +163,12 @@ async def test_oversized_file_is_returned_without_text() -> None:
     file = run.files[0]
     file.hunks[0].patch_text = "+line\n" * 6000
 
-    view = await GetFilePatch(unit_of_work).execute(tenant_id, run.id, file.id)
+    view = await GetFilePatch(unit_of_work, source_of(9000)).execute(tenant_id, run.id, file.id)
 
     assert view.is_too_large is True
     assert view.patch == ""
     assert view.patch_size_bytes > 0
+    assert view.total_lines is None
 
 
 async def test_unknown_file_is_reported() -> None:
@@ -121,7 +176,11 @@ async def test_unknown_file_is_reported() -> None:
     tenant_id, run = prepare(unit_of_work)
 
     with pytest.raises(EntityNotFoundError):
-        await GetFilePatch(unit_of_work).execute(tenant_id, run.id, ReviewFileId(uuid4()))
+        await GetFilePatch(unit_of_work, source_of(50)).execute(
+            tenant_id,
+            run.id,
+            ReviewFileId(uuid4()),
+        )
 
 
 async def test_context_returns_requested_window() -> None:

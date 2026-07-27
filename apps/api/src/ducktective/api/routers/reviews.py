@@ -17,6 +17,7 @@ from ducktective.api.dependencies import (
     VcsProviderDependency,
 )
 from ducktective.api.schemas.review import (
+    FeedbackDigestResponse,
     FeedbackResponse,
     FileContextResponse,
     FilePatchResponse,
@@ -35,6 +36,9 @@ from ducktective.application.review.prepare_run import (
     EmptyDiffError,
     PrepareReviewRun,
     PrepareReviewRunCommand,
+)
+from ducktective.application.review.read_feedback import (
+    CollectFeedback,
 )
 from ducktective.application.review.read_file import (
     FileContentUnavailableError,
@@ -223,8 +227,9 @@ async def get_file_patch(
     tenant_id: UUID,
     response: Response,
     unit_of_work: UnitOfWorkDependency,
+    vcs_provider: VcsProviderDependency,
 ) -> FilePatchResponse:
-    use_case = GetFilePatch(unit_of_work)
+    use_case = GetFilePatch(unit_of_work, vcs_provider)
 
     try:
         view = await use_case.execute(
@@ -291,3 +296,22 @@ async def list_reviews(
         limit=limit,
     )
     return [ReviewRunSummary.from_domain(run) for run in runs]
+
+
+@router.get("/repositories/{repository_id}/feedback", response_model=FeedbackDigestResponse)
+async def get_feedback_digest(
+    repository_id: UUID,
+    tenant_id: UUID,
+    unit_of_work: UnitOfWorkDependency,
+    response: Response,
+    runs_limit: int = 50,
+) -> FeedbackDigestResponse:
+    use_case = CollectFeedback(unit_of_work)
+    view = await use_case.execute(
+        TenantId(tenant_id),
+        RepositoryId(repository_id),
+        runs_limit=runs_limit,
+    )
+
+    response.headers["Cache-Control"] = NO_STORE
+    return FeedbackDigestResponse.from_view(view)

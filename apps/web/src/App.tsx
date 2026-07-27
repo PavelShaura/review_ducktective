@@ -3,6 +3,7 @@ import { Link, Route, Routes } from "react-router";
 
 const CaseListPage = lazy(() => import("@/pages/CaseListPage"));
 const CasePage = lazy(() => import("@/pages/CasePage"));
+const MarksPage = lazy(() => import("@/pages/MarksPage"));
 const NewCasePage = lazy(() => import("@/pages/NewCasePage"));
 
 export function App() {
@@ -15,6 +16,7 @@ export function App() {
             <Route path="/" element={<CaseListPage />} />
             <Route path="/cases/new" element={<NewCasePage />} />
             <Route path="/cases/:runId" element={<CasePage />} />
+            <Route path="/marks" element={<MarksPage />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </Suspense>
@@ -32,12 +34,20 @@ function Header() {
         </span>
         <span className="case-label hidden sm:inline">дела о качестве кода</span>
       </Link>
-      <Link
-        to="/cases/new"
-        className="rounded-case border border-tweed px-4 py-2 font-mono text-[13px] tracking-wide text-paper-dim transition-colors hover:border-brass hover:text-brass"
-      >
-        новое дело
-      </Link>
+      <nav className="flex items-center gap-3">
+        <Link
+          to="/marks"
+          className="font-mono text-[13px] tracking-wide text-paper-dim transition-colors hover:text-brass"
+        >
+          отметки
+        </Link>
+        <Link
+          to="/cases/new"
+          className="rounded-case border border-tweed px-4 py-2 font-mono text-[13px] tracking-wide text-paper-dim transition-colors hover:border-brass hover:text-brass"
+        >
+          новое дело
+        </Link>
+      </nav>
     </header>
   );
 }
