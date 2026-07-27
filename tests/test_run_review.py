@@ -11,6 +11,7 @@ from ducktective.application.exceptions import (
     PermissionDeniedError,
 )
 from ducktective.application.review.run_review import (
+    ReviewOutcome,
     RunNotReviewableError,
     RunReview,
 )
@@ -118,6 +119,15 @@ async def run_with(
     run: ReviewRun,
     reviewer: FakeCodeReviewer,
 ) -> ReviewRun:
+    return (await review_with(unit_of_work, tenant_id, run, reviewer)).run
+
+
+async def review_with(
+    unit_of_work: FakeUnitOfWork,
+    tenant_id: TenantId,
+    run: ReviewRun,
+    reviewer: FakeCodeReviewer,
+) -> ReviewOutcome:
     use_case = RunReview(unit_of_work, FakeEventPublisher(), reviewer)
     return await use_case.execute(tenant_id, run.id)
 
@@ -151,9 +161,35 @@ async def test_finding_outside_diff_is_discarded() -> None:
     tenant_id, run = prepare(unit_of_work)
     reviewer = FakeCodeReviewer({SERVICE_FILE: [build_draft(line=UNCHANGED_LINE)]})
 
-    result = await run_with(unit_of_work, tenant_id, run, reviewer)
+    outcome = await review_with(unit_of_work, tenant_id, run, reviewer)
 
-    assert result.findings == []
+    assert outcome.run.findings == []
+    assert outcome.proposed == 1
+    assert outcome.discarded_outside_diff == 1
+
+
+async def test_outcome_counts_discarded_by_reason() -> None:
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, run = prepare(unit_of_work)
+    reviewer = FakeCodeReviewer(
+        {
+            SERVICE_FILE: [
+                build_draft(),
+                build_draft(title="повтор"),
+                build_draft(line=UNCHANGED_LINE, title="вне диффа"),
+                build_draft(snippet="session.query(Model).all()", title="выдумка"),
+            ]
+        }
+    )
+
+    outcome = await review_with(unit_of_work, tenant_id, run, reviewer)
+
+    assert outcome.proposed == 4
+    assert len(outcome.run.findings) == 1
+    assert outcome.discarded_outside_diff == 1
+    assert outcome.discarded_without_evidence == 1
+    assert outcome.discarded_as_duplicate == 1
+    assert outcome.discarded == 3
 
 
 async def test_finding_with_invented_quote_is_discarded() -> None:

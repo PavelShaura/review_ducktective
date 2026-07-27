@@ -24,14 +24,38 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
 )
 
+from ducktective.api.dependencies import (
+    SettingsDependency,
+)
+
 
 router = APIRouter(tags=["service"])
+
+
+class ServiceResponse(BaseModel):
+    service: str
+    version: str
+    profile: str
+    docs: str
+    health: str
 
 
 class HealthResponse(BaseModel):
     status: Literal["ok", "degraded"]
     database: bool
     redis: bool
+
+
+@router.get("/", response_model=ServiceResponse)
+async def describe_service(request: Request, settings: SettingsDependency) -> ServiceResponse:
+    """Корень сервиса: куда идти дальше, если открыл адрес руками."""
+    return ServiceResponse(
+        service=request.app.title,
+        version=request.app.version,
+        profile=settings.deployment_profile.value,
+        docs="/docs",
+        health="/health",
+    )
 
 
 @router.get("/health", response_model=HealthResponse)

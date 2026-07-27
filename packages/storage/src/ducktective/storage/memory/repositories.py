@@ -69,6 +69,7 @@ class InMemoryReviewRunRepository:
     def __init__(self) -> None:
         self._committed: dict[ReviewRunId, ReviewRun] = {}
         self._pending: dict[ReviewRunId, ReviewRun] = {}
+        self._removed_events: list[DomainEvent] = []
 
     def add(self, run: ReviewRun) -> None:
         self._pending[run.id] = run
@@ -88,6 +89,11 @@ class InMemoryReviewRunRepository:
         runs = [run for run in self._tracked() if run.repository_id == repository_id]
         return runs[:limit]
 
+    async def remove(self, run: ReviewRun) -> None:
+        self._pending.pop(run.id, None)
+        self._committed.pop(run.id, None)
+        self._removed_events.extend(run.pull_events())
+
     def commit(self) -> None:
         self._committed.update(self._pending)
         self._pending.clear()
@@ -96,7 +102,8 @@ class InMemoryReviewRunRepository:
         self._pending.clear()
 
     def collect_events(self) -> list[DomainEvent]:
-        collected: list[DomainEvent] = []
+        collected = self._removed_events
+        self._removed_events = []
         for run in self._tracked():
             collected.extend(run.pull_events())
         return collected

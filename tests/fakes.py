@@ -72,6 +72,7 @@ class FakeCodeRepositoryRepository:
 class FakeReviewRunRepository:
     def __init__(self) -> None:
         self.stored: dict[ReviewRunId, ReviewRun] = {}
+        self.removed_events: list[DomainEvent] = []
 
     def add(self, run: ReviewRun) -> None:
         self.stored[run.id] = run
@@ -90,6 +91,10 @@ class FakeReviewRunRepository:
     ) -> list[ReviewRun]:
         runs = [run for run in self.stored.values() if run.repository_id == repository_id]
         return runs[:limit]
+
+    async def remove(self, run: ReviewRun) -> None:
+        self.stored.pop(run.id, None)
+        self.removed_events.extend(run.pull_events())
 
 
 class FakeUnitOfWork:
@@ -121,7 +126,8 @@ class FakeUnitOfWork:
         self.rollback_calls += 1
 
     def collect_events(self) -> list[DomainEvent]:
-        collected: list[DomainEvent] = []
+        collected = self.review_runs.removed_events
+        self.review_runs.removed_events = []
         for repository in self.code_repositories.stored.values():
             collected.extend(repository.pull_events())
         for run in self.review_runs.stored.values():

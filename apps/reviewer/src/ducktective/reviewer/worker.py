@@ -109,16 +109,22 @@ async def run_review_task(ctx: dict[str, Any], run_id: str, tenant_id: str) -> d
 
     logger.info("review.started", run_id=run_id)
     try:
-        run = await use_case.execute(TenantId(UUID(tenant_id)), ReviewRunId(UUID(run_id)))
+        outcome = await use_case.execute(TenantId(UUID(tenant_id)), ReviewRunId(UUID(run_id)))
     except (DomainError, ApplicationError) as error:
         logger.warning("review.failed", run_id=run_id, error=str(error))
         return {"run_id": run_id, "status": "failed", "error": str(error)}
 
+    run = outcome.run
     logger.info(
         "review.finished",
         run_id=run_id,
         status=run.status.value,
         findings=len(run.findings),
+        proposed=outcome.proposed,
+        discarded_outside_diff=outcome.discarded_outside_diff,
+        discarded_without_evidence=outcome.discarded_without_evidence,
+        discarded_as_duplicate=outcome.discarded_as_duplicate,
+        failed_files=len(outcome.failed_files),
         tokens_input=run.tokens_input,
         tokens_output=run.tokens_output,
     )
@@ -126,6 +132,8 @@ async def run_review_task(ctx: dict[str, Any], run_id: str, tenant_id: str) -> d
         "run_id": run_id,
         "status": run.status.value,
         "findings": len(run.findings),
+        "proposed": outcome.proposed,
+        "discarded": outcome.discarded,
         "totals": run.severity_totals,
     }
 

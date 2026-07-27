@@ -4,6 +4,7 @@ from pathlib import (
 )
 
 from ducktective.core.exceptions import (
+    RepositoryPathError,
     VcsOperationError,
 )
 from ducktective.core.types import (
@@ -12,6 +13,7 @@ from ducktective.core.types import (
 
 
 GIT_EXECUTABLE = "git"
+RELATIVE_REVISION_MARKS = ("~", "^")
 DIFF_ARGUMENTS = (
     "--no-color",
     "--no-ext-diff",
@@ -34,8 +36,53 @@ class LocalGitProvider:
         self._timeout_seconds = timeout_seconds
 
     async def resolve_revision(self, repository_path: Path, revision: str) -> CommitSha:
-        stdout = await self._run(repository_path, "rev-parse", "--verify", f"{revision}^{{commit}}")
+        try:
+            stdout = await self._run(
+                repository_path,
+                "rev-parse",
+                "--verify",
+                f"{revision}^{{commit}}",
+            )
+        except RepositoryPathError:
+            raise
+        except VcsOperationError as error:
+            message = await self._describe_unknown_revision(repository_path, revision)
+            raise VcsOperationError(message) from error
         return CommitSha(stdout.strip())
+
+    async def _describe_unknown_revision(self, repository_path: Path, revision: str) -> str:
+        """Объясняет, почему ревизия не разрешилась.
+
+        Вывод git здесь бесполезен: «Needed a single revision» не говорит,
+        отсутствует ли сам коммит или у него просто нет родителя.
+        """
+        base = revision
+        for mark in RELATIVE_REVISION_MARKS:
+            base = base.split(mark)[0]
+
+        if base == revision:
+            return (
+                f"Коммита «{revision}» нет в этом репозитории. Проверьте хеш или название "
+                f"ветки; если коммит пришёл из удалённой ветки, сначала выполните git fetch."
+            )
+
+        if await self._revision_exists(repository_path, base):
+            return (
+                f"У коммита {base} нет предыдущего — это первый коммит в истории, "
+                f"и сравнивать его не с чем."
+            )
+
+        return (
+            f"Коммита {base} нет в этом репозитории, поэтому «{revision}» не разрешается. "
+            f"Проверьте хеш; если коммит пришёл из удалённой ветки, выполните git fetch."
+        )
+
+    async def _revision_exists(self, repository_path: Path, revision: str) -> bool:
+        try:
+            await self._run(repository_path, "rev-parse", "--verify", f"{revision}^{{commit}}")
+        except VcsOperationError:
+            return False
+        return True
 
     async def get_patch(
         self,
@@ -76,7 +123,7 @@ class LocalGitProvider:
 
     async def _run(self, repository_path: Path, *arguments: str) -> str:
         if not repository_path.exists():
-            raise VcsOperationError(f"Каталог репозитория не найден: {repository_path}")
+            raise RepositoryPathError(f"Каталог репозитория не найден: {repository_path}")
 
         process = await asyncio.create_subprocess_exec(
             self._executable,

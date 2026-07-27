@@ -10,6 +10,14 @@ class VcsOperationError(DomainError):
     """Операция с системой контроля версий завершилась неуспешно."""
 
 
+class RepositoryPathError(VcsOperationError):
+    """Каталог репозитория недоступен.
+
+    Отделён от остальных ошибок git, чтобы недоступный путь не выглядел
+    как отсутствующая ревизия.
+    """
+
+
 class DiffParsingError(DomainError):
     """Патч не удалось разобрать."""
 

@@ -28,6 +28,7 @@ from rich.console import (
 
 from ducktective.api.rendering import (
     render_markdown,
+    render_outcome_notes,
     render_run,
 )
 from ducktective.application.review.prepare_run import (
@@ -214,11 +215,12 @@ async def _review(arguments: argparse.Namespace) -> int:
                 f"[dim]Ревьюю {file_count} файл(ов), это может занять минуты…[/]",
                 spinner="dots",
             ):
-                run = await RunReview(
+                outcome = await RunReview(
                     context.unit_of_work,
                     context.event_publisher,
                     context.code_reviewer,
                 ).execute(tenant_id, prepared.id)
+                run = outcome.run
     except (EmptyDiffError, NoMatchingFilesError) as error:
         error_console.print(f"[yellow]{error}[/]")
         return 0
@@ -227,6 +229,8 @@ async def _review(arguments: argparse.Namespace) -> int:
         return 1
 
     _render(run, output_format=arguments.format)
+    if arguments.format == "rich":
+        render_outcome_notes(console, outcome)
     return _exit_code(run, arguments.fail_on)
 
 

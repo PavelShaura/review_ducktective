@@ -35,6 +35,12 @@ class ReviewRunStatusChanged(DomainEvent):
 
 
 @dataclass(frozen=True, kw_only=True)
+class ReviewRunDeleted(DomainEvent):
+    run_id: ReviewRunId
+    repository_id: RepositoryId
+
+
+@dataclass(frozen=True, kw_only=True)
 class FindingFeedbackSubmitted(DomainEvent):
     run_id: ReviewRunId
     finding_id: FindingId

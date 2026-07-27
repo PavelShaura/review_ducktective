@@ -14,6 +14,9 @@ from rich.text import (
     Text,
 )
 
+from ducktective.application.review.run_review import (
+    ReviewOutcome,
+)
 from ducktective.core.review.entities import (
     Finding,
     ReviewRun,
@@ -50,6 +53,29 @@ STATUS_STYLES = {
     ReviewStatus.FAILED: "red",
     ReviewStatus.CANCELLED: "yellow",
 }
+
+
+def render_outcome_notes(console: Console, outcome: ReviewOutcome) -> None:
+    """Показывает, что модель предложила и что было отброшено.
+
+    Без этого «замечаний нет» скрывает разницу между молчанием модели
+    и отбраковкой всех её ответов.
+    """
+    if outcome.proposed == 0 and not outcome.failed_files:
+        return
+
+    parts: list[str] = [f"модель предложила {outcome.proposed}"]
+    if outcome.discarded_outside_diff:
+        parts.append(f"вне диффа {outcome.discarded_outside_diff}")
+    if outcome.discarded_without_evidence:
+        parts.append(f"без цитаты {outcome.discarded_without_evidence}")
+    if outcome.discarded_as_duplicate:
+        parts.append(f"повторов {outcome.discarded_as_duplicate}")
+    if outcome.failed_files:
+        parts.append(f"файлов с ошибкой {len(outcome.failed_files)}")
+
+    console.print()
+    console.print(f"[dim]{' · '.join(parts)}[/]")
 
 
 def render_markdown(run: ReviewRun) -> str:

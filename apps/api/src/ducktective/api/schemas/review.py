@@ -201,6 +201,7 @@ class ReviewRunResponse(BaseModel):
     base_sha: str
     head_sha: str
     totals: dict[str, int]
+    failure_reason: str | None
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
@@ -217,6 +218,7 @@ class ReviewRunResponse(BaseModel):
             base_sha=run.base_sha,
             head_sha=run.head_sha,
             totals=run.severity_totals,
+            failure_reason=run.failure_reason,
             created_at=run.created_at,
             started_at=run.started_at,
             finished_at=run.finished_at,
@@ -232,6 +234,9 @@ class ReviewRunSummary(BaseModel):
     base_sha: str
     head_sha: str
     totals: dict[str, int]
+    severity_counts: dict[str, int]
+    findings_total: int
+    rejected_count: int
     created_at: datetime
     changed_files: int
 
@@ -244,6 +249,9 @@ class ReviewRunSummary(BaseModel):
             base_sha=run.base_sha,
             head_sha=run.head_sha,
             totals=run.severity_totals,
+            severity_counts=run.severity_counts,
+            findings_total=len(run.findings),
+            rejected_count=run.rejected_count,
             created_at=run.created_at,
             changed_files=len(run.files),
         )

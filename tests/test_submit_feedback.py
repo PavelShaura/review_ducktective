@@ -28,6 +28,7 @@ from ducktective.core.review.dedup import (
     build_dedup_key,
 )
 from ducktective.core.review.entities import (
+    Evidence,
     Finding,
     ReviewRun,
 )
@@ -35,6 +36,7 @@ from ducktective.core.review.events import (
     FindingFeedbackSubmitted,
 )
 from ducktective.core.review.value_objects import (
+    EvidenceKind,
     FeedbackVerdict,
     FindingCategory,
     FindingProducer,
@@ -167,6 +169,53 @@ async def test_feedback_event_is_published() -> None:
     await submit(unit_of_work, publisher, tenant_id, run, finding.id, FeedbackVerdict.WONTFIX)
 
     assert any(isinstance(event, FindingFeedbackSubmitted) for event in publisher.published)
+
+
+async def test_confirmation_returns_rejected_finding_to_work() -> None:
+    unit_of_work = FakeUnitOfWork()
+    publisher = FakeEventPublisher()
+    tenant_id, run, finding = prepare(unit_of_work)
+    finding.evidence.append(
+        Evidence(
+            kind=EvidenceKind.QUOTED_CODE,
+            file_path=finding.file_path,
+            snippet="result = self._compute()",
+        )
+    )
+
+    await submit(
+        unit_of_work,
+        publisher,
+        tenant_id,
+        run,
+        finding.id,
+        FeedbackVerdict.FALSE_POSITIVE,
+    )
+    status_after_rejection = finding.status
+    assert status_after_rejection is FindingStatus.REJECTED
+
+    await submit(unit_of_work, publisher, tenant_id, run, finding.id, FeedbackVerdict.USEFUL)
+
+    assert finding.status is FindingStatus.VERIFIED
+    assert run.severity_totals == {"major": 1}
+
+
+async def test_postponing_also_clears_rejection() -> None:
+    unit_of_work = FakeUnitOfWork()
+    publisher = FakeEventPublisher()
+    tenant_id, run, finding = prepare(unit_of_work)
+
+    await submit(
+        unit_of_work,
+        publisher,
+        tenant_id,
+        run,
+        finding.id,
+        FeedbackVerdict.FALSE_POSITIVE,
+    )
+    await submit(unit_of_work, publisher, tenant_id, run, finding.id, FeedbackVerdict.WONTFIX)
+
+    assert finding.status is not FindingStatus.REJECTED
 
 
 async def test_latest_verdict_wins() -> None:

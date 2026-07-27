@@ -111,6 +111,34 @@ ducktective review --staged --no-store --fail-on major
 
 Проверка: http://localhost:8000/health, документация API: http://localhost:8000/docs
 
+## Интерфейс
+
+```bash
+cd apps/web
+npm install
+npm run dev
+```
+
+Откроется на http://localhost:5173, запросы к API проксируются на порт 8000 —
+CORS настраивать не нужно. Тенант задаётся переменной `VITE_TENANT_ID`, адрес
+бэкенда — `VITE_API_TARGET`.
+
+Шрифты подключены пакетами и раздаются с того же хоста: интерфейс не обращается
+к внешним CDN, как и остальная система.
+
+```bash
+npm run build       # сборка
+npm run typecheck   # типы
+npm run codegen     # обновить типы API из openapi.json
+```
+
+Схема API пересобирается из приложения:
+
+```bash
+uv run python -c "import json; from ducktective.api.main import create_app; \
+  print(json.dumps(create_app().openapi(), ensure_ascii=False))" > apps/web/openapi.json
+```
+
 ## Миграции
 
 ```bash

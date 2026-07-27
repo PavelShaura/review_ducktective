@@ -1,3 +1,6 @@
+from dataclasses import (
+    dataclass,
+)
 from uuid import (
     uuid4,
 )
@@ -57,6 +60,31 @@ class RunNotReviewableError(ApplicationError):
         self.status = status
 
 
+@dataclass(frozen=True, kw_only=True)
+class ReviewOutcome:
+    """Итог прогона вместе с тем, что было отброшено по дороге.
+
+    Без этих чисел «находок 0» означает сразу две разные ситуации: модель
+    ничего не нашла или все её ответы не прошли проверку. Различать их нужно,
+    иначе непонятно, что чинить — промпт или фильтры.
+    """
+
+    run: ReviewRun
+    proposed: int = 0
+    discarded_outside_diff: int = 0
+    discarded_without_evidence: int = 0
+    discarded_as_duplicate: int = 0
+    failed_files: tuple[str, ...] = ()
+
+    @property
+    def discarded(self) -> int:
+        return (
+            self.discarded_outside_diff
+            + self.discarded_without_evidence
+            + self.discarded_as_duplicate
+        )
+
+
 class RunReview(TransactionalUseCase):
     """Прогоняет подготовленный дифф через ревьюера.
 
@@ -74,7 +102,7 @@ class RunReview(TransactionalUseCase):
         super().__init__(unit_of_work, event_publisher)
         self._reviewer = reviewer
 
-    async def execute(self, tenant_id: TenantId, run_id: ReviewRunId) -> ReviewRun:
+    async def execute(self, tenant_id: TenantId, run_id: ReviewRunId) -> ReviewOutcome:
         async with self._unit_of_work:
             run = await self._unit_of_work.review_runs.get(run_id)
             if run.tenant_id != tenant_id:
@@ -109,15 +137,29 @@ class RunReview(TransactionalUseCase):
             drafts_by_file.append((file, result.drafts))
             total_usage = _accumulate(total_usage, result.usage)
 
+        proposed = 0
+        outside_diff = 0
+        without_evidence = 0
+        duplicates = 0
+
         async with self._unit_of_work:
             run = await self._unit_of_work.review_runs.get(run_id)
             run.record_usage(total_usage)
 
             for file, drafts in drafts_by_file:
                 for draft in drafts:
+                    proposed += 1
+                    if not file.covers_line(draft.line_start):
+                        outside_diff += 1
+                        continue
+
                     finding = _build_finding(draft, file)
-                    if finding is not None:
-                        run.add_finding(finding)
+                    if finding is None:
+                        without_evidence += 1
+                        continue
+
+                    if not run.add_finding(finding):
+                        duplicates += 1
 
             if failures and not drafts_by_file:
                 run.mark_failed("; ".join(failures))
@@ -125,7 +167,15 @@ class RunReview(TransactionalUseCase):
                 run.mark_completed()
 
             await self._commit_and_publish()
-            return run
+
+            return ReviewOutcome(
+                run=run,
+                proposed=proposed,
+                discarded_outside_diff=outside_diff,
+                discarded_without_evidence=without_evidence,
+                discarded_as_duplicate=duplicates,
+                failed_files=tuple(failures),
+            )
 
 
 def _accumulate(total: LlmUsage, addition: LlmUsage) -> LlmUsage:
@@ -139,13 +189,10 @@ def _accumulate(total: LlmUsage, addition: LlmUsage) -> LlmUsage:
 def _build_finding(draft: FindingDraft, file: ReviewFile) -> Finding | None:
     """Превращает черновик в находку, отбраковывая недостоверные.
 
-    Отбрасываются находки, привязанные к неизменённым строкам, и находки,
-    цитата которых не встречается в патче: и то и другое — типичные признаки
-    выдуманного контекста.
+    Находка без подтверждённой цитаты не создаётся: это типичный признак
+    выдуманного контекста. Принадлежность строки диффу проверяется раньше,
+    на уровне вызывающего кода, чтобы различать причины отбраковки.
     """
-    if not file.covers_line(draft.line_start):
-        return None
-
     patch_text = file.to_unified_patch()
     evidence = _collect_evidence(draft, patch_text)
     if not evidence:

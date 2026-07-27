@@ -39,6 +39,7 @@ from ducktective.core.review.events import (
     FindingFeedbackSubmitted,
     FindingRecorded,
     ReviewRunCreated,
+    ReviewRunDeleted,
     ReviewRunStatusChanged,
 )
 from ducktective.core.review.limits import (
@@ -202,10 +203,10 @@ class Finding:
         user_id: UserId | None = None,
         comment: str | None = None,
     ) -> FindingFeedback:
-        """Фиксирует оценку.
+        """Фиксирует оценку и приводит статус в соответствие с ней.
 
-        Отметка «ложное срабатывание» сразу отклоняет находку: показывать её
-        снова при повторном прогоне не нужно.
+        Отметка «ложное срабатывание» отклоняет находку, а любая другая снимает
+        отклонение: мнение можно изменить, и находка должна вернуться в работу.
         """
         entry = FindingFeedback(
             id=FindingFeedbackId(uuid4()),
@@ -218,6 +219,9 @@ class Finding:
 
         if verdict is FeedbackVerdict.FALSE_POSITIVE:
             self.status = FindingStatus.REJECTED
+        elif self.status is FindingStatus.REJECTED:
+            self.status = FindingStatus.VERIFIED if self.has_evidence else FindingStatus.PROPOSED
+
         return entry
 
     def verify(self) -> None:
@@ -303,12 +307,26 @@ class ReviewRun(AggregateRoot):
 
     @property
     def severity_totals(self) -> dict[str, int]:
+        """Сводка активных находок: отклонённые внимания больше не требуют."""
         counter = Counter(
             finding.severity.value
             for finding in self.findings
             if finding.status is not FindingStatus.REJECTED
         )
         return dict(counter)
+
+    @property
+    def severity_counts(self) -> dict[str, int]:
+        """Разбивка всех находок, включая отклонённые.
+
+        Нужна там, где число должно совпадать с тем, что человек видит
+        на странице прогона: отклонённые никуда не исчезают.
+        """
+        return dict(Counter(finding.severity.value for finding in self.findings))
+
+    @property
+    def rejected_count(self) -> int:
+        return sum(1 for finding in self.findings if finding.status is FindingStatus.REJECTED)
 
     def mark_running(self) -> None:
         self._change_status(ReviewStatus.RUNNING)
@@ -385,6 +403,14 @@ class ReviewRun(AggregateRoot):
             )
         )
         return entry
+
+    def record_deletion(self) -> None:
+        """Отмечает удаление прогона.
+
+        Событие порождается до фактического удаления: после него агрегата
+        уже не существует, а подписчикам знать о случившемся нужно.
+        """
+        self.record_event(ReviewRunDeleted(run_id=self.id, repository_id=self.repository_id))
 
     def find_finding(self, finding_id: FindingId) -> Finding | None:
         for finding in self.findings:

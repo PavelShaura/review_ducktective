@@ -30,6 +30,7 @@ class SqlAlchemyReviewRunRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._identity_map: dict[ReviewRunId, tuple[ReviewRun, ReviewRunModel]] = {}
+        self._removed_events: list[DomainEvent] = []
 
     def add(self, run: ReviewRun) -> None:
         model = mapper.to_model(run)
@@ -61,12 +62,29 @@ class SqlAlchemyReviewRunRepository:
         models = (await self._session.execute(statement)).scalars().all()
         return [self._track(model) for model in models]
 
+    async def remove(self, run: ReviewRun) -> None:
+        """Удаляет прогон целиком.
+
+        Файлы, блоки изменений, находки и отметки уходят следом по каскаду
+        внешних ключей — агрегат не может пережить свои части.
+        """
+        tracked = self._identity_map.pop(run.id, None)
+        model = (
+            tracked[1] if tracked is not None else await self._session.get(ReviewRunModel, run.id)
+        )
+        if model is None:
+            raise EntityNotFoundError("ReviewRun", run.id)
+
+        await self._session.delete(model)
+        self._removed_events.extend(run.pull_events())
+
     def flush_changes(self) -> None:
         for run, model in self._identity_map.values():
             mapper.apply_changes(model, run)
 
     def collect_events(self) -> list[DomainEvent]:
-        collected: list[DomainEvent] = []
+        collected = self._removed_events
+        self._removed_events = []
         for run, _ in self._identity_map.values():
             collected.extend(run.pull_events())
         return collected

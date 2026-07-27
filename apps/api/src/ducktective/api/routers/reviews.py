@@ -28,6 +28,9 @@ from ducktective.api.schemas.review import (
 from ducktective.application.exceptions import (
     PermissionDeniedError,
 )
+from ducktective.application.review.delete_run import (
+    DeleteReviewRun,
+)
 from ducktective.application.review.prepare_run import (
     EmptyDiffError,
     PrepareReviewRun,
@@ -159,6 +162,23 @@ async def enqueue_review(
 
     await task_queue.enqueue_job(REVIEW_TASK_NAME, str(run_id), str(tenant_id))
     return ReviewRunResponse.from_domain(run)
+
+
+@router.delete("/reviews/{run_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_review(
+    run_id: UUID,
+    tenant_id: UUID,
+    unit_of_work: UnitOfWorkDependency,
+    event_publisher: EventPublisherDependency,
+) -> None:
+    use_case = DeleteReviewRun(unit_of_work, event_publisher)
+
+    try:
+        await use_case.execute(TenantId(tenant_id), ReviewRunId(run_id))
+    except EntityNotFoundError as error:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
+    except PermissionDeniedError as error:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(error)) from error
 
 
 @router.post(

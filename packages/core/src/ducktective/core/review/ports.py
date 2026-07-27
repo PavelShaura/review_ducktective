@@ -36,6 +36,8 @@ class ReviewRunRepository(Protocol):
         limit: int = 50,
     ) -> list[ReviewRun]: ...
 
+    async def remove(self, run: ReviewRun) -> None: ...
+
 
 @dataclass(frozen=True, kw_only=True)
 class FileReviewResult:
