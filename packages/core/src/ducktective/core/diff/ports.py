@@ -35,6 +35,10 @@ class VcsProvider(Protocol):
         head: str,
     ) -> str: ...
 
+    async def get_staged_patch(self, repository_path: Path) -> str:
+        """Изменения, подготовленные к коммиту, но ещё не закоммиченные."""
+        ...
+
     async def get_file_content(
         self,
         repository_path: Path,

@@ -1,6 +1,12 @@
+from collections.abc import (
+    Sequence,
+)
 from dataclasses import (
     dataclass,
     field,
+)
+from fnmatch import (
+    fnmatch,
 )
 
 from ducktective.core.diff.value_objects import (
@@ -10,6 +16,10 @@ from ducktective.core.diff.value_objects import (
 from ducktective.core.types import (
     CommitSha,
 )
+
+
+def _matches_any(path: str, patterns: Sequence[str]) -> bool:
+    return any(fnmatch(path, pattern) for pattern in patterns)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -72,3 +82,19 @@ class Diff:
 
     def reviewable_files(self) -> list[DiffFile]:
         return [file for file in self.files if file.is_reviewable]
+
+    def include_only(self, patterns: Sequence[str]) -> "Diff":
+        """Оставляет файлы, чей путь совпал хотя бы с одним шаблоном.
+
+        Используется fnmatch, где `*` покрывает и разделители каталогов: шаблон
+        `src/*.py` найдёт файл на любой глубине внутри `src`. Пустой список
+        шаблонов ничего не отсекает.
+        """
+        if not patterns:
+            return self
+
+        return Diff(
+            base_sha=self.base_sha,
+            head_sha=self.head_sha,
+            files=[file for file in self.files if _matches_any(file.path, patterns)],
+        )

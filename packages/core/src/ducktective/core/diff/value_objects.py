@@ -10,6 +10,9 @@ from ducktective.core.exceptions import (
 )
 
 
+STAGED_REVISION = "staged"
+
+
 class ChangeType(StrEnum):
     ADDED = "added"
     MODIFIED = "modified"

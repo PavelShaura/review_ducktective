@@ -47,12 +47,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         json_output=settings.app_env != "dev",
     )
     engine = build_engine(
-        settings.database_url,
+        settings.require_database_url(),
         pool_size=settings.database_pool_size,
         max_overflow=settings.database_pool_max_overflow,
     )
-    redis_client = Redis.from_url(settings.redis_url, decode_responses=True)
-    task_queue = await create_pool(RedisSettings.from_dsn(settings.redis_url))
+    redis_url = settings.require_redis_url()
+    redis_client = Redis.from_url(redis_url, decode_responses=True)
+    task_queue = await create_pool(RedisSettings.from_dsn(redis_url))
 
     app.state.settings = settings
     app.state.engine = engine

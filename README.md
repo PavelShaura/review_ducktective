@@ -59,12 +59,55 @@ uv run ducktective serve --reload
 uv run arq ducktective.reviewer.worker.WorkerSettings
 ```
 
-Ревью из терминала, без API и очереди:
+## Ревью из терминала
+
+Автономный режим: без базы, без Redis, без запущенного API. Нужна только локальная
+модель — код никуда не уходит.
 
 ```bash
-uv run ducktective review /path/to/repo --tenant <uuid> --base HEAD~1 --head HEAD
-uv run ducktective review /path/to/repo --tenant <uuid> --json
+# то, что собираешься коммитить
+ducktective review --staged --no-store
+
+# диапазон ревизий
+ducktective review /path/to/repo --no-store --base HEAD~1 --head HEAD
+
+# отчёт для описания pull request
+ducktective review --staged --no-store --format markdown
 ```
+
+Форматы вывода: `rich` (по умолчанию), `json`, `markdown`.
+
+Большой коммит можно сузить до нужной части — `--include` принимает шаблоны
+и повторяется несколько раз. `*` покрывает и разделители каталогов, поэтому
+`src/report/*` найдёт файлы на любой глубине:
+
+```bash
+ducktective review /path/to/repo --no-store \
+  --base a1b2c3d~1 --head a1b2c3d \
+  --include 'src/report/*' --include '*.py'
+```
+
+С флагом `--fail-on` команда возвращает ненулевой код, если найдены проблемы
+указанного уровня или выше — это делает её пригодной для git-хука и для CI:
+
+```bash
+ducktective review --staged --no-store --fail-on major
+```
+
+```yaml
+# .pre-commit-config.yaml
+- repo: local
+  hooks:
+    - id: ducktective
+      name: ducktective
+      entry: ducktective review --staged --no-store --fail-on critical
+      language: system
+      pass_filenames: false
+```
+
+Режим с хранением (без `--no-store`) пишет прогоны и находки в базу, требует
+`--tenant` и поднятой инфраструктуры — он нужен, чтобы размечать находки
+и накапливать данные для оценки качества.
 
 Проверка: http://localhost:8000/health, документация API: http://localhost:8000/docs
 

@@ -63,11 +63,11 @@ async def startup(ctx: dict[str, Any]) -> None:
     configure_logging(level=settings.app_log_level, json_output=settings.app_env != "dev")
 
     engine = build_engine(
-        settings.database_url,
+        settings.require_database_url(),
         pool_size=settings.database_pool_size,
         max_overflow=settings.database_pool_max_overflow,
     )
-    redis_client = Redis.from_url(settings.redis_url, decode_responses=True)
+    redis_client = Redis.from_url(settings.require_redis_url(), decode_responses=True)
 
     ctx["settings"] = settings
     ctx["engine"] = engine

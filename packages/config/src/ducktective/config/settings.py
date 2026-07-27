@@ -34,11 +34,11 @@ class Settings(BaseSettings):
     app_env: str = "dev"
     app_log_level: str = "INFO"
 
-    database_url: str
+    database_url: str = ""
     database_pool_size: int = 10
     database_pool_max_overflow: int = 5
 
-    redis_url: str
+    redis_url: str = ""
 
     deployment_profile: DeploymentProfile = DeploymentProfile.DEV
 
@@ -70,3 +70,14 @@ class Settings(BaseSettings):
     def cloud_providers_allowed(self) -> bool:
         """В air-gapped профиле облачные провайдеры запрещены на уровне конфигурации."""
         return self.deployment_profile is not DeploymentProfile.AIRGAPPED
+
+    def require_database_url(self) -> str:
+        """Адреса хранилищ не обязательны: автономный режим CLI работает без них."""
+        if not self.database_url:
+            raise ValueError("Не задан DATABASE_URL — он нужен всем режимам, кроме --no-store")
+        return self.database_url
+
+    def require_redis_url(self) -> str:
+        if not self.redis_url:
+            raise ValueError("Не задан REDIS_URL — он нужен всем режимам, кроме --no-store")
+        return self.redis_url

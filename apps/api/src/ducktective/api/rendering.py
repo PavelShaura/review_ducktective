@@ -52,6 +52,41 @@ STATUS_STYLES = {
 }
 
 
+def render_markdown(run: ReviewRun) -> str:
+    """Отчёт для вставки в описание pull request."""
+    lines = [
+        f"## Ревью {run.base_sha[:8]} → {run.head_sha[:8]}",
+        "",
+        f"Файлов: {len(run.files)} · находок: {len(run.findings)} · "
+        f"токенов: {run.tokens_input} → {run.tokens_output}",
+    ]
+
+    if not run.findings:
+        lines.extend(["", "Замечаний нет."])
+        return "\n".join(lines)
+
+    for severity in SEVERITY_ORDER:
+        findings = [finding for finding in run.findings if finding.severity is severity]
+        if not findings:
+            continue
+
+        lines.extend(["", f"### {SEVERITY_LABELS[severity]} ({len(findings)})"])
+        for finding in findings:
+            lines.extend(
+                [
+                    "",
+                    f"**{finding.title}**  ",
+                    f"`{finding.file_path}:{finding.line_start}` · {finding.category.value}",
+                    "",
+                    finding.body_markdown.strip(),
+                ]
+            )
+            if finding.suggested_patch:
+                lines.extend(["", "```python", finding.suggested_patch.strip(), "```"])
+
+    return "\n".join(lines)
+
+
 def render_run(console: Console, run: ReviewRun) -> None:
     console.print()
     console.print(_build_summary(run))

@@ -58,6 +58,10 @@ class LocalGitProvider:
             f"{base}{separator}{head}",
         )
 
+    async def get_staged_patch(self, repository_path: Path) -> str:
+        """Дифф проиндексированных изменений относительно HEAD."""
+        return await self._run(repository_path, "diff", *DIFF_ARGUMENTS, "--cached")
+
     async def get_file_content(
         self,
         repository_path: Path,

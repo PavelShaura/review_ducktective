@@ -57,3 +57,6 @@ The `title` and `body` fields must be written in Russian; everything else stays 
 
 Write `body` as plain prose. Do not use LaTeX (`$N$`), HTML, or headings. Inline code
 may be wrapped in single backticks. Keep it under four sentences.
+
+`suggested_patch` must contain replacement code and nothing else — no prose, no
+explanation, no markdown fences. Set it to null when you cannot provide code.

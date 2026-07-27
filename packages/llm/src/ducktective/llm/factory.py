@@ -53,7 +53,7 @@ def build_model_router(
 
 def build_code_reviewer(
     *,
-    redis_client: Redis,
+    redis_client: Redis | None,
     local_provider: str,
     local_model: str,
     local_base_url: str,
@@ -69,6 +69,9 @@ def build_code_reviewer(
     Фабрика принимает примитивы, а не объект настроек: пакет моделей не должен
     зависеть от конфигурации приложений, но собирать зависимости в каждом
     приложении заново — источник расхождений.
+
+    Без Redis ревьюер работает без кэша: в автономном режиме внешних сервисов
+    нет, а повторные прогоны там редки.
     """
     router = build_model_router(
         local_provider=local_provider,
@@ -79,9 +82,10 @@ def build_code_reviewer(
         cloud_api_key=cloud_api_key,
         cloud_enabled=cloud_enabled,
     )
-    client = LiteLlmClient(
-        router,
-        cache=RedisResponseCache(redis_client, ttl_seconds=cache_ttl_seconds),
-        timeout_seconds=timeout_seconds,
+    cache = (
+        RedisResponseCache(redis_client, ttl_seconds=cache_ttl_seconds)
+        if redis_client is not None
+        else None
     )
+    client = LiteLlmClient(router, cache=cache, timeout_seconds=timeout_seconds)
     return LlmCodeReviewer(client)

@@ -12,6 +12,7 @@ from ducktective.application.exceptions import (
 )
 from ducktective.application.review.prepare_run import (
     EmptyDiffError,
+    NoMatchingFilesError,
     PrepareReviewRun,
     PrepareReviewRunCommand,
 )
@@ -19,6 +20,9 @@ from ducktective.core.code_repository.entities import (
     CodeRepository,
 )
 from ducktective.core.code_repository.value_objects import VcsProvider as VcsProviderKind
+from ducktective.core.diff.value_objects import (
+    STAGED_REVISION,
+)
 from ducktective.core.review.events import (
     ReviewRunCreated,
 )
@@ -169,6 +173,86 @@ async def test_repository_path_is_taken_from_aggregate() -> None:
     )
 
     assert vcs_provider.requested_paths == [REPOSITORY_PATH]
+
+
+async def test_staged_mode_uses_index_instead_of_revisions() -> None:
+    unit_of_work = FakeUnitOfWork()
+    publisher = FakeEventPublisher()
+    tenant_id = TenantId(uuid4())
+    repository = register_repository(unit_of_work, tenant_id)
+    vcs_provider = FakeVcsProvider("", staged_patch_text=MODIFIED_AND_ADDED_PATCH)
+    use_case = PrepareReviewRun(unit_of_work, publisher, vcs_provider, UnifiedDiffParser())
+
+    run = await use_case.execute(
+        PrepareReviewRunCommand(
+            tenant_id=tenant_id,
+            repository_id=repository.id,
+            staged=True,
+        )
+    )
+
+    assert run.head_sha == STAGED_REVISION
+    assert run.base_sha == "sha-HEAD"
+    assert len(run.files) == 2
+
+
+async def test_staged_mode_without_changes_is_reported() -> None:
+    unit_of_work = FakeUnitOfWork()
+    publisher = FakeEventPublisher()
+    tenant_id = TenantId(uuid4())
+    repository = register_repository(unit_of_work, tenant_id)
+    vcs_provider = FakeVcsProvider("", staged_patch_text="")
+    use_case = PrepareReviewRun(unit_of_work, publisher, vcs_provider, UnifiedDiffParser())
+
+    with pytest.raises(EmptyDiffError):
+        await use_case.execute(
+            PrepareReviewRunCommand(
+                tenant_id=tenant_id,
+                repository_id=repository.id,
+                staged=True,
+            )
+        )
+
+
+async def test_include_pattern_narrows_review() -> None:
+    unit_of_work = FakeUnitOfWork()
+    publisher = FakeEventPublisher()
+    tenant_id = TenantId(uuid4())
+    repository = register_repository(unit_of_work, tenant_id)
+    use_case = build_use_case(unit_of_work, publisher, MODIFIED_AND_ADDED_PATCH)
+
+    run = await use_case.execute(
+        PrepareReviewRunCommand(
+            tenant_id=tenant_id,
+            repository_id=repository.id,
+            base="main",
+            head="feature",
+            include_patterns=("*/service.py",),
+        )
+    )
+
+    assert [file.path for file in run.files] == ["app/service.py"]
+
+
+async def test_include_pattern_without_matches_is_reported() -> None:
+    unit_of_work = FakeUnitOfWork()
+    publisher = FakeEventPublisher()
+    tenant_id = TenantId(uuid4())
+    repository = register_repository(unit_of_work, tenant_id)
+    use_case = build_use_case(unit_of_work, publisher, MODIFIED_AND_ADDED_PATCH)
+
+    with pytest.raises(NoMatchingFilesError):
+        await use_case.execute(
+            PrepareReviewRunCommand(
+                tenant_id=tenant_id,
+                repository_id=repository.id,
+                base="main",
+                head="feature",
+                include_patterns=("*.ts",),
+            )
+        )
+
+    assert unit_of_work.commit_calls == 0
 
 
 async def test_missing_repository_is_reported() -> None:

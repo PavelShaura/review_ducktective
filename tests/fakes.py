@@ -203,8 +203,10 @@ class FakeVcsProvider:
         *,
         known_revisions: set[str] | None = None,
         file_contents: dict[str, str] | None = None,
+        staged_patch_text: str | None = None,
     ) -> None:
         self.patch_text = patch_text
+        self.staged_patch_text = staged_patch_text
         self.known_revisions = known_revisions
         self.file_contents = file_contents or {}
         self.requested_paths: list[Path] = []
@@ -224,6 +226,10 @@ class FakeVcsProvider:
     ) -> str:
         self.requested_paths.append(repository_path)
         return self.patch_text
+
+    async def get_staged_patch(self, repository_path: Path) -> str:
+        self.requested_paths.append(repository_path)
+        return self.staged_patch_text if self.staged_patch_text is not None else self.patch_text
 
     async def get_file_content(
         self,
