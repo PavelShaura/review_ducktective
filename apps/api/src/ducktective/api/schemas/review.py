@@ -247,6 +247,16 @@ class FindingResponse(BaseModel):
         )
 
 
+class CancelRunResponse(BaseModel):
+    """Признак того, что просьбу приняли.
+
+    Ложь означает, что прогон уже завершился сам, — это не ошибка,
+    а гонка между кнопкой и последним файлом.
+    """
+
+    cancelled: bool
+
+
 class ReviewRunResponse(BaseModel):
     id: UUID
     repository_id: UUID
@@ -256,6 +266,7 @@ class ReviewRunResponse(BaseModel):
     head_sha: str
     totals: dict[str, int]
     failure_reason: str | None
+    files_with_context: int
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
@@ -273,6 +284,7 @@ class ReviewRunResponse(BaseModel):
             head_sha=run.head_sha,
             totals=run.severity_totals,
             failure_reason=run.failure_reason,
+            files_with_context=run.files_with_context,
             created_at=run.created_at,
             started_at=run.started_at,
             finished_at=run.finished_at,

@@ -14,6 +14,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import (
     JSONB,
@@ -69,9 +70,14 @@ class ReviewRunModel(Base):
     )
     totals: Mapped[dict[str, int]] = mapped_column(JSONB, default=dict)
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-    tokens_input: Mapped[int] = mapped_column(Integer, default=0)
-    tokens_output: Mapped[int] = mapped_column(Integer, default=0)
-    cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    tokens_input: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    tokens_output: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    cost_usd: Mapped[float] = mapped_column(Float, default=0.0, server_default=text("0"))
+    files_with_context: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        server_default=text("0"),
+    )
     created_by: Mapped[UUID | None] = mapped_column(
         ForeignKey("user_account.id", ondelete="SET NULL"),
         nullable=True,

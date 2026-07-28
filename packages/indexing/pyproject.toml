@@ -1,0 +1,21 @@
+[project]
+name = "ducktective-indexing"
+version = "0.1.0"
+description = "Индексация кодовой базы: разбор через tree-sitter, символы, чанки"
+requires-python = ">=3.12"
+
+dependencies = [
+    "ducktective-core",
+    "tree-sitter>=0.23",
+    "tree-sitter-python>=0.23",
+]
+
+[tool.uv.sources]
+ducktective-core = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ducktective"]

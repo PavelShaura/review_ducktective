@@ -13,6 +13,12 @@ from ducktective.core.code_repository.ports import (
 from ducktective.core.events import (
     DomainEvent,
 )
+from ducktective.core.indexing.ports import (
+    EmbeddingStore,
+    IndexSnapshotRepository,
+    SourceFileRepository,
+    SymbolEdgeRepository,
+)
 from ducktective.core.review.ports import (
     ReviewRunRepository,
 )
@@ -32,6 +38,18 @@ class UnitOfWork(Protocol):
 
     @property
     def review_runs(self) -> ReviewRunRepository: ...
+
+    @property
+    def index_snapshots(self) -> IndexSnapshotRepository: ...
+
+    @property
+    def source_files(self) -> SourceFileRepository: ...
+
+    @property
+    def symbol_edges(self) -> SymbolEdgeRepository: ...
+
+    @property
+    def embeddings(self) -> EmbeddingStore: ...
 
     async def __aenter__(self) -> Self: ...
 

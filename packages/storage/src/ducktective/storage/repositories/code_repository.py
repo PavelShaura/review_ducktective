@@ -34,6 +34,7 @@ class SqlAlchemyCodeRepositoryRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._identity_map: dict[RepositoryId, tuple[CodeRepository, CodeRepositoryModel]] = {}
+        self._removed_events: list[DomainEvent] = []
 
     def add(self, repository: CodeRepository) -> None:
         model = mapper.to_model(repository)
@@ -69,13 +70,32 @@ class SqlAlchemyCodeRepositoryRepository:
         models = (await self._session.execute(statement)).scalars().all()
         return [self._track(model) for model in models]
 
+    async def remove(self, repository: CodeRepository) -> None:
+        """Удаляет репозиторий вместе с его индексом и прогонами.
+
+        Связанные записи убирают внешние ключи: перечислять их здесь значило бы
+        держать в двух местах одно и то же знание.
+        """
+        tracked = self._identity_map.pop(repository.id, None)
+        model = (
+            tracked[1]
+            if tracked is not None
+            else await self._session.get(CodeRepositoryModel, repository.id)
+        )
+        if model is None:
+            raise EntityNotFoundError("CodeRepository", repository.id)
+
+        await self._session.delete(model)
+        self._removed_events.extend(repository.pull_events())
+
     def flush_changes(self) -> None:
         """Переносит изменения агрегатов в ORM-модели перед коммитом."""
         for repository, model in self._identity_map.values():
             mapper.apply_changes(model, repository)
 
     def collect_events(self) -> list[DomainEvent]:
-        collected: list[DomainEvent] = []
+        collected = self._removed_events
+        self._removed_events = []
         for repository, _ in self._identity_map.values():
             collected.extend(repository.pull_events())
         return collected

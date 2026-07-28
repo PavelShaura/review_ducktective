@@ -17,6 +17,14 @@ from ducktective.core.events import (
 from ducktective.storage.repositories.code_repository import (
     SqlAlchemyCodeRepositoryRepository,
 )
+from ducktective.storage.repositories.embeddings import (
+    SqlAlchemyEmbeddingStore,
+)
+from ducktective.storage.repositories.indexing import (
+    SqlAlchemyIndexSnapshotRepository,
+    SqlAlchemySourceFileRepository,
+    SqlAlchemySymbolEdgeRepository,
+)
 from ducktective.storage.repositories.review_run import (
     SqlAlchemyReviewRunRepository,
 )
@@ -43,6 +51,10 @@ class SqlAlchemyUnitOfWork:
         self._session: AsyncSession | None = None
         self._code_repositories: SqlAlchemyCodeRepositoryRepository | None = None
         self._review_runs: SqlAlchemyReviewRunRepository | None = None
+        self._index_snapshots: SqlAlchemyIndexSnapshotRepository | None = None
+        self._source_files: SqlAlchemySourceFileRepository | None = None
+        self._symbol_edges: SqlAlchemySymbolEdgeRepository | None = None
+        self._embeddings: SqlAlchemyEmbeddingStore | None = None
         self._collected_events: list[DomainEvent] = []
 
     @property
@@ -62,6 +74,30 @@ class SqlAlchemyUnitOfWork:
         if self._review_runs is None:
             self._review_runs = SqlAlchemyReviewRunRepository(self.session)
         return self._review_runs
+
+    @property
+    def index_snapshots(self) -> SqlAlchemyIndexSnapshotRepository:
+        if self._index_snapshots is None:
+            self._index_snapshots = SqlAlchemyIndexSnapshotRepository(self.session)
+        return self._index_snapshots
+
+    @property
+    def source_files(self) -> SqlAlchemySourceFileRepository:
+        if self._source_files is None:
+            self._source_files = SqlAlchemySourceFileRepository(self.session)
+        return self._source_files
+
+    @property
+    def symbol_edges(self) -> SqlAlchemySymbolEdgeRepository:
+        if self._symbol_edges is None:
+            self._symbol_edges = SqlAlchemySymbolEdgeRepository(self.session)
+        return self._symbol_edges
+
+    @property
+    def embeddings(self) -> SqlAlchemyEmbeddingStore:
+        if self._embeddings is None:
+            self._embeddings = SqlAlchemyEmbeddingStore(self.session)
+        return self._embeddings
 
     async def __aenter__(self) -> Self:
         if self._session is not None:
@@ -102,7 +138,13 @@ class SqlAlchemyUnitOfWork:
         self._collected_events.extend(events)
 
     def _active_repositories(self) -> list[TrackingRepository]:
-        candidates: list[TrackingRepository | None] = [self._code_repositories, self._review_runs]
+        candidates: list[TrackingRepository | None] = [
+            self._code_repositories,
+            self._review_runs,
+            self._index_snapshots,
+            self._source_files,
+            self._symbol_edges,
+        ]
         return [repository for repository in candidates if repository is not None]
 
     def _absorb_aggregate_changes(self) -> None:
@@ -113,3 +155,7 @@ class SqlAlchemyUnitOfWork:
     def _reset_repositories(self) -> None:
         self._code_repositories = None
         self._review_runs = None
+        self._index_snapshots = None
+        self._source_files = None
+        self._symbol_edges = None
+        self._embeddings = None

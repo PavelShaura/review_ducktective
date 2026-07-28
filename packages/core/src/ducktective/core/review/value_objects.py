@@ -73,3 +73,15 @@ TERMINAL_STATUSES = frozenset(
         ReviewStatus.CANCELLED,
     }
 )
+
+RESTARTABLE_STATUSES = frozenset(
+    {
+        ReviewStatus.FAILED,
+        ReviewStatus.CANCELLED,
+    }
+)
+"""Завершившиеся не своей волей.
+
+Успешный прогон не перезапускается: его результат — то, ради чего дело
+заводили, и затирать его повторным чтением тех же файлов незачем.
+"""

@@ -1,0 +1,21 @@
+[project]
+name = "ducktective-retrieval"
+version = "0.1.0"
+description = "Поиск по кодовой базе: лексический, векторный и их слияние"
+requires-python = ">=3.12"
+
+dependencies = [
+    "ducktective-core",
+    "ducktective-storage",
+]
+
+[tool.uv.sources]
+ducktective-core = { workspace = true }
+ducktective-storage = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ducktective"]

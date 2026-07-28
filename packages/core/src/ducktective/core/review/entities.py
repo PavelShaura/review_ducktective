@@ -47,6 +47,7 @@ from ducktective.core.review.limits import (
     MAX_DISPLAYABLE_PATCH_LINES,
 )
 from ducktective.core.review.value_objects import (
+    RESTARTABLE_STATUSES,
     TERMINAL_STATUSES,
     EvidenceKind,
     FeedbackVerdict,
@@ -265,6 +266,7 @@ class ReviewRun(AggregateRoot):
     tokens_input: int = 0
     tokens_output: int = 0
     cost_usd: float = 0.0
+    files_with_context: int = 0
     files: list[ReviewFile] = field(default_factory=list)
     findings: list[Finding] = field(default_factory=list)
 
@@ -346,6 +348,53 @@ class ReviewRun(AggregateRoot):
         self.failure_reason = reason
         self.finished_at = datetime.now(UTC)
 
+    def cancel(self) -> None:
+        """Прекращает прогон по просьбе человека.
+
+        Найденное не сохраняется: находки пишутся одной транзакцией в конце,
+        а половина ревью — это не половина результата, потому что дубли
+        отсеиваются по всему набору сразу.
+        """
+        self._change_status(ReviewStatus.CANCELLED)
+        self.finished_at = datetime.now(UTC)
+
+    @property
+    def is_cancelled(self) -> bool:
+        return self.status is ReviewStatus.CANCELLED
+
+    @property
+    def is_restartable(self) -> bool:
+        return self.status in RESTARTABLE_STATUSES
+
+    def restart(self) -> None:
+        """Возвращает прекращённый или неудавшийся прогон в очередь.
+
+        Расследование начинается с начала: сохранять было нечего, а счётчики
+        токенов обнуляются, чтобы цифры прогона описывали одну попытку,
+        а не сумму всех.
+        """
+        if not self.is_restartable:
+            raise InvariantViolationError(
+                f"Прогон в статусе {self.status} нельзя отправить на расследование заново"
+            )
+
+        previous_status = self.status
+        self.status = ReviewStatus.QUEUED
+        self.started_at = None
+        self.finished_at = None
+        self.failure_reason = None
+        self.tokens_input = 0
+        self.tokens_output = 0
+        self.cost_usd = 0.0
+        self.files_with_context = 0
+        self.record_event(
+            ReviewRunStatusChanged(
+                run_id=self.id,
+                previous_status=previous_status,
+                current_status=ReviewStatus.QUEUED,
+            )
+        )
+
     def add_finding(self, finding: Finding) -> bool:
         """Добавляет находку, отбрасывая дубли по ключу дедупликации.
 
@@ -367,6 +416,15 @@ class ReviewRun(AggregateRoot):
             )
         )
         return True
+
+    def record_context_usage(self, files_with_context: int) -> None:
+        """Запоминает, для скольких файлов нашлось окружение из индекса.
+
+        Ревью без индекса работает по одному диффу и находит заметно меньше.
+        Без этого числа разница в качестве выглядит случайностью, а не
+        следствием того, был ли собран индекс.
+        """
+        self.files_with_context = files_with_context
 
     def record_usage(self, usage: LlmUsage) -> None:
         self.tokens_input += usage.input_tokens

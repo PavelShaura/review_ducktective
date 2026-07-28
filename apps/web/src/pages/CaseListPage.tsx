@@ -3,6 +3,7 @@ import { Link } from "react-router";
 
 import { api } from "@/api/client";
 import { DeleteCaseButton } from "@/components/DeleteCaseButton";
+import { DeleteRepositoryButton } from "@/components/DeleteRepositoryButton";
 import type { Repository, ReviewRunSummary, Severity } from "@/api/types";
 import { SEVERITY_ORDER, SEVERITY_TEXT, SEVERITY_LABEL } from "@/components/SeverityMark";
 import { StatusMark } from "@/components/StatusMark";
@@ -61,6 +62,8 @@ function RepositorySection({ repository }: { repository: Repository }) {
           <span className="mx-2 opacity-40">·</span>
           {repository.egress_policy === "local_only" ? "только локально" : "облако разрешено"}
         </span>
+
+        <DeleteRepositoryButton repositoryId={repository.id} name={repository.name} />
       </div>
 
       {runs.data && runs.data.length > 0 ? (

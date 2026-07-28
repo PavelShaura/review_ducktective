@@ -14,6 +14,12 @@ from rich.text import (
     Text,
 )
 
+from ducktective.application.indexing.build_embeddings import (
+    EmbeddingOutcome,
+)
+from ducktective.application.indexing.build_index import (
+    IndexOutcome,
+)
 from ducktective.application.review.run_review import (
     ReviewOutcome,
 )
@@ -55,16 +61,65 @@ STATUS_STYLES = {
 }
 
 
+def render_index_outcome(
+    console: Console,
+    outcome: IndexOutcome,
+    embeddings: EmbeddingOutcome | None = None,
+    *,
+    elapsed_seconds: float,
+) -> None:
+    """Показывает итог индексации.
+
+    Переиспользованные файлы выводятся отдельной строкой: на них держится
+    обещание про быстрый инкремент, и видеть их число важнее, чем общее.
+    """
+    stats = outcome.stats
+    kind = "инкрементальная" if outcome.is_incremental else "полная"
+
+    table = Table.grid(padding=(0, 2))
+    table.add_column(style="dim")
+    table.add_column()
+    table.add_row("ревизия", outcome.snapshot.commit_sha[:12])
+    table.add_row("индексация", f"{kind}, {elapsed_seconds:.2f} с")
+    table.add_row("файлов", str(stats.files_total))
+    table.add_row("разобрано", str(stats.files_parsed))
+    table.add_row("не менялось", f"[green]{stats.files_reused}[/]")
+    if stats.files_deleted:
+        table.add_row("исчезло", str(stats.files_deleted))
+    table.add_row("символов", str(stats.symbols))
+    table.add_row("чанков", str(stats.chunks))
+    if stats.edges:
+        table.add_row("связей", f"{stats.edges}, из них разрешено {stats.edges_resolved}")
+
+    if embeddings is not None:
+        table.add_row(
+            "векторы",
+            f"{embeddings.total} ({embeddings.computed} посчитано, "
+            f"{embeddings.reused} переиспользовано)",
+        )
+
+    console.print(Panel(table, title="индекс", border_style="cyan", padding=(1, 2)))
+
+    if outcome.unreadable:
+        console.print(
+            f"[yellow]Не удалось прочитать файлов: {len(outcome.unreadable)}[/] "
+            f"[dim]({', '.join(outcome.unreadable[:3])}…)[/]"
+        )
+
+
 def render_outcome_notes(console: Console, outcome: ReviewOutcome) -> None:
     """Показывает, что модель предложила и что было отброшено.
 
     Без этого «замечаний нет» скрывает разницу между молчанием модели
     и отбраковкой всех её ответов.
     """
-    if outcome.proposed == 0 and not outcome.failed_files:
+    if outcome.proposed == 0 and not outcome.failed_files and not outcome.files_with_context:
         return
 
-    parts: list[str] = [f"модель предложила {outcome.proposed}"]
+    parts: list[str] = []
+    if outcome.files_with_context:
+        parts.append(f"с контекстом из индекса {outcome.files_with_context}")
+    parts.append(f"модель предложила {outcome.proposed}")
     if outcome.discarded_outside_diff:
         parts.append(f"вне диффа {outcome.discarded_outside_diff}")
     if outcome.discarded_without_evidence:
@@ -76,6 +131,9 @@ def render_outcome_notes(console: Console, outcome: ReviewOutcome) -> None:
 
     console.print()
     console.print(f"[dim]{' · '.join(parts)}[/]")
+
+    for failure in outcome.failed_files:
+        console.print(f"[yellow]  {failure}[/]")
 
 
 def render_markdown(run: ReviewRun) -> str:

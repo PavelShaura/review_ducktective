@@ -60,7 +60,12 @@ def build_context(
         "ducktective.reviewer.worker.RedisEventPublisher",
         lambda redis_client: _NullPublisher(),
     )
-    return {"session_factory": None, "redis": None, "code_reviewer": reviewer}
+    return {
+        "session_factory": None,
+        "redis": None,
+        "code_reviewer": reviewer,
+        "context_builder": None,
+    }
 
 
 class _NullPublisher:

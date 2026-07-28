@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     local_llm_base_url: str = "http://localhost:11434"
     local_llm_api_key: str = ""
     local_embedding_model: str = "qwen3-embedding:0.6b"
+    local_embedding_base_url: str = ""
+    embedding_dimensions: int = 768
+    context_token_budget: int = 2000
     local_reranker_model: str = "bge-reranker-v2-m3"
     local_review_model: str = "qwen2.5-coder:14b"
     cloud_review_model: str = "anthropic/claude-sonnet-5"

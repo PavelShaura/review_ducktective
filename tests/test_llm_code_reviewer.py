@@ -1,4 +1,7 @@
 import json
+from typing import (
+    Any,
+)
 from uuid import (
     uuid4,
 )
@@ -12,6 +15,9 @@ from ducktective.core.exceptions import (
     LlmOutputError,
 )
 from ducktective.core.llm.value_objects import (
+    LlmMessage,
+    LlmResponse,
+    LlmUsage,
     ModelRequirements,
 )
 from ducktective.core.review.drafts import (
@@ -30,6 +36,7 @@ from ducktective.core.types import (
     ReviewHunkId,
 )
 from ducktective.llm.code_reviewer import (
+    DEFAULT_ATTEMPTS,
     LlmCodeReviewer,
 )
 from tests.fakes import (
@@ -145,3 +152,71 @@ async def test_prompt_contains_file_metadata_and_patch() -> None:
     assert "app/service.py" in user_message
     assert "Language: python" in user_message
     assert "@@ -10,2 +10,3 @@" in user_message
+
+
+class FlakyLlmClient:
+    """Клиент, отвечающий прозой, пока его не переспросят."""
+
+    def __init__(self, *, failures: int) -> None:
+        self.failures = failures
+        self.calls: list[list[LlmMessage]] = []
+
+    async def complete(
+        self,
+        messages: list[LlmMessage],
+        *,
+        requirements: ModelRequirements,
+        json_schema: dict[str, Any] | None = None,
+    ) -> LlmResponse:
+        self.calls.append(messages)
+        content = (
+            "Конечно! Вот мой разбор кода."
+            if len(self.calls) <= self.failures
+            else '{"findings": []}'
+        )
+        return LlmResponse(
+            content=content,
+            model="fake-model",
+            provider="fake",
+            usage=LlmUsage(input_tokens=10, output_tokens=5),
+        )
+
+
+async def test_unparseable_answer_is_retried() -> None:
+    """Длинная подсказка сбивает модель на прозу — терять из-за этого файл незачем."""
+    client = FlakyLlmClient(failures=1)
+
+    result = await LlmCodeReviewer(client).review_file(
+        build_file(),
+        patch_text=build_file().to_unified_patch(),
+        requirements=ModelRequirements(),
+    )
+
+    assert result.drafts == []
+    assert len(client.calls) == 2
+
+
+async def test_retry_tells_the_model_what_went_wrong() -> None:
+    client = FlakyLlmClient(failures=1)
+
+    await LlmCodeReviewer(client).review_file(
+        build_file(),
+        patch_text=build_file().to_unified_patch(),
+        requirements=ModelRequirements(),
+    )
+
+    correction = client.calls[1][-1].content
+    assert "JSON" in correction
+
+
+async def test_attempts_are_not_endless() -> None:
+    client = FlakyLlmClient(failures=10)
+
+    with pytest.raises(LlmOutputError):
+        await LlmCodeReviewer(client).review_file(
+            build_file(),
+            patch_text=build_file().to_unified_patch(),
+            requirements=ModelRequirements(),
+        )
+
+    assert len(client.calls) == DEFAULT_ATTEMPTS

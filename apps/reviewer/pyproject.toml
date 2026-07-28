@@ -10,6 +10,7 @@ dependencies = [
     "ducktective-application",
     "ducktective-storage",
     "ducktective-llm",
+    "ducktective-retrieval",
     "ducktective-observability",
     "arq>=0.26",
     "redis>=5.2",
@@ -21,6 +22,7 @@ ducktective-config = { workspace = true }
 ducktective-application = { workspace = true }
 ducktective-storage = { workspace = true }
 ducktective-llm = { workspace = true }
+ducktective-retrieval = { workspace = true }
 ducktective-observability = { workspace = true }
 
 [build-system]

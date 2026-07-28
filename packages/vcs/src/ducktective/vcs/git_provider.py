@@ -9,11 +9,14 @@ from ducktective.core.exceptions import (
 )
 from ducktective.core.types import (
     CommitSha,
+    ContentHash,
 )
 
 
 GIT_EXECUTABLE = "git"
 RELATIVE_REVISION_MARKS = ("~", "^")
+TREE_FORMAT = "%(objectmode) %(objectname) %(path)"
+REGULAR_FILE_MODES = frozenset({"100644", "100755"})
 DIFF_ARGUMENTS = (
     "--no-color",
     "--no-ext-diff",
@@ -120,6 +123,30 @@ class LocalGitProvider:
             return await self._run(repository_path, "show", f"{revision}:{path}")
         except VcsOperationError:
             return None
+
+    async def list_tree(self, repository_path: Path, revision: str) -> dict[str, ContentHash]:
+        """Файлы ревизии с хешами их содержимого.
+
+        Хеш объекта git считается по содержимому, поэтому совпадение с прошлым
+        снапшотом означает, что файл не менялся, — и читать его незачем.
+        Подмодули и символические ссылки пропускаются: разбирать там нечего.
+        """
+        output = await self._run(
+            repository_path,
+            "ls-tree",
+            "-r",
+            "--full-tree",
+            f"--format={TREE_FORMAT}",
+            revision,
+        )
+
+        tree: dict[str, ContentHash] = {}
+        for line in output.splitlines():
+            mode, _, remainder = line.partition(" ")
+            object_hash, _, path = remainder.partition(" ")
+            if mode in REGULAR_FILE_MODES and path:
+                tree[path] = ContentHash(object_hash)
+        return tree
 
     async def _run(self, repository_path: Path, *arguments: str) -> str:
         if not repository_path.exists():

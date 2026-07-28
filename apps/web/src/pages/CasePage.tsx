@@ -6,8 +6,9 @@ import { api } from "@/api/client";
 import type { FeedbackVerdict, Finding, ReviewRun, Severity } from "@/api/types";
 import { FileDiff } from "@/components/FileDiff";
 import { FindingCard } from "@/components/FindingCard";
+import { ContextMark } from "@/components/ContextMark";
 import { SEVERITY_LABEL, SEVERITY_ORDER, SEVERITY_TEXT } from "@/components/SeverityMark";
-import { ReviewFailure, ReviewProgress } from "@/components/ReviewProgress";
+import { ReviewCancelled, ReviewFailure, ReviewProgress } from "@/components/ReviewProgress";
 import { isInProgress, StatusMark } from "@/components/StatusMark";
 import { VERDICT_LABEL, VERDICT_ORDER, VERDICT_TEXT } from "@/components/VerdictStamp";
 import { formatDateTime, shortSha } from "@/lib/format";
@@ -59,6 +60,7 @@ export default function CasePage() {
 
   const isRunning = isInProgress(run.data.status);
   const hasFailed = run.data.status === "failed";
+  const wasCancelled = run.data.status === "cancelled";
 
   return (
     <div className="space-y-8">
@@ -66,8 +68,9 @@ export default function CasePage() {
 
       {isRunning ? <ReviewProgress run={run.data} /> : null}
       {hasFailed ? <ReviewFailure run={run.data} /> : null}
+      {wasCancelled ? <ReviewCancelled run={run.data} /> : null}
 
-      {isRunning || hasFailed ? null : (
+      {isRunning || hasFailed || wasCancelled ? null : (
         <SeverityFilter
           findings={run.data.findings}
           active={severityFilter}
@@ -149,6 +152,9 @@ function CaseHeader({ run }: { run: ReviewRun }) {
           {shortSha(run.id)}
         </h1>
         <StatusMark status={run.status} />
+        <span className="ml-auto">
+          <ContextMark run={run} />
+        </span>
       </div>
 
       <dl className="mt-3 grid grid-cols-2 gap-x-8 gap-y-1.5 sm:grid-cols-4">

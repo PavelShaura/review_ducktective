@@ -5,6 +5,7 @@ import type {
   FeedbackVerdict,
   FileContext,
   FilePatch,
+  IndexState,
   Repository,
   ReviewRun,
   ReviewRunSummary,
@@ -66,6 +67,15 @@ export const api = {
       }),
     }),
 
+  deleteRepository: async (repositoryId: string): Promise<void> => {
+    const response = await fetch(`/api/repositories/${repositoryId}?tenant_id=${TENANT_ID}`, {
+      method: "DELETE",
+    });
+    if (!response.ok) {
+      throw new ApiError(response.status, response.statusText);
+    }
+  },
+
   listRuns: (repositoryId: string) =>
     request<ReviewRunSummary[]>(`/repositories/${repositoryId}/reviews?tenant_id=${TENANT_ID}`),
 
@@ -80,6 +90,14 @@ export const api = {
     }
   },
 
+  cancelRun: (runId: string) =>
+    request<{ cancelled: boolean }>(`/reviews/${runId}/cancel?tenant_id=${TENANT_ID}`, {
+      method: "POST",
+    }),
+
+  restartRun: (runId: string) =>
+    request<ReviewRun>(`/reviews/${runId}/restart?tenant_id=${TENANT_ID}`, { method: "POST" }),
+
   getFilePatch: (runId: string, fileId: string) =>
     request<FilePatch>(`/reviews/${runId}/files/${fileId}/patch?tenant_id=${TENANT_ID}`),
 
@@ -87,6 +105,21 @@ export const api = {
     request<FileContext>(
       `/reviews/${runId}/files/${fileId}/content?tenant_id=${TENANT_ID}` +
         `&side=${window.side}&start_line=${window.startLine}&end_line=${window.endLine}`,
+    ),
+
+  getIndexState: (repositoryId: string) =>
+    request<IndexState>(`/repositories/${repositoryId}/index?tenant_id=${TENANT_ID}`),
+
+  startIndexing: (repositoryId: string, revision = "HEAD") =>
+    request<{ queued: boolean; revision: string }>(`/repositories/${repositoryId}/index`, {
+      method: "POST",
+      body: JSON.stringify({ tenant_id: TENANT_ID, revision }),
+    }),
+
+  cancelIndexing: (repositoryId: string) =>
+    request<{ cancelled: boolean }>(
+      `/repositories/${repositoryId}/index/cancel?tenant_id=${TENANT_ID}`,
+      { method: "POST" },
     ),
 
   getFeedbackDigest: (repositoryId: string) =>

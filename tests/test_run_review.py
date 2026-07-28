@@ -1,6 +1,9 @@
 from pathlib import (
     Path,
 )
+from typing import (
+    Any,
+)
 from uuid import (
     uuid4,
 )
@@ -10,7 +13,15 @@ import pytest
 from ducktective.application.exceptions import (
     PermissionDeniedError,
 )
+from ducktective.application.review.cancel_run import (
+    CancelReviewRun,
+)
+from ducktective.application.review.restart_run import (
+    RestartReviewRun,
+    RunNotRestartableError,
+)
 from ducktective.application.review.run_review import (
+    ReviewCancelledError,
     ReviewOutcome,
     RunNotReviewableError,
     RunReview,
@@ -25,14 +36,24 @@ from ducktective.core.code_repository.value_objects import VcsProvider as VcsPro
 from ducktective.core.diff.value_objects import (
     DiffSide,
 )
+from ducktective.core.exceptions import (
+    VcsOperationError,
+)
+from ducktective.core.retrieval.context import (
+    ContextOrigin,
+    ContextPiece,
+    DiffContext,
+)
 from ducktective.core.review.drafts import (
     EvidenceDraft,
     FindingDraft,
 )
 from ducktective.core.review.entities import (
+    ReviewFile,
     ReviewRun,
 )
 from ducktective.core.review.value_objects import (
+    EvidenceKind,
     FindingCategory,
     FindingStatus,
     ReviewSource,
@@ -41,6 +62,8 @@ from ducktective.core.review.value_objects import (
 )
 from ducktective.core.types import (
     CommitSha,
+    QualifiedName,
+    RepositoryId,
     TenantId,
 )
 from ducktective.vcs.diff_parser import (
@@ -275,3 +298,244 @@ async def test_foreign_tenant_is_rejected() -> None:
 
     with pytest.raises(PermissionDeniedError):
         await run_with(unit_of_work, TenantId(uuid4()), run, FakeCodeReviewer())
+
+
+def context_with(text: str, path: str = "app/caller.py") -> DiffContext:
+    return DiffContext(
+        path="app/service.py",
+        pieces=(
+            ContextPiece(
+                origin=ContextOrigin.CALLER,
+                path=path,
+                qualified_name=QualifiedName("app.caller.handler"),
+                start_line=10,
+                end_line=20,
+                text=text,
+                token_count=10,
+            ),
+        ),
+        token_budget=1000,
+    )
+
+
+class FakeContextBuilder:
+    def __init__(self, context: DiffContext | None = None, *, failing: bool = False) -> None:
+        self.context = context
+        self.failing = failing
+        self.calls = 0
+
+    async def build(self, repository_id: RepositoryId, file: ReviewFile) -> DiffContext:
+        self.calls += 1
+        if self.failing:
+            raise VcsOperationError("индекс недоступен")
+        return self.context or DiffContext(path=file.path)
+
+
+async def test_context_reaches_the_reviewer() -> None:
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, run = prepare(unit_of_work)
+    reviewer = FakeCodeReviewer()
+    builder = FakeContextBuilder(context_with("def handler(): ..."))
+
+    await RunReview(unit_of_work, FakeEventPublisher(), reviewer, builder).execute(
+        tenant_id,
+        run.id,
+    )
+
+    assert builder.calls == len(reviewer.reviewed_paths)
+    assert all(context is not None for context in reviewer.seen_contexts)
+
+
+async def test_quote_from_context_confirms_a_finding() -> None:
+    """Ссылка на вызывающий код — самое ценное, что модель может сказать."""
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, run = prepare(unit_of_work)
+    caller_line = "result = service.compute(value)"
+    draft = build_draft(snippet=caller_line)
+    reviewer = FakeCodeReviewer({"app/service.py": [draft]})
+
+    outcome = await RunReview(
+        unit_of_work,
+        FakeEventPublisher(),
+        reviewer,
+        FakeContextBuilder(context_with(caller_line)),
+    ).execute(tenant_id, run.id)
+
+    assert outcome.discarded_without_evidence == 0
+    assert outcome.run.findings
+    assert outcome.run.findings[0].evidence[0].kind is EvidenceKind.RETRIEVED_CHUNK
+
+
+async def test_quote_from_nowhere_is_still_discarded() -> None:
+    """Контекст расширяет круг допустимых цитат, но не отменяет проверку."""
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, run = prepare(unit_of_work)
+    draft = build_draft(snippet="никогда не существовавшая строка")
+    reviewer = FakeCodeReviewer({"app/service.py": [draft]})
+
+    outcome = await RunReview(
+        unit_of_work,
+        FakeEventPublisher(),
+        reviewer,
+        FakeContextBuilder(context_with("совсем другой код")),
+    ).execute(tenant_id, run.id)
+
+    assert outcome.discarded_without_evidence == 1
+    assert outcome.run.findings == []
+
+
+async def test_broken_index_does_not_stop_the_run() -> None:
+    """Ревью без контекста хуже, но лучше, чем отсутствие ревью."""
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, run = prepare(unit_of_work)
+    reviewer = FakeCodeReviewer()
+
+    outcome = await RunReview(
+        unit_of_work,
+        FakeEventPublisher(),
+        reviewer,
+        FakeContextBuilder(failing=True),
+    ).execute(tenant_id, run.id)
+
+    assert outcome.run.status is ReviewStatus.COMPLETED
+    assert outcome.files_with_context == 0
+    assert reviewer.reviewed_paths
+
+
+async def test_run_without_builder_works_as_before() -> None:
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, run = prepare(unit_of_work)
+    reviewer = FakeCodeReviewer()
+
+    outcome = await RunReview(unit_of_work, FakeEventPublisher(), reviewer).execute(
+        tenant_id,
+        run.id,
+    )
+
+    assert outcome.files_with_context == 0
+    assert reviewer.seen_contexts == [None] * len(reviewer.reviewed_paths)
+
+
+async def test_context_usage_is_stored_on_the_run() -> None:
+    """По завершённому прогону должно быть видно, участвовал ли индекс."""
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, run = prepare(unit_of_work)
+    reviewer = FakeCodeReviewer()
+
+    outcome = await RunReview(
+        unit_of_work,
+        FakeEventPublisher(),
+        reviewer,
+        FakeContextBuilder(context_with("def handler(): ...")),
+    ).execute(tenant_id, run.id)
+
+    assert outcome.run.files_with_context == len(reviewer.reviewed_paths)
+
+
+async def test_empty_context_does_not_count_as_used() -> None:
+    """Собранный, но пустой контекст — это ревью без окружения."""
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, run = prepare(unit_of_work)
+
+    outcome = await RunReview(
+        unit_of_work,
+        FakeEventPublisher(),
+        FakeCodeReviewer(),
+        FakeContextBuilder(),
+    ).execute(tenant_id, run.id)
+
+    assert outcome.run.files_with_context == 0
+
+
+class CancellingReviewer(FakeCodeReviewer):
+    """Ревьюер, который отменяет прогон, дочитав первый файл."""
+
+    def __init__(self, run: ReviewRun, drafts: dict[str, list[FindingDraft]]) -> None:
+        super().__init__(drafts)
+        self._run = run
+
+    async def review_file(self, *args: Any, **kwargs: Any) -> Any:
+        result = await super().review_file(*args, **kwargs)
+        self._run.cancel()
+        return result
+
+
+async def test_cancelling_between_files_saves_nothing() -> None:
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, run = prepare(unit_of_work)
+    reviewer = CancellingReviewer(run, {SERVICE_FILE: [build_draft()]})
+
+    with pytest.raises(ReviewCancelledError):
+        await review_with(unit_of_work, tenant_id, run, reviewer)
+
+    assert run.findings == []
+    assert run.status is ReviewStatus.CANCELLED
+    assert reviewer.reviewed_paths == [SERVICE_FILE]
+
+
+async def test_queued_run_can_be_cancelled() -> None:
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, run = prepare(unit_of_work)
+
+    cancelled = await CancelReviewRun(unit_of_work, FakeEventPublisher()).execute(
+        tenant_id,
+        run.id,
+    )
+
+    assert cancelled is True
+    assert run.status is ReviewStatus.CANCELLED
+
+
+async def test_cancelling_finished_run_changes_nothing() -> None:
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, run = prepare(unit_of_work)
+    reviewer = FakeCodeReviewer({SERVICE_FILE: [build_draft()]})
+    await run_with(unit_of_work, tenant_id, run, reviewer)
+
+    cancelled = await CancelReviewRun(unit_of_work, FakeEventPublisher()).execute(
+        tenant_id,
+        run.id,
+    )
+
+    assert cancelled is False
+    assert run.status is ReviewStatus.COMPLETED
+
+
+async def test_cancelled_run_can_be_restarted() -> None:
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, run = prepare(unit_of_work)
+    reviewer = CancellingReviewer(run, {SERVICE_FILE: [build_draft()]})
+    with pytest.raises(ReviewCancelledError):
+        await review_with(unit_of_work, tenant_id, run, reviewer)
+
+    await RestartReviewRun(unit_of_work, FakeEventPublisher()).execute(tenant_id, run.id)
+
+    assert run.status is ReviewStatus.QUEUED
+    assert run.finished_at is None
+    assert run.files
+
+
+async def test_restarted_run_reviews_from_scratch() -> None:
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, run = prepare(unit_of_work)
+    cancelling = CancellingReviewer(run, {SERVICE_FILE: [build_draft()]})
+    with pytest.raises(ReviewCancelledError):
+        await review_with(unit_of_work, tenant_id, run, cancelling)
+    await RestartReviewRun(unit_of_work, FakeEventPublisher()).execute(tenant_id, run.id)
+
+    result = await run_with(
+        unit_of_work, tenant_id, run, FakeCodeReviewer({SERVICE_FILE: [build_draft()]})
+    )
+
+    assert result.status is ReviewStatus.COMPLETED
+    assert len(result.findings) == 1
+    assert result.tokens_input == 200
+
+
+async def test_completed_run_is_not_restartable() -> None:
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, run = prepare(unit_of_work)
+    await run_with(unit_of_work, tenant_id, run, FakeCodeReviewer({SERVICE_FILE: [build_draft()]}))
+
+    with pytest.raises(RunNotRestartableError):
+        await RestartReviewRun(unit_of_work, FakeEventPublisher()).execute(tenant_id, run.id)

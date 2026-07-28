@@ -27,12 +27,21 @@ export function App() {
 
 function Header() {
   return (
-    <header className="mx-auto mb-12 flex w-full max-w-7xl items-baseline justify-between px-5 pt-7">
-      <Link to="/" className="group flex items-baseline gap-3">
-        <span className="font-display text-2xl font-semibold tracking-tight text-paper">
-          review<span className="text-brass">_ducktective</span>
+    <header className="mx-auto mb-12 flex w-full max-w-7xl items-center justify-between px-5 pt-7">
+      <Link to="/" className="group flex items-center gap-3">
+        <img
+          src="/mascot.webp"
+          alt=""
+          width={40}
+          height={40}
+          className="shrink-0 rounded-full"
+        />
+        <span className="flex items-baseline gap-3">
+          <span className="font-display text-2xl font-semibold tracking-tight text-paper">
+            review<span className="text-brass">_ducktective</span>
+          </span>
+          <span className="case-label hidden sm:inline">дела о качестве кода</span>
         </span>
-        <span className="case-label hidden sm:inline">дела о качестве кода</span>
       </Link>
       <nav className="flex items-center gap-3">
         <Link

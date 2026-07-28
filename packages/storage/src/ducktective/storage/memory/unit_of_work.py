@@ -2,6 +2,7 @@ from types import (
     TracebackType,
 )
 from typing import (
+    Protocol,
     Self,
 )
 
@@ -10,8 +11,22 @@ from ducktective.core.events import (
 )
 from ducktective.storage.memory.repositories import (
     InMemoryCodeRepositoryRepository,
+    InMemoryEmbeddingStore,
+    InMemoryIndexSnapshotRepository,
     InMemoryReviewRunRepository,
+    InMemorySourceFileRepository,
+    InMemorySymbolEdgeRepository,
 )
+
+
+class InMemoryRepository(Protocol):
+    """Репозиторий в памяти: фиксирует и откатывает добавленное."""
+
+    def commit(self) -> None: ...
+
+    def rollback(self) -> None: ...
+
+    def collect_events(self) -> list[DomainEvent]: ...
 
 
 class InMemoryUnitOfWork:
@@ -29,6 +44,10 @@ class InMemoryUnitOfWork:
     def __init__(self) -> None:
         self.code_repositories = InMemoryCodeRepositoryRepository()
         self.review_runs = InMemoryReviewRunRepository()
+        self.index_snapshots = InMemoryIndexSnapshotRepository()
+        self.source_files = InMemorySourceFileRepository(self.index_snapshots)
+        self.symbol_edges = InMemorySymbolEdgeRepository(self.source_files)
+        self.embeddings = InMemoryEmbeddingStore(self.source_files)
         self._collected_events: list[DomainEvent] = []
         self._is_active = False
 
@@ -45,18 +64,16 @@ class InMemoryUnitOfWork:
         traceback: TracebackType | None,
     ) -> None:
         self._is_active = False
-        self.code_repositories.rollback()
-        self.review_runs.rollback()
+        self._rollback_all()
 
     async def commit(self) -> None:
         self._collect_from_repositories()
-        self.code_repositories.commit()
-        self.review_runs.commit()
+        for repository in self._repositories():
+            repository.commit()
 
     async def rollback(self) -> None:
         self._collected_events = []
-        self.code_repositories.rollback()
-        self.review_runs.rollback()
+        self._rollback_all()
 
     def collect_events(self) -> list[DomainEvent]:
         collected = self._collected_events
@@ -64,5 +81,19 @@ class InMemoryUnitOfWork:
         return collected
 
     def _collect_from_repositories(self) -> None:
-        self._collected_events.extend(self.code_repositories.collect_events())
-        self._collected_events.extend(self.review_runs.collect_events())
+        for repository in self._repositories():
+            self._collected_events.extend(repository.collect_events())
+
+    def _rollback_all(self) -> None:
+        for repository in self._repositories():
+            repository.rollback()
+
+    def _repositories(self) -> list[InMemoryRepository]:
+        return [
+            self.code_repositories,
+            self.review_runs,
+            self.index_snapshots,
+            self.source_files,
+            self.symbol_edges,
+            self.embeddings,
+        ]

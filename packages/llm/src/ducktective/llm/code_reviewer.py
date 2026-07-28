@@ -22,8 +22,13 @@ from ducktective.core.llm.ports import (
 )
 from ducktective.core.llm.value_objects import (
     LlmMessage,
+    LlmResponse,
     LlmRole,
     ModelRequirements,
+)
+from ducktective.core.retrieval.context import (
+    ContextOrigin,
+    DiffContext,
 )
 from ducktective.core.review.drafts import (
     EvidenceDraft,
@@ -45,6 +50,15 @@ from ducktective.llm.schemas import (
 )
 
 
+DEFAULT_ATTEMPTS = 2
+
+ORIGIN_TITLES = {
+    ContextOrigin.CHANGED_SYMBOL: "Full definitions of the changed symbols",
+    ContextOrigin.CALLEE: "Contracts of what the changed code calls",
+    ContextOrigin.CALLER: "Callers of the changed code — what may break",
+    ContextOrigin.SIMILAR: "Similar places elsewhere in the project",
+}
+
 PROMPTS_DIRECTORY = Path(__file__).parent / "prompts"
 SINGLE_PASS_PROMPT_FILE = "single_pass_review.md"
 JSON_BLOCK_PATTERN = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
@@ -64,8 +78,36 @@ class LlmCodeReviewer:
 
     name = "reviewer:single-pass"
 
-    def __init__(self, llm_client: LlmClient) -> None:
+    def __init__(self, llm_client: LlmClient, *, attempts: int = DEFAULT_ATTEMPTS) -> None:
         self._llm_client = llm_client
+        self._attempts = attempts
+
+    async def _ask(
+        self,
+        messages: list[LlmMessage],
+        requirements: ModelRequirements,
+    ) -> tuple[LlmResponse, ReviewPayload]:
+        """Спрашивает модель, пока та не ответит разбираемым JSON.
+
+        Модель иногда сбивается на прозу — тем чаще, чем длиннее подсказка.
+        Терять из-за этого ревью целого файла незачем: повтор с указанием
+        на ошибку обходится дешевле, чем пропущенная находка.
+        """
+        schema = ReviewPayload.model_json_schema()
+        last_error: LlmOutputError | None = None
+
+        for attempt in range(self._attempts):
+            response = await self._llm_client.complete(
+                messages if attempt == 0 else [*messages, _correction(last_error)],
+                requirements=requirements,
+                json_schema=schema,
+            )
+            try:
+                return response, _parse_payload(response.content)
+            except LlmOutputError as error:
+                last_error = error
+
+        raise last_error if last_error else LlmOutputError("Модель не вернула ответ")
 
     async def review_file(
         self,
@@ -73,17 +115,13 @@ class LlmCodeReviewer:
         *,
         patch_text: str,
         requirements: ModelRequirements,
+        context: DiffContext | None = None,
     ) -> FileReviewResult:
         messages = [
             LlmMessage(role=LlmRole.SYSTEM, content=load_prompt(SINGLE_PASS_PROMPT_FILE)),
-            LlmMessage(role=LlmRole.USER, content=_build_user_message(file, patch_text)),
+            LlmMessage(role=LlmRole.USER, content=_build_user_message(file, patch_text, context)),
         ]
-        response = await self._llm_client.complete(
-            messages,
-            requirements=requirements,
-            json_schema=ReviewPayload.model_json_schema(),
-        )
-        payload = _parse_payload(response.content)
+        response, payload = await self._ask(messages, requirements)
 
         return FileReviewResult(
             drafts=[_to_draft(finding, file.path) for finding in payload.findings],
@@ -93,14 +131,71 @@ class LlmCodeReviewer:
         )
 
 
-def _build_user_message(file: ReviewFile, patch_text: str) -> str:
-    language = file.language or "unknown"
-    return (
-        f"File: {file.path}\n"
-        f"Language: {language}\n"
-        f"Change type: {file.change_type.value}\n\n"
-        f"Unified diff:\n\n{patch_text}"
+def _correction(error: LlmOutputError | None) -> LlmMessage:
+    """Уточняющее сообщение после неразобранного ответа."""
+    return LlmMessage(
+        role=LlmRole.USER,
+        content=(
+            "Your previous answer could not be parsed"
+            f"{f': {error}' if error else ''}. "
+            "Reply with a single JSON object matching the schema and nothing else: "
+            "no prose, no markdown fences, no explanation."
+        ),
     )
+
+
+def _build_user_message(
+    file: ReviewFile,
+    patch_text: str,
+    context: DiffContext | None,
+) -> str:
+    parts = [
+        f"File: {file.path}",
+        f"Language: {file.language or 'unknown'}",
+        f"Change type: {file.change_type.value}",
+        "",
+        f"Unified diff:\n\n{patch_text}",
+    ]
+
+    if context is not None and not context.is_empty:
+        parts.extend(["", _render_context(context)])
+
+    return "\n".join(parts)
+
+
+def _render_context(context: DiffContext) -> str:
+    """Раскладывает контекст по назначению фрагментов.
+
+    Модель должна понимать не только что перед ней за код, но и почему он
+    показан: вызываемое читается как контракт, вызывающее — как список того,
+    что сломается, похожее — как принятый в проекте образец.
+    """
+    sections = [
+        "## Repository context",
+        "",
+        "Code below is NOT part of the diff. Use it to judge the change; never report",
+        "problems in it. Quoting it as evidence is allowed.",
+    ]
+
+    for origin in ContextOrigin:
+        pieces = context.of_origin(origin)
+        if not pieces:
+            continue
+
+        sections.extend(["", f"### {ORIGIN_TITLES[origin]}"])
+        for piece in pieces:
+            name = piece.qualified_name or piece.path
+            sections.extend(
+                [
+                    "",
+                    f"{name} ({piece.location})",
+                    "```",
+                    piece.text.strip(),
+                    "```",
+                ]
+            )
+
+    return "\n".join(sections)
 
 
 def _parse_payload(content: str) -> ReviewPayload:

@@ -207,3 +207,26 @@ async def test_duplicate_dedup_key_within_run_is_rejected_by_database(
 
         with pytest.raises(Exception, match="uq_finding_run_id_dedup_key"):
             await unit_of_work.commit()
+
+
+async def test_context_usage_survives_reload(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Число файлов с контекстом должно переживать перезагрузку прогона."""
+    tenant_id, repository_id = await prepare_repository(session_factory)
+    run = build_run(tenant_id, repository_id)
+
+    async with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:
+        unit_of_work.review_runs.add(run)
+        await unit_of_work.commit()
+
+    async with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:
+        stored = await unit_of_work.review_runs.get(run.id)
+        stored.mark_running()
+        stored.record_context_usage(2)
+        await unit_of_work.commit()
+
+    async with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:
+        reloaded = await unit_of_work.review_runs.get(run.id)
+
+    assert reloaded.files_with_context == 2

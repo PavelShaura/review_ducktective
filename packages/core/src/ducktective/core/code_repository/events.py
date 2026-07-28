@@ -26,3 +26,10 @@ class EgressPolicyChanged(DomainEvent):
     repository_id: RepositoryId
     previous_policy: EgressPolicy
     current_policy: EgressPolicy
+
+
+@dataclass(frozen=True, kw_only=True)
+class CodeRepositoryDeleted(DomainEvent):
+    repository_id: RepositoryId
+    tenant_id: TenantId
+    name: str

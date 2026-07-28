@@ -10,6 +10,7 @@ from ducktective.core.diff.entities import (
 )
 from ducktective.core.types import (
     CommitSha,
+    ContentHash,
 )
 
 
@@ -46,3 +47,11 @@ class VcsProvider(Protocol):
         revision: str,
         path: str,
     ) -> str | None: ...
+
+    async def list_tree(self, repository_path: Path, revision: str) -> dict[str, ContentHash]:
+        """Файлы ревизии и хеш содержимого каждого.
+
+        Хеш отдаёт сама система контроля версий, поэтому для сверки с прошлым
+        снапшотом читать файлы не нужно — на этом держится инкрементальность.
+        """
+        ...

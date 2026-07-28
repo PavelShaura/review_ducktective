@@ -17,6 +17,7 @@ from ducktective.api.dependencies import (
     VcsProviderDependency,
 )
 from ducktective.api.schemas.review import (
+    CancelRunResponse,
     FeedbackDigestResponse,
     FeedbackResponse,
     FileContextResponse,
@@ -28,6 +29,9 @@ from ducktective.api.schemas.review import (
 )
 from ducktective.application.exceptions import (
     PermissionDeniedError,
+)
+from ducktective.application.review.cancel_run import (
+    CancelReviewRun,
 )
 from ducktective.application.review.delete_run import (
     DeleteReviewRun,
@@ -49,11 +53,16 @@ from ducktective.application.review.read_runs import (
     GetReviewRun,
     ListReviewRuns,
 )
+from ducktective.application.review.restart_run import (
+    RestartReviewRun,
+    RunNotRestartableError,
+)
 from ducktective.application.review.submit_feedback import (
     SubmitFindingFeedback,
     SubmitFindingFeedbackCommand,
 )
 from ducktective.config.queues import (
+    REVIEW_QUEUE,
     REVIEW_TASK_NAME,
 )
 from ducktective.core.diff.value_objects import (
@@ -164,8 +173,76 @@ async def enqueue_review(
             f"Прогон в статусе {run.status} нельзя отправить на ревью",
         )
 
-    await task_queue.enqueue_job(REVIEW_TASK_NAME, str(run_id), str(tenant_id))
+    await task_queue.enqueue_job(
+        REVIEW_TASK_NAME,
+        str(run_id),
+        str(tenant_id),
+        _queue_name=REVIEW_QUEUE,
+    )
     return ReviewRunResponse.from_domain(run)
+
+
+@router.post(
+    "/reviews/{run_id}/restart",
+    response_model=ReviewRunResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def restart_review(
+    run_id: UUID,
+    tenant_id: UUID,
+    unit_of_work: UnitOfWorkDependency,
+    event_publisher: EventPublisherDependency,
+    task_queue: TaskQueueDependency,
+) -> ReviewRunResponse:
+    """Отправляет прекращённый или неудавшийся прогон на расследование заново.
+
+    Файлы диффа уже разобраны и остаются на месте — повторяется только чтение
+    моделью. Продолжения с места нет: находки пишутся все сразу в конце,
+    и половины прогона в базе не существует.
+    """
+    use_case = RestartReviewRun(unit_of_work, event_publisher)
+
+    try:
+        run = await use_case.execute(TenantId(tenant_id), ReviewRunId(run_id))
+    except EntityNotFoundError as error:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
+    except PermissionDeniedError as error:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(error)) from error
+    except RunNotRestartableError as error:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
+
+    await task_queue.enqueue_job(
+        REVIEW_TASK_NAME,
+        str(run_id),
+        str(tenant_id),
+        _queue_name=REVIEW_QUEUE,
+    )
+    return ReviewRunResponse.from_domain(run)
+
+
+@router.post("/reviews/{run_id}/cancel", response_model=CancelRunResponse)
+async def cancel_review(
+    run_id: UUID,
+    tenant_id: UUID,
+    unit_of_work: UnitOfWorkDependency,
+    event_publisher: EventPublisherDependency,
+) -> CancelRunResponse:
+    """Просит прекратить идущее расследование.
+
+    Ответ приходит сразу, а воркер выходит перед следующим файлом: файл,
+    который модель читает прямо сейчас, дочитывается, но результат прогона
+    не сохраняется.
+    """
+    use_case = CancelReviewRun(unit_of_work, event_publisher)
+
+    try:
+        cancelled = await use_case.execute(TenantId(tenant_id), ReviewRunId(run_id))
+    except EntityNotFoundError as error:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
+    except PermissionDeniedError as error:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(error)) from error
+
+    return CancelRunResponse(cancelled=cancelled)
 
 
 @router.delete("/reviews/{run_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -9,6 +9,9 @@ from ducktective.core.llm.value_objects import (
     LlmUsage,
     ModelRequirements,
 )
+from ducktective.core.retrieval.context import (
+    DiffContext,
+)
 from ducktective.core.review.drafts import (
     FindingDraft,
 )
@@ -58,4 +61,5 @@ class CodeReviewer(Protocol):
         *,
         patch_text: str,
         requirements: ModelRequirements,
+        context: DiffContext | None = None,
     ) -> FileReviewResult: ...

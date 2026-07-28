@@ -26,6 +26,9 @@ from ducktective.core.llm.value_objects import (
     LlmUsage,
     ModelRequirements,
 )
+from ducktective.core.retrieval.context import (
+    DiffContext,
+)
 from ducktective.core.review.drafts import (
     FindingDraft,
 )
@@ -38,15 +41,23 @@ from ducktective.core.review.ports import (
 )
 from ducktective.core.types import (
     CommitSha,
+    ContentHash,
     RepositoryId,
     ReviewRunId,
     TenantId,
+)
+from ducktective.storage.memory.repositories import (
+    InMemoryEmbeddingStore,
+    InMemoryIndexSnapshotRepository,
+    InMemorySourceFileRepository,
+    InMemorySymbolEdgeRepository,
 )
 
 
 class FakeCodeRepositoryRepository:
     def __init__(self) -> None:
         self.stored: dict[RepositoryId, CodeRepository] = {}
+        self.removed_events: list[DomainEvent] = []
 
     def add(self, repository: CodeRepository) -> None:
         self.stored[repository.id] = repository
@@ -67,6 +78,10 @@ class FakeCodeRepositoryRepository:
         return [
             repository for repository in self.stored.values() if repository.tenant_id == tenant_id
         ]
+
+    async def remove(self, repository: CodeRepository) -> None:
+        self.stored.pop(repository.id, None)
+        self.removed_events.extend(repository.pull_events())
 
 
 class FakeReviewRunRepository:
@@ -98,11 +113,20 @@ class FakeReviewRunRepository:
 
 
 class FakeUnitOfWork:
-    """Unit of Work на словарях: позволяет тестировать use cases без БД."""
+    """Unit of Work на словарях: позволяет тестировать use cases без БД.
+
+    Репозитории индекса берутся готовыми из `storage.memory`: они уже
+    реализуют тот же порт на словарях, и второй такой же набор в тестах
+    расходился бы с первым.
+    """
 
     def __init__(self) -> None:
         self.code_repositories = FakeCodeRepositoryRepository()
         self.review_runs = FakeReviewRunRepository()
+        self.index_snapshots = InMemoryIndexSnapshotRepository()
+        self.source_files = InMemorySourceFileRepository(self.index_snapshots)
+        self.symbol_edges = InMemorySymbolEdgeRepository(self.source_files)
+        self.embeddings = InMemoryEmbeddingStore(self.source_files)
         self.commit_calls = 0
         self.rollback_calls = 0
         self.is_active = False
@@ -121,17 +145,22 @@ class FakeUnitOfWork:
 
     async def commit(self) -> None:
         self.commit_calls += 1
+        self.index_snapshots.commit()
+        self.source_files.commit()
 
     async def rollback(self) -> None:
         self.rollback_calls += 1
 
     def collect_events(self) -> list[DomainEvent]:
-        collected = self.review_runs.removed_events
+        collected = self.review_runs.removed_events + self.code_repositories.removed_events
         self.review_runs.removed_events = []
+        self.code_repositories.removed_events = []
         for repository in self.code_repositories.stored.values():
             collected.extend(repository.pull_events())
         for run in self.review_runs.stored.values():
             collected.extend(run.pull_events())
+        collected.extend(self.index_snapshots.collect_events())
+        collected.extend(self.source_files.collect_events())
         return collected
 
 
@@ -181,6 +210,7 @@ class FakeCodeReviewer:
         self.drafts_by_path = drafts_by_path or {}
         self.failing_paths = failing_paths or set()
         self.reviewed_paths: list[str] = []
+        self.seen_contexts: list[DiffContext | None] = []
 
     async def review_file(
         self,
@@ -188,11 +218,13 @@ class FakeCodeReviewer:
         *,
         patch_text: str,
         requirements: ModelRequirements,
+        context: DiffContext | None = None,
     ) -> FileReviewResult:
         if file.path in self.failing_paths:
             raise LlmInvocationError(f"Модель недоступна для {file.path}")
 
         self.reviewed_paths.append(file.path)
+        self.seen_contexts.append(context)
         return FileReviewResult(
             drafts=self.drafts_by_path.get(file.path, []),
             usage=LlmUsage(input_tokens=100, output_tokens=25),
@@ -210,11 +242,13 @@ class FakeVcsProvider:
         known_revisions: set[str] | None = None,
         file_contents: dict[str, str] | None = None,
         staged_patch_text: str | None = None,
+        tree: dict[str, ContentHash] | None = None,
     ) -> None:
         self.patch_text = patch_text
         self.staged_patch_text = staged_patch_text
         self.known_revisions = known_revisions
         self.file_contents = file_contents or {}
+        self.tree = tree or {}
         self.requested_paths: list[Path] = []
 
     async def resolve_revision(self, repository_path: Path, revision: str) -> CommitSha:
@@ -245,3 +279,6 @@ class FakeVcsProvider:
         path: str,
     ) -> str | None:
         return self.file_contents.get(path)
+
+    async def list_tree(self, repository_path: Path, revision: str) -> dict[str, ContentHash]:
+        return dict(self.tree)

@@ -23,6 +23,12 @@ from ducktective.core.ports import (
     EventPublisher,
     UnitOfWork,
 )
+from ducktective.core.retrieval.context import (
+    DiffContext,
+)
+from ducktective.core.retrieval.ports import (
+    ContextBuilder,
+)
 from ducktective.core.review.dedup import (
     build_dedup_key,
 )
@@ -46,12 +52,35 @@ from ducktective.core.review.value_objects import (
 )
 from ducktective.core.types import (
     FindingId,
+    RepositoryId,
     ReviewRunId,
     TenantId,
 )
 
 
 WHITESPACE = " \t\r\n"
+
+
+@dataclass(frozen=True, kw_only=True)
+class _EvidenceSource:
+    """Текст, в котором ищется цитата, вместе с его происхождением."""
+
+    normalized_text: str
+    kind: EvidenceKind
+    file_path: str
+    line_start: int
+    line_end: int
+
+
+class ReviewCancelledError(ApplicationError):
+    """Расследование попросили прекратить.
+
+    Ничего не сохраняется: находки пишутся одной транзакцией в конце,
+    и половина прогона результатом не является.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("Расследование прекращено")
 
 
 class RunNotReviewableError(ApplicationError):
@@ -75,6 +104,7 @@ class ReviewOutcome:
     discarded_without_evidence: int = 0
     discarded_as_duplicate: int = 0
     failed_files: tuple[str, ...] = ()
+    files_with_context: int = 0
 
     @property
     def discarded(self) -> int:
@@ -98,9 +128,42 @@ class RunReview(TransactionalUseCase):
         unit_of_work: UnitOfWork,
         event_publisher: EventPublisher,
         reviewer: CodeReviewer,
+        context_builder: ContextBuilder | None = None,
     ) -> None:
         super().__init__(unit_of_work, event_publisher)
         self._reviewer = reviewer
+        self._context_builder = context_builder
+
+    async def _build_context(
+        self,
+        repository_id: RepositoryId,
+        file: ReviewFile,
+    ) -> DiffContext | None:
+        """Собирает окружение изменений, если индекс доступен.
+
+        Отсутствие или поломка индекса не отменяют ревью: оно продолжается
+        по одному диффу, а число файлов с контекстом попадает в итог прогона,
+        чтобы разницу в качестве не приходилось угадывать.
+        """
+        if self._context_builder is None:
+            return None
+
+        try:
+            return await self._context_builder.build(repository_id, file)
+        except DomainError:
+            return None
+
+    async def _ensure_not_cancelled(self, run_id: ReviewRunId) -> None:
+        """Сверяется с просьбой прекратить перед очередным файлом.
+
+        Между файлами — единственная дешёвая отсечка: чтение одного файла
+        занимает десятки секунд, а прерывать запрос к модели на середине
+        нечем и незачем.
+        """
+        async with self._unit_of_work:
+            run = await self._unit_of_work.review_runs.get(run_id)
+            if run.is_cancelled:
+                raise ReviewCancelledError
 
     async def execute(self, tenant_id: TenantId, run_id: ReviewRunId) -> ReviewOutcome:
         async with self._unit_of_work:
@@ -116,26 +179,33 @@ class RunReview(TransactionalUseCase):
                 cloud_allowed=repository.cloud_processing_allowed,
             )
             files = run.reviewable_files()
+            repository_id = run.repository_id
             run.mark_running()
             await self._commit_and_publish()
 
-        drafts_by_file: list[tuple[ReviewFile, list[FindingDraft]]] = []
+        drafts_by_file: list[tuple[ReviewFile, list[FindingDraft], DiffContext | None]] = []
         total_usage = LlmUsage()
         failures: list[str] = []
+        contextual_files = 0
 
         for file in files:
+            await self._ensure_not_cancelled(run_id)
+            context = await self._build_context(repository_id, file)
             try:
                 result = await self._reviewer.review_file(
                     file,
                     patch_text=file.to_unified_patch(),
                     requirements=requirements,
+                    context=context,
                 )
             except DomainError as error:
                 failures.append(f"{file.path}: {error}")
                 continue
 
-            drafts_by_file.append((file, result.drafts))
+            drafts_by_file.append((file, result.drafts, context))
             total_usage = _accumulate(total_usage, result.usage)
+            if context is not None and not context.is_empty:
+                contextual_files += 1
 
         proposed = 0
         outside_diff = 0
@@ -145,15 +215,16 @@ class RunReview(TransactionalUseCase):
         async with self._unit_of_work:
             run = await self._unit_of_work.review_runs.get(run_id)
             run.record_usage(total_usage)
+            run.record_context_usage(contextual_files)
 
-            for file, drafts in drafts_by_file:
+            for file, drafts, context in drafts_by_file:
                 for draft in drafts:
                     proposed += 1
                     if not file.covers_line(draft.line_start):
                         outside_diff += 1
                         continue
 
-                    finding = _build_finding(draft, file)
+                    finding = _build_finding(draft, file, context)
                     if finding is None:
                         without_evidence += 1
                         continue
@@ -175,6 +246,7 @@ class RunReview(TransactionalUseCase):
                 discarded_without_evidence=without_evidence,
                 discarded_as_duplicate=duplicates,
                 failed_files=tuple(failures),
+                files_with_context=contextual_files,
             )
 
 
@@ -186,15 +258,18 @@ def _accumulate(total: LlmUsage, addition: LlmUsage) -> LlmUsage:
     )
 
 
-def _build_finding(draft: FindingDraft, file: ReviewFile) -> Finding | None:
+def _build_finding(
+    draft: FindingDraft,
+    file: ReviewFile,
+    context: DiffContext | None = None,
+) -> Finding | None:
     """Превращает черновик в находку, отбраковывая недостоверные.
 
     Находка без подтверждённой цитаты не создаётся: это типичный признак
     выдуманного контекста. Принадлежность строки диффу проверяется раньше,
     на уровне вызывающего кода, чтобы различать причины отбраковки.
     """
-    patch_text = file.to_unified_patch()
-    evidence = _collect_evidence(draft, patch_text)
+    evidence = _collect_evidence(draft, file.to_unified_patch(), context)
     if not evidence:
         return None
 
@@ -224,10 +299,23 @@ def _build_finding(draft: FindingDraft, file: ReviewFile) -> Finding | None:
     )
 
 
-def _collect_evidence(draft: FindingDraft, patch_text: str) -> list[Evidence]:
+def _collect_evidence(
+    draft: FindingDraft,
+    patch_text: str,
+    context: DiffContext | None,
+) -> list[Evidence]:
+    """Оставляет только те цитаты, которые действительно существуют.
+
+    Искать их приходится и в патче, и в показанном окружении: получив контекст,
+    модель ссылается на вызывающий код, и такая ссылка — самое ценное, что она
+    может сказать. Проверка от этого не слабеет, потому что окружение — это
+    ровно то, что мы ей показали, а не то, что она придумала.
+    """
     candidates = [item.snippet for item in draft.evidence]
     if draft.code_fragment:
         candidates.append(draft.code_fragment)
+
+    sources = _evidence_sources(draft, patch_text, context)
 
     confirmed: list[Evidence] = []
     seen: set[str] = set()
@@ -235,20 +323,54 @@ def _collect_evidence(draft: FindingDraft, patch_text: str) -> list[Evidence]:
         normalized = _normalize(snippet)
         if not normalized or normalized in seen:
             continue
-        if normalized not in _normalize(patch_text):
+
+        source = next((item for item in sources if normalized in item.normalized_text), None)
+        if source is None:
             continue
 
         seen.add(normalized)
         confirmed.append(
             Evidence(
-                kind=EvidenceKind.QUOTED_CODE,
-                file_path=draft.file_path,
+                kind=source.kind,
+                file_path=source.file_path,
                 snippet=snippet.strip(),
-                line_start=draft.line_start,
-                line_end=draft.line_end,
+                line_start=source.line_start,
+                line_end=source.line_end,
             )
         )
     return confirmed
+
+
+def _evidence_sources(
+    draft: FindingDraft,
+    patch_text: str,
+    context: DiffContext | None,
+) -> list[_EvidenceSource]:
+    """Тексты, в которых цитата считается подтверждённой.
+
+    Патч идёт первым: если строка встречается и в нём, и в окружении, находка
+    относится к изменению, а не к соседнему коду.
+    """
+    sources = [
+        _EvidenceSource(
+            normalized_text=_normalize(patch_text),
+            kind=EvidenceKind.QUOTED_CODE,
+            file_path=draft.file_path,
+            line_start=draft.line_start,
+            line_end=draft.line_end,
+        )
+    ]
+    sources.extend(
+        _EvidenceSource(
+            normalized_text=_normalize(piece.text),
+            kind=EvidenceKind.RETRIEVED_CHUNK,
+            file_path=piece.path,
+            line_start=piece.start_line,
+            line_end=piece.end_line,
+        )
+        for piece in (context.pieces if context else ())
+    )
+    return sources
 
 
 def _normalize(text: str) -> str:

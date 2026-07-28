@@ -19,6 +19,7 @@ from ducktective.core.aggregate import (
     AggregateRoot,
 )
 from ducktective.core.code_repository.events import (
+    CodeRepositoryDeleted,
     CodeRepositoryRegistered,
     EgressPolicyChanged,
 )
@@ -107,5 +108,19 @@ class CodeRepository(AggregateRoot):
                 repository_id=self.id,
                 previous_policy=previous_policy,
                 current_policy=policy,
+            )
+        )
+
+    def record_deletion(self) -> None:
+        """Отмечает удаление репозитория.
+
+        Событие порождается до самого удаления: после него агрегата уже нет,
+        а подписчикам знать о случившемся нужно.
+        """
+        self.record_event(
+            CodeRepositoryDeleted(
+                repository_id=self.id,
+                tenant_id=self.tenant_id,
+                name=self.name,
             )
         )

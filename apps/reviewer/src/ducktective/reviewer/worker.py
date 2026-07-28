@@ -21,9 +21,11 @@ from ducktective.application.exceptions import (
     ApplicationError,
 )
 from ducktective.application.review.run_review import (
+    ReviewCancelledError,
     RunReview,
 )
 from ducktective.config.queues import (
+    REVIEW_QUEUE,
     REVIEW_TASK_NAME,
 )
 from ducktective.config.settings import (
@@ -36,12 +38,18 @@ from ducktective.core.types import (
     ReviewRunId,
     TenantId,
 )
+from ducktective.llm.embedder import (
+    LiteLlmEmbedder,
+)
 from ducktective.llm.factory import (
     build_code_reviewer,
 )
 from ducktective.observability.logging import (
     configure_logging,
     get_logger,
+)
+from ducktective.retrieval.session_scope import (
+    SessionScopedContextBuilder,
 )
 from ducktective.storage.database import (
     build_engine,
@@ -73,6 +81,16 @@ async def startup(ctx: dict[str, Any]) -> None:
     ctx["engine"] = engine
     ctx["session_factory"] = build_session_factory(engine)
     ctx["redis"] = redis_client
+    ctx["context_builder"] = SessionScopedContextBuilder(
+        ctx["session_factory"],
+        LiteLlmEmbedder(
+            model=settings.local_embedding_model,
+            dimensions=settings.embedding_dimensions,
+            base_url=settings.local_embedding_base_url or None,
+            api_key=settings.local_llm_api_key,
+        ),
+        token_budget=settings.context_token_budget,
+    )
     ctx["code_reviewer"] = build_code_reviewer(
         redis_client=redis_client,
         local_provider=settings.local_llm_provider,
@@ -86,7 +104,11 @@ async def startup(ctx: dict[str, Any]) -> None:
         timeout_seconds=settings.llm_timeout_seconds,
     )
 
-    logger.info("reviewer.started", profile=settings.deployment_profile)
+    logger.info(
+        "reviewer.started",
+        profile=settings.deployment_profile,
+        context_budget=settings.context_token_budget,
+    )
 
 
 async def shutdown(ctx: dict[str, Any]) -> None:
@@ -99,19 +121,29 @@ async def run_review_task(ctx: dict[str, Any], run_id: str, tenant_id: str) -> d
 
     Ошибки домена и приложения не пробрасываются наружу: прогон уже переведён
     в неуспешный статус внутри use case, а повторная попытка arq ничего
-    не изменит и только займёт воркер.
+    не изменит и только займёт воркер. Всё остальное — ошибка не предусмотренная,
+    и прогон переводится в неуспешный здесь: иначе он навсегда останется
+    «идущим», а интерфейс будет вечно показывать растущее время.
     """
     use_case = RunReview(
         SqlAlchemyUnitOfWork(ctx["session_factory"]),
         RedisEventPublisher(ctx["redis"]),
         ctx["code_reviewer"],
+        ctx["context_builder"],
     )
 
     logger.info("review.started", run_id=run_id)
     try:
         outcome = await use_case.execute(TenantId(UUID(tenant_id)), ReviewRunId(UUID(run_id)))
+    except ReviewCancelledError:
+        logger.info("review.cancelled", run_id=run_id)
+        return {"run_id": run_id, "status": "cancelled"}
     except (DomainError, ApplicationError) as error:
         logger.warning("review.failed", run_id=run_id, error=str(error))
+        return {"run_id": run_id, "status": "failed", "error": str(error)}
+    except Exception as error:
+        logger.exception("review.crashed", run_id=run_id, error=str(error))
+        await _mark_failed(ctx, run_id, error)
         return {"run_id": run_id, "status": "failed", "error": str(error)}
 
     run = outcome.run
@@ -138,6 +170,24 @@ async def run_review_task(ctx: dict[str, Any], run_id: str, tenant_id: str) -> d
     }
 
 
+async def _mark_failed(ctx: dict[str, Any], run_id: str, error: Exception) -> None:
+    """Переводит прогон в неуспешный после непредвиденной ошибки.
+
+    Отдельной транзакцией и с подавлением собственных ошибок: упасть могла
+    как раз работа с базой, и вторая попытка не должна маскировать первую
+    причину в журнале.
+    """
+    try:
+        unit_of_work = SqlAlchemyUnitOfWork(ctx["session_factory"])
+        async with unit_of_work:
+            run = await unit_of_work.review_runs.get(ReviewRunId(UUID(run_id)))
+            if not run.is_finished:
+                run.mark_failed(str(error))
+                await unit_of_work.commit()
+    except Exception:
+        logger.warning("review.status_not_saved", run_id=run_id)
+
+
 class WorkerSettings:
     """Точка входа arq: `arq ducktective.reviewer.worker.WorkerSettings`.
 
@@ -146,6 +196,7 @@ class WorkerSettings:
     """
 
     functions: ClassVar[list[Any]] = [func(run_review_task, name=REVIEW_TASK_NAME)]
+    queue_name = REVIEW_QUEUE
     on_startup = startup
     on_shutdown = shutdown
     redis_settings = RedisSettings.from_dsn(os.environ.get("REDIS_URL", "redis://localhost:6379/0"))

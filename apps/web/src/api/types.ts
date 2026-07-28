@@ -84,6 +84,7 @@ export interface ReviewRun {
   head_sha: string;
   totals: Record<string, number>;
   failure_reason: string | null;
+  files_with_context: number;
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
@@ -156,4 +157,30 @@ export interface FeedbackDigest {
   marked_count: number;
   total_findings: number;
   useful_share: number | null;
+}
+
+export type SnapshotStatus = "pending" | "running" | "ready" | "failed" | "cancelled";
+
+export type SnapshotStage = "parsing" | "storing" | "linking" | "embedding";
+
+export interface IndexStats {
+  files_total: number;
+  files_parsed: number;
+  files_reused: number;
+  symbols: number;
+  chunks: number;
+  edges: number;
+  edges_resolved: number;
+}
+
+export interface IndexState {
+  snapshot_id: string | null;
+  status: SnapshotStatus | null;
+  stage: SnapshotStage | null;
+  stage_title: string | null;
+  commit_sha: string | null;
+  finished_at: string | null;
+  failure_reason: string | null;
+  is_ready: boolean;
+  stats: IndexStats | null;
 }
