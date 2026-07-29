@@ -122,6 +122,12 @@ export const api = {
       { method: "POST" },
     ),
 
+  deleteIndex: (repositoryId: string) =>
+    request<{ removed_snapshots: number }>(
+      `/repositories/${repositoryId}/index?tenant_id=${TENANT_ID}`,
+      { method: "DELETE" },
+    ),
+
   getFeedbackDigest: (repositoryId: string) =>
     request<FeedbackDigest>(`/repositories/${repositoryId}/feedback?tenant_id=${TENANT_ID}`),
 

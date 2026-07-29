@@ -4,6 +4,9 @@ from ducktective.application.exceptions import (
 from ducktective.application.indexing.views import (
     IndexStateView,
 )
+from ducktective.core.indexing.value_objects import (
+    SnapshotStatus,
+)
 from ducktective.core.ports import (
     UnitOfWork,
 )
@@ -37,12 +40,22 @@ class GetIndexState:
             if snapshot is None:
                 return IndexStateView()
 
+            context_ready = snapshot.status is SnapshotStatus.READY or (
+                await self._unit_of_work.index_snapshots.find_latest_ready(repository_id)
+                is not None
+            )
+            vectors = await self._unit_of_work.embeddings.count_coverage(repository_id)
+
             return IndexStateView(
                 snapshot_id=snapshot.id,
                 status=snapshot.status,
                 stage=snapshot.stage,
                 commit_sha=snapshot.commit_sha,
                 stats=snapshot.stats,
+                started_at=snapshot.started_at,
                 finished_at=snapshot.finished_at,
                 failure_reason=snapshot.failure_reason,
+                embedding_stopped=snapshot.embedding_stopped,
+                context_ready=context_ready,
+                vectors=vectors,
             )

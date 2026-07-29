@@ -79,6 +79,24 @@ class Embedder(Protocol):
     async def embed(self, texts: list[str]) -> list[list[float]]: ...
 
 
+@dataclass(frozen=True, kw_only=True)
+class VectorCoverage:
+    """Сколько фрагментов репозитория уже имеет вектор.
+
+    Векторы считаются отдельным шагом после символов и графа: недоступность
+    модели не должна оставлять репозиторий без индекса вовсе. Из этого следует
+    состояние, которое надо уметь показать — символы готовы, поиск по смыслу
+    ещё нет.
+    """
+
+    chunks: int = 0
+    embedded: int = 0
+
+    @property
+    def is_complete(self) -> bool:
+        return self.embedded >= self.chunks
+
+
 class EmbeddingStore(Protocol):
     """Хранилище векторов.
 
@@ -87,6 +105,14 @@ class EmbeddingStore(Protocol):
     """
 
     async def register_model(self, name: str, dimensions: int) -> EmbeddingModelId: ...
+
+    async def count_coverage(self, repository_id: RepositoryId) -> VectorCoverage:
+        """Считает, у скольких фрагментов уже есть вектор.
+
+        Считается по любой модели: вопрос интерфейса — работает ли поиск
+        по смыслу, а не какой моделью посчитано.
+        """
+        ...
 
     async def missing_chunks(
         self,
@@ -135,6 +161,18 @@ class IndexSnapshotRepository(Protocol):
         """
         ...
 
+    async def remove_for_repository(self, repository_id: RepositoryId) -> int:
+        """Стирает индекс репозитория целиком, оставляя сам репозиторий.
+
+        Инкрементальность опирается на хеши уже разобранных файлов, поэтому
+        сменившиеся правила разбора или чанкинга новым прогоном не применятся:
+        неизменившийся файл не перечитывается. Стереть и собрать заново —
+        единственный способ применить их ко всей базе.
+
+        Возвращает число удалённых снапшотов.
+        """
+        ...
+
 
 class SourceFileRepository(Protocol):
     """Доступ к агрегату SourceFile."""
@@ -177,6 +215,15 @@ class SymbolEdgeRepository(Protocol):
         symbol_ids: list[CodeSymbolId],
         edges: list[SymbolEdge],
     ) -> None: ...
+
+    async def refresh_statistics(self) -> None:
+        """Просит хранилище пересчитать статистику по таблицам графа.
+
+        Нужна перед замыканием рёбер: план этого запроса зависит от того,
+        сколько строк хранилище считает существующими, а после массовой
+        записи оно об этом ещё не знает.
+        """
+        ...
 
     async def resolve_pending(self, repository_id: RepositoryId) -> int:
         """Привязывает висящие рёбра к символам с подходящим именем.

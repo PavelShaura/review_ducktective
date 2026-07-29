@@ -1,8 +1,12 @@
 from ducktective.application.exceptions import (
     PermissionDeniedError,
 )
+from ducktective.application.indexing.read_state import (
+    GetIndexState,
+)
 from ducktective.application.retrieval.views import (
     CodeMatchView,
+    RepositoryOverview,
     SymbolNeighbourhoodView,
     SymbolView,
 )
@@ -19,6 +23,31 @@ from ducktective.core.types import (
     RepositoryId,
     TenantId,
 )
+
+
+class SurveyRepositories:
+    """Перечисляет репозитории тенанта вместе с состоянием их индексов.
+
+    Точка входа для того, кто ещё ничего не знает: без неё имя репозитория
+    приходится угадывать, а угадав — выяснять, отвечает ли он вообще.
+    """
+
+    def __init__(self, unit_of_work: UnitOfWork) -> None:
+        self._unit_of_work = unit_of_work
+        self._read_state = GetIndexState(unit_of_work)
+
+    async def execute(self, tenant_id: TenantId) -> list[RepositoryOverview]:
+        async with self._unit_of_work:
+            repositories = await self._unit_of_work.code_repositories.list_for_tenant(tenant_id)
+
+        return [
+            RepositoryOverview(
+                repository_id=repository.id,
+                name=repository.name,
+                index=await self._read_state.execute(tenant_id, repository.id),
+            )
+            for repository in repositories
+        ]
 
 
 class SearchCode:

@@ -33,6 +33,10 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
 )
 
+from ducktective.api.dev import (
+    plan,
+    supervise,
+)
 from ducktective.api.rendering import (
     render_index_outcome,
     render_markdown,
@@ -169,6 +173,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(prog="ducktective")
     subcommands = parser.add_subparsers(dest="command", required=True)
 
+    dev_parser = subcommands.add_parser(
+        "dev",
+        help="Поднять всё разом: API, воркеры и фронт",
+    )
+    dev_parser.add_argument("--no-web", action="store_true", help="Без фронта")
+    dev_parser.add_argument("--no-workers", action="store_true", help="Без воркеров")
+    dev_parser.add_argument("--reload", action="store_true", help="Перезапускать API по правкам")
+
     serve_parser = subcommands.add_parser("serve", help="Запустить API")
     serve_parser.add_argument("--host", default="127.0.0.1")
     serve_parser.add_argument("--port", type=int, default=8000)
@@ -256,6 +268,9 @@ def main() -> None:
     if arguments.command == "index":
         raise SystemExit(asyncio.run(_index(arguments)))
 
+    if arguments.command == "dev":
+        raise SystemExit(asyncio.run(_dev(arguments)))
+
     if arguments.command == "serve":
         uvicorn.run(
             "ducktective.api.main:app",
@@ -267,6 +282,20 @@ def main() -> None:
 
     if arguments.command == "review":
         raise SystemExit(asyncio.run(_review(arguments)))
+
+
+async def _dev(arguments: argparse.Namespace) -> int:
+    """Поднимает всё разом, оставаясь тем же набором процессов.
+
+    Воркеры не втягиваются в процесс API: разделение по профилю нагрузки
+    закреплено решением D-013, и удобство запуска не повод его пересматривать.
+    """
+    services = plan(
+        with_web=not arguments.no_web,
+        with_workers=not arguments.no_workers,
+        reload=arguments.reload,
+    )
+    return await supervise(services, console=console)
 
 
 async def _review(arguments: argparse.Namespace) -> int:
@@ -635,3 +664,7 @@ def _to_payload(run: ReviewRun) -> dict[str, object]:
             for finding in run.findings
         ],
     }
+
+
+if __name__ == "__main__":
+    main()

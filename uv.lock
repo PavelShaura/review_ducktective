@@ -934,6 +934,7 @@ dependencies = [
     { name = "asyncpg" },
     { name = "ducktective-core" },
     { name = "pgvector" },
+    { name = "python-dotenv" },
     { name = "redis" },
     { name = "sqlalchemy", extra = ["asyncio"] },
 ]
@@ -944,6 +945,7 @@ requires-dist = [
     { name = "asyncpg", specifier = ">=0.30" },
     { name = "ducktective-core", editable = "packages/core" },
     { name = "pgvector", specifier = ">=0.3.6" },
+    { name = "python-dotenv", specifier = ">=1.0" },
     { name = "redis", specifier = ">=5.2" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.36" },
 ]

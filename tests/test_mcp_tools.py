@@ -30,6 +30,9 @@ from ducktective.core.types import (
     CommitSha,
     TenantId,
 )
+from ducktective.mcp_server.rendering import (
+    MAX_ANSWER_CHARS,
+)
 from ducktective.mcp_server.runtime import (
     McpRuntime,
 )
@@ -100,7 +103,13 @@ async def test_every_documented_tool_is_published() -> None:
 
     published = {tool.name for tool in await server.list_tools()}
 
-    assert published == {"search_code", "get_definition", "find_callers", "get_file_context"}
+    assert published == {
+        "list_repositories",
+        "search_code",
+        "get_definition",
+        "find_callers",
+        "get_file_context",
+    }
 
 
 async def test_search_finds_by_repository_name() -> None:
@@ -134,7 +143,8 @@ async def test_empty_answer_names_the_missing_index() -> None:
 
     answer = await call(server, "search_code", repository="ducktective", query="отчёт")
 
-    assert "Индекс репозитория не собран" in answer
+    assert "ничего не нашлось" in answer
+    assert "индекс не собран" in answer
 
 
 async def test_empty_answer_over_ready_index_says_nothing_found() -> None:
@@ -146,7 +156,47 @@ async def test_empty_answer_over_ready_index_says_nothing_found() -> None:
     answer = await call(server, "search_code", repository="ducktective", query="отчёт")
 
     assert "ничего не нашлось" in answer
-    assert "Индекс" not in answer
+    assert "не собран" not in answer
+
+
+async def test_answer_is_signed_with_the_indexed_revision() -> None:
+    """Без ревизии нельзя судить, насколько ответ свеж."""
+    unit_of_work = FakeUnitOfWork()
+    repository = registered(unit_of_work)
+    await indexed(unit_of_work, repository)
+    server = build_server(runtime_over(unit_of_work, search=FakeChunkSearch([chunk()])))
+
+    answer = await call(server, "search_code", repository="ducktective", query="отчёт")
+
+    assert f"— ducktective: индекс на ревизии {'a' * 8}, собран " in answer
+
+
+async def test_oversized_fragment_is_clipped() -> None:
+    """Один чанк на весь файл не имеет права занять всё окно вызывающей модели."""
+    unit_of_work = FakeUnitOfWork()
+    repository = registered(unit_of_work)
+    await indexed(unit_of_work, repository)
+    giant = FakeChunkSearch([chunk(content="строка кода\n" * 40000)])
+    server = build_server(runtime_over(unit_of_work, search=giant))
+
+    answer = await call(server, "search_code", repository="ducktective", query="отчёт")
+
+    assert "обрезано, ещё" in answer
+    assert len(answer) < MAX_ANSWER_CHARS + 500
+
+
+async def test_repositories_are_listed_with_their_index_state() -> None:
+    """Без списка имя репозитория приходится угадывать."""
+    unit_of_work = FakeUnitOfWork()
+    indexed_repository = registered(unit_of_work)
+    await indexed(unit_of_work, indexed_repository)
+    registered(unit_of_work, "sandbox")
+    server = build_server(runtime_over(unit_of_work))
+
+    answer = await call(server, "list_repositories")
+
+    assert "ducktective — индекс на ревизии" in answer
+    assert "sandbox — индекс не собран" in answer
 
 
 async def test_definition_returns_body() -> None:

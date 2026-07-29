@@ -29,9 +29,9 @@ from ducktective.core.types import (
 def build_repository(**overrides: object) -> CodeRepository:
     parameters: dict[str, object] = {
         "tenant_id": TenantId(uuid4()),
-        "name": "edussuz",
+        "name": "sandbox",
         "vcs_provider": VcsProvider.LOCAL,
-        "local_path": Path("/repos/edussuz"),
+        "local_path": Path("/repos/sandbox"),
     }
     parameters.update(overrides)
     return CodeRepository.register(**parameters)  # type: ignore[arg-type]
@@ -47,9 +47,9 @@ def test_registration_records_event() -> None:
 
 
 def test_registration_trims_name() -> None:
-    repository = build_repository(name="  edussuz  ")
+    repository = build_repository(name="  sandbox  ")
 
-    assert repository.name == "edussuz"
+    assert repository.name == "sandbox"
 
 
 def test_blank_name_is_rejected() -> None:

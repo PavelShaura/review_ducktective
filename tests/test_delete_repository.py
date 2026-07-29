@@ -37,9 +37,9 @@ def prepare(unit_of_work: FakeUnitOfWork) -> tuple[TenantId, CodeRepository]:
     tenant_id = TenantId(uuid4())
     repository = CodeRepository.register(
         tenant_id=tenant_id,
-        name="edussuz",
+        name="sandbox",
         vcs_provider=VcsProviderKind.LOCAL,
-        local_path=Path("/repos/edussuz"),
+        local_path=Path("/repos/sandbox"),
     )
     repository.pull_events()
     unit_of_work.code_repositories.add(repository)

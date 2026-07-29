@@ -15,6 +15,7 @@ from ducktective.application.retrieval.read_index import (
     GetFileContext,
     GetSymbolDefinition,
     SearchCode,
+    SurveyRepositories,
 )
 from ducktective.core.code_repository.entities import (
     CodeRepository,
@@ -227,3 +228,21 @@ async def test_file_context_without_symbols_does_not_walk_the_graph() -> None:
 
     assert view.is_empty
     assert view.callees == ()
+
+
+async def test_survey_lists_repositories_with_index_state() -> None:
+    unit_of_work = FakeUnitOfWork()
+    repository = registered(unit_of_work)
+
+    overviews = await SurveyRepositories(unit_of_work).execute(TENANT_ID)
+
+    assert [overview.name for overview in overviews] == ["ducktective"]
+    assert overviews[0].repository_id == repository.id
+    assert not overviews[0].index.is_ready
+
+
+async def test_survey_does_not_show_foreign_repositories() -> None:
+    unit_of_work = FakeUnitOfWork()
+    registered(unit_of_work, tenant_id=OTHER_TENANT_ID)
+
+    assert await SurveyRepositories(unit_of_work).execute(TENANT_ID) == []

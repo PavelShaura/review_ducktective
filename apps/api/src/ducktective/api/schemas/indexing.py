@@ -23,14 +23,24 @@ class IndexStatsResponse(BaseModel):
     files_total: int = 0
     files_parsed: int = 0
     files_reused: int = 0
+    files_stored: int = 0
     symbols: int = 0
     chunks: int = 0
     edges: int = 0
     edges_resolved: int = 0
 
 
+class VectorCoverageResponse(BaseModel):
+    chunks: int = 0
+    embedded: int = 0
+
+
 class CancelIndexingResponse(BaseModel):
     cancelled: bool
+
+
+class DeleteIndexResponse(BaseModel):
+    removed_snapshots: int
 
 
 class IndexStateResponse(BaseModel):
@@ -46,9 +56,13 @@ class IndexStateResponse(BaseModel):
     stage: SnapshotStage | None = None
     stage_title: str | None = None
     commit_sha: str | None = None
+    started_at: datetime | None = None
     finished_at: datetime | None = None
     failure_reason: str | None = None
     is_ready: bool = False
+    embedding_stopped: bool = False
+    context_ready: bool = False
+    vectors: VectorCoverageResponse = VectorCoverageResponse()
     stats: IndexStatsResponse | None = None
 
     @classmethod
@@ -59,14 +73,22 @@ class IndexStateResponse(BaseModel):
             stage=view.stage,
             stage_title=STAGE_TITLES.get(view.stage) if view.stage else None,
             commit_sha=view.commit_sha,
+            started_at=view.started_at,
             finished_at=view.finished_at,
             failure_reason=view.failure_reason,
             is_ready=view.is_ready,
+            embedding_stopped=view.embedding_stopped,
+            context_ready=view.context_ready,
+            vectors=VectorCoverageResponse(
+                chunks=view.vectors.chunks,
+                embedded=view.vectors.embedded,
+            ),
             stats=(
                 IndexStatsResponse(
                     files_total=view.stats.files_total,
                     files_parsed=view.stats.files_parsed,
                     files_reused=view.stats.files_reused,
+                    files_stored=view.stats.files_stored,
                     symbols=view.stats.symbols,
                     chunks=view.stats.chunks,
                     edges=view.stats.edges,

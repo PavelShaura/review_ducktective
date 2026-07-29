@@ -100,3 +100,39 @@ def test_identical_fragments_share_a_hash() -> None:
     second = chunks_of("def render(report):\n    return report\n", path="b/two.py")
 
     assert first[0].content_hash == second[0].content_hash
+
+
+def test_file_of_constants_without_definitions_is_cut_into_chunks() -> None:
+    """Реестры прав и таблицы констант — файлы без единого определения.
+
+    Без разбиения такой файл давал один чанк на весь себя: бесполезный
+    для поиска и разрушительный для выдачи.
+    """
+    source = "\n".join(f"PERMISSION_{number} = 'право номер {number}'" for number in range(2000))
+
+    chunks = chunks_of(source)
+
+    assert len(chunks) > 1
+    assert all(chunk.token_count <= MAX_CHUNK_TOKENS * 2 for chunk in chunks)
+
+
+def test_single_oversized_constant_is_cut_by_lines() -> None:
+    entries = "\n".join(f"    'право_{number}': True," for number in range(2000))
+    source = f"PERMISSIONS = {{\n{entries}\n}}\n"
+
+    chunks = chunks_of(source)
+
+    assert len(chunks) > 1
+    assert all(chunk.token_count <= MAX_CHUNK_TOKENS * 2 for chunk in chunks)
+
+
+def test_module_chunks_report_the_lines_they_came_from() -> None:
+    """Границы групп идут по узлам, поэтому номера строк не съезжают."""
+    source = "\n".join(f"VALUE_{number} = {number}" for number in range(2000))
+    lines = source.splitlines()
+
+    chunks = chunks_of(source)
+
+    for chunk in chunks:
+        assert 1 <= chunk.start_line <= chunk.end_line <= len(lines)
+        assert chunk.content.splitlines()[0].strip() == lines[chunk.start_line - 1].strip()

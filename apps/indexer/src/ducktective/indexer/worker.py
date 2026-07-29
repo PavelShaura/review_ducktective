@@ -102,6 +102,7 @@ async def build_index_task(
     repository_id: str,
     tenant_id: str,
     revision: str = "HEAD",
+    snapshot_id: str | None = None,
 ) -> dict[str, Any]:
     """Фоновая индексация репозитория.
 
@@ -115,6 +116,7 @@ async def build_index_task(
         tenant_id=TenantId(UUID(tenant_id)),
         repository_id=RepositoryId(UUID(repository_id)),
         revision=revision,
+        snapshot_id=IndexSnapshotId(UUID(snapshot_id)) if snapshot_id else None,
     )
 
     logger.info("index.started", repository_id=repository_id, revision=revision)
@@ -136,7 +138,12 @@ async def build_index_task(
         return {"repository_id": repository_id, "status": "failed", "error": str(error)}
 
     await _mark_embedding_stage(unit_of_work, outcome.snapshot.id)
-    embeddings = await _embed(settings, unit_of_work, command.repository_id)
+    embeddings = await _embed(
+        settings,
+        unit_of_work,
+        command.repository_id,
+        outcome.snapshot.id,
+    )
 
     stats = outcome.stats
     logger.info(
@@ -180,6 +187,7 @@ async def _embed(
     settings: Settings,
     unit_of_work: SqlAlchemyUnitOfWork,
     repository_id: RepositoryId,
+    snapshot_id: IndexSnapshotId,
 ) -> int:
     embedder = LiteLlmEmbedder(
         model=settings.local_embedding_model,
@@ -189,7 +197,10 @@ async def _embed(
     )
 
     try:
-        outcome = await BuildEmbeddings(unit_of_work, embedder).execute(repository_id)
+        outcome = await BuildEmbeddings(unit_of_work, embedder).execute(
+            repository_id,
+            snapshot_id=snapshot_id,
+        )
     except LlmInvocationError as error:
         logger.warning("index.embeddings_skipped", error=str(error))
         return 0

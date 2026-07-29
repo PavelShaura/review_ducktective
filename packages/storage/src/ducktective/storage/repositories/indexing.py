@@ -2,6 +2,7 @@ from sqlalchemy import (
     delete,
     func,
     select,
+    text,
     update,
 )
 from sqlalchemy.ext.asyncio import (
@@ -30,6 +31,8 @@ from ducktective.core.types import (
 )
 from ducktective.storage.mappers import indexing as mapper
 from ducktective.storage.models.indexing import (
+    ChunkEmbeddingModel,
+    CodeChunkModel,
     CodeSymbolModel,
     IndexSnapshotModel,
     SourceFileModel,
@@ -93,6 +96,45 @@ class SqlAlchemyIndexSnapshotRepository:
         )
         model = (await self._session.execute(statement)).scalars().first()
         return None if model is None else self._track(model)
+
+    async def remove_for_repository(self, repository_id: RepositoryId) -> int:
+        """Удаляет снапшоты репозитория, а с ними и весь индекс.
+
+        Порядок задан явно, хотя схема убрала бы всё каскадом сама: каскад
+        в Postgres — это триггер на каждую строку, и снапшоты крупного
+        репозитория разворачиваются в четверть миллиона удалений по одному.
+        Замерено:
+        76 секунд каскадом против доли секунды перечислением, при том что
+        индексы на внешних ключах уже стояли.
+
+        Дубль знания о порядке — цена, заплаченная сознательно: схема
+        остаётся источником правды о связях, а здесь их обход выражен
+        множествами, потому что по одной строке это слишком медленно
+        для действия, за которым ждут у экрана.
+
+        Отслеживаемые агрегаты забываются: после удаления их нельзя писать
+        обратно, а `flush_changes` попыталась бы.
+        """
+        belongs = IndexSnapshotModel.repository_id == repository_id
+        counted = await self._session.execute(
+            select(func.count()).select_from(IndexSnapshotModel).where(belongs)
+        )
+        removed = int(counted.scalar_one())
+
+        chunks_of_repository = select(CodeChunkModel.id).where(
+            CodeChunkModel.repository_id == repository_id
+        )
+        await self._session.execute(
+            delete(ChunkEmbeddingModel).where(
+                ChunkEmbeddingModel.chunk_id.in_(chunks_of_repository)
+            )
+        )
+        for model in (CodeChunkModel, SymbolEdgeModel, CodeSymbolModel, SourceFileModel):
+            await self._session.execute(delete(model).where(model.repository_id == repository_id))
+
+        await self._session.execute(delete(IndexSnapshotModel).where(belongs))
+        self._identity_map.clear()
+        return removed
 
     def flush_changes(self) -> None:
         for snapshot, model in self._identity_map.values():
@@ -243,6 +285,17 @@ class SqlAlchemySymbolEdgeRepository:
         self._session.add_all([mapper.edge_to_model(edge) for edge in edges])
         await self._session.flush()
 
+    async def refresh_statistics(self) -> None:
+        """Пересчитывает статистику таблиц, по которым планируется замыкание.
+
+        `ANALYZE` видит только закоммиченные строки, поэтому вызывать его
+        имеет смысл после записи рёбер и до их замыкания. Автоматический
+        сбор статистики здесь не помогает: он запускается по своему
+        расписанию и к моменту запроса не успевает.
+        """
+        for table in ("symbol_edge", "code_symbol"):
+            await self._session.execute(text(f"ANALYZE {table}"))
+
     async def resolve_pending(self, repository_id: RepositoryId) -> int:
         """Замыкает висящие рёбра.
 
@@ -294,34 +347,41 @@ class SqlAlchemySymbolEdgeRepository:
         return len(result.all())
 
     async def _resolve_by_suffix(self, repository_id: RepositoryId) -> int:
+        """Замыкает рёбра по последнему сегменту имени.
+
+        Идентификатор берётся тем же агрегатом, что и проверка однозначности:
+        при `count(*) = 1` в группе ровно один символ, и второе соединение
+        с таблицей символов ради его выборки не нужно.
+
+        Дело не в лишнем запросе, а в плане. С двумя соединениями Postgres
+        оценивал `having count(*) = 1` в 85 строк вместо десятков тысяч,
+        выбирал вложенный цикл и сравнивал имена строками: на сотне тысяч
+        рёбер такой `UPDATE` шёл больше часа. Без второго соединения ошибка
+        перестаёт быть решающей, и план становится слиянием отсортированных
+        входов.
+        """
         singletons = (
-            select(CodeSymbolModel.name.label("name"))
+            select(
+                CodeSymbolModel.name.label("name"),
+                func.array_agg(CodeSymbolModel.id)[1].label("id"),
+            )
             .where(
                 CodeSymbolModel.repository_id == repository_id,
                 CodeSymbolModel.kind != SymbolKind.MODULE,
             )
             .group_by(CodeSymbolModel.name)
             .having(func.count() == 1)
-            .subquery()
-        )
-        unique_names = (
-            select(CodeSymbolModel.id, CodeSymbolModel.name)
-            .join(singletons, CodeSymbolModel.name == singletons.c.name)
-            .where(
-                CodeSymbolModel.repository_id == repository_id,
-                CodeSymbolModel.kind != SymbolKind.MODULE,
-            )
-            .subquery()
+            .cte("singletons")
         )
         result = await self._session.execute(
             update(SymbolEdgeModel)
             .where(
                 SymbolEdgeModel.repository_id == repository_id,
                 SymbolEdgeModel.is_resolved.is_(False),
-                SymbolEdgeModel.target_name == unique_names.c.name,
+                SymbolEdgeModel.target_name == singletons.c.name,
             )
             .values(
-                target_symbol_id=unique_names.c.id,
+                target_symbol_id=singletons.c.id,
                 is_resolved=True,
                 confidence=SUFFIX_MATCH_CONFIDENCE,
             )

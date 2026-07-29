@@ -83,14 +83,14 @@ async def test_search_by_name_sees_committed_aggregates() -> None:
     tenant_id = TenantId(uuid4())
 
     async with unit_of_work:
-        unit_of_work.code_repositories.add(build_repository(tenant_id, name="edussuz"))
+        unit_of_work.code_repositories.add(build_repository(tenant_id, name="sandbox"))
         await unit_of_work.commit()
 
     async with unit_of_work:
-        found = await unit_of_work.code_repositories.find_by_name(tenant_id, "edussuz")
+        found = await unit_of_work.code_repositories.find_by_name(tenant_id, "sandbox")
 
     assert found is not None
-    assert found.name == "edussuz"
+    assert found.name == "sandbox"
 
 
 async def test_nested_unit_of_work_is_rejected() -> None:

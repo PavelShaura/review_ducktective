@@ -11,9 +11,9 @@ from ducktective.core.types import (
 
 
 PATHS = (
-    "src/ssuz/report/builder.py",
-    "src/ssuz/report/tests/test_builder.py",
-    "src/ssuz/admin/views.py",
+    "src/sandbox/report/builder.py",
+    "src/sandbox/report/tests/test_builder.py",
+    "src/sandbox/admin/views.py",
     "docs/changelog.md",
 )
 
@@ -37,9 +37,9 @@ def test_without_patterns_diff_is_unchanged() -> None:
 
 
 def test_directory_pattern_matches_at_any_depth() -> None:
-    assert paths_after("src/ssuz/report/*") == [
-        "src/ssuz/report/builder.py",
-        "src/ssuz/report/tests/test_builder.py",
+    assert paths_after("src/sandbox/report/*") == [
+        "src/sandbox/report/builder.py",
+        "src/sandbox/report/tests/test_builder.py",
     ]
 
 
@@ -49,13 +49,13 @@ def test_extension_pattern() -> None:
 
 def test_several_patterns_are_combined() -> None:
     assert paths_after("*/admin/*", "*.md") == [
-        "src/ssuz/admin/views.py",
+        "src/sandbox/admin/views.py",
         "docs/changelog.md",
     ]
 
 
 def test_exact_path_matches_single_file() -> None:
-    assert paths_after("src/ssuz/admin/views.py") == ["src/ssuz/admin/views.py"]
+    assert paths_after("src/sandbox/admin/views.py") == ["src/sandbox/admin/views.py"]
 
 
 def test_pattern_without_matches_gives_empty_diff() -> None:

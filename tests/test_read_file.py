@@ -49,7 +49,7 @@ from tests.fakes import (
 )
 
 
-REPOSITORY_PATH = Path("/repos/edussuz")
+REPOSITORY_PATH = Path("/repos/sandbox")
 SOURCE_FILE = "app/service.py"
 
 
@@ -60,7 +60,7 @@ def prepare(
     tenant_id = TenantId(uuid4())
     repository = CodeRepository.register(
         tenant_id=tenant_id,
-        name="edussuz",
+        name="sandbox",
         vcs_provider=VcsProviderKind.LOCAL,
         local_path=REPOSITORY_PATH,
     )

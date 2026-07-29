@@ -14,7 +14,7 @@ from ducktective.mcp_server.__main__ import (
 ENV_CONTENTS = """
 DATABASE_URL=postgresql+asyncpg://user:secret@elsewhere:5432/ducktective
 MCP_TENANT_ID=11111111-1111-1111-1111-111111111111
-LOCAL_EMBEDDING_BASE_URL=http://192.168.0.104:1234/v1
+LOCAL_EMBEDDING_BASE_URL=http://models.local:1234/v1
 """
 
 
@@ -41,7 +41,7 @@ def test_settings_are_read_from_the_named_file(env_file: Path) -> None:
 
     assert settings.require_database_url().endswith("@elsewhere:5432/ducktective")
     assert settings.mcp_tenant_id == "11111111-1111-1111-1111-111111111111"
-    assert settings.local_embedding_base_url == "http://192.168.0.104:1234/v1"
+    assert settings.local_embedding_base_url == "http://models.local:1234/v1"
 
 
 def test_named_file_wins_over_the_environment(env_file: Path) -> None:

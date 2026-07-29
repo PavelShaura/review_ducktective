@@ -92,9 +92,9 @@ def prepare(
     tenant_id = TenantId(uuid4())
     repository = CodeRepository.register(
         tenant_id=tenant_id,
-        name="edussuz",
+        name="sandbox",
         vcs_provider=VcsProviderKind.LOCAL,
-        local_path=Path("/repos/edussuz"),
+        local_path=Path("/repos/sandbox"),
         egress_policy=egress_policy,
     )
     unit_of_work.code_repositories.add(repository)

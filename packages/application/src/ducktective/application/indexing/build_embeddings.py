@@ -9,6 +9,7 @@ from ducktective.core.ports import (
     UnitOfWork,
 )
 from ducktective.core.types import (
+    IndexSnapshotId,
     RepositoryId,
 )
 
@@ -21,6 +22,7 @@ class EmbeddingOutcome:
     model: str
     computed: int = 0
     reused: int = 0
+    stopped: bool = False
 
     @property
     def total(self) -> int:
@@ -50,7 +52,18 @@ class BuildEmbeddings:
         self._embedder = embedder
         self._batch_size = batch_size
 
-    async def execute(self, repository_id: RepositoryId) -> EmbeddingOutcome:
+    async def execute(
+        self,
+        repository_id: RepositoryId,
+        *,
+        snapshot_id: IndexSnapshotId | None = None,
+    ) -> EmbeddingOutcome:
+        """Считает недостающие векторы, сверяясь с просьбой прекратить.
+
+        Снапшот назван, когда досчёт продолжает сборку и его можно остановить
+        из интерфейса. У автономного счёта своего снапшота нет — прерывать
+        там нечего и некому.
+        """
         async with self._unit_of_work:
             model_id = await self._unit_of_work.embeddings.register_model(
                 self._embedder.name,
@@ -63,6 +76,14 @@ class BuildEmbeddings:
         computed = 0
         for start in range(0, len(pending), self._batch_size):
             batch = pending[start : start + self._batch_size]
+            if await self._is_stopped(snapshot_id):
+                return EmbeddingOutcome(
+                    model=self._embedder.name,
+                    computed=computed,
+                    reused=reused,
+                    stopped=True,
+                )
+
             vectors = await self._embedder.embed([content for _, _, content in batch])
 
             async with self._unit_of_work:
@@ -78,3 +99,17 @@ class BuildEmbeddings:
             computed += len(batch)
 
         return EmbeddingOutcome(model=self._embedder.name, computed=computed, reused=reused)
+
+    async def _is_stopped(self, snapshot_id: IndexSnapshotId | None) -> bool:
+        """Сверяется с просьбой прекратить перед обращением к модели.
+
+        Проверка стоит до вызова модели, а не после: пачка векторов — самая
+        долгая часть шага, и начинать её, зная об отмене, значит заставить
+        человека ждать ещё столько же.
+        """
+        if snapshot_id is None:
+            return False
+
+        async with self._unit_of_work:
+            snapshot = await self._unit_of_work.index_snapshots.get(snapshot_id)
+            return snapshot.embedding_stopped

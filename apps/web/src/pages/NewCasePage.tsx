@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router";
 
 import { api, ApiError } from "@/api/client";
+import type { IndexState as IndexStateData } from "@/api/types";
 import type { NewRepositoryDraft } from "@/components/RepositoryPicker";
 import { IndexState } from "@/components/IndexState";
 import { RepositoryPicker } from "@/components/RepositoryPicker";
@@ -25,6 +26,14 @@ export default function NewCasePage() {
   const isDraftMode = isAdding || known.length === 0;
   const isReady = isDraftMode ? draft.localPath.trim().length > 0 : selectedId.length > 0;
   const indexedId = isDraftMode ? addedId : selectedId;
+
+  /* Тот же ключ, что у панели индекса: значение берётся из кэша,
+     второго запроса за состоянием не уходит. */
+  const index = useQuery({
+    queryKey: ["index", indexedId],
+    queryFn: () => api.getIndexState(indexedId),
+    enabled: false,
+  });
 
   /* Репозиторий заводится отдельно от прогона: без него нечего индексировать,
      а собрать индекс разумно до первого ревью, а не после. */
@@ -102,6 +111,8 @@ export default function NewCasePage() {
         >
           {start.isPending ? "отправляю в работу…" : "начать расследование"}
         </button>
+
+        <ContextWarning state={index.data} />
 
         {start.isError ? (
           <p className="border-l-2 border-critical bg-critical/5 px-3 py-2 text-[14px] text-paper">
@@ -191,4 +202,40 @@ function describeError(error: unknown): string {
     return "Между указанными ревизиями нет изменений.";
   }
   return error.message;
+}
+
+
+interface ContextWarningProps {
+  state: IndexStateData | undefined;
+}
+
+/**
+ * Чем обернётся запуск ревью прямо сейчас.
+ *
+ * Идущая сборка расследованию не мешает и его не задерживает: окружение
+ * берётся из последнего завершённого снапшота, а не из собираемого. Но если
+ * завершённого нет, ревью пойдёт по одному диффу и найдёт заметно меньше —
+ * об этом человек должен узнать до нажатия, а не из результата.
+ */
+function ContextWarning({ state }: ContextWarningProps) {
+  const building = state?.status === "pending" || state?.status === "running";
+  if (!building) {
+    return null;
+  }
+
+  if (state?.context_ready) {
+    return (
+      <p className="border-l-2 border-tweed-dim px-3 py-2 text-[13px] text-paper-dim">
+        Индекс пересобирается — расследованию это не мешает. Окружение возьмётся
+        из прошлой сборки, новое подхватят следующие дела.
+      </p>
+    );
+  }
+
+  return (
+    <p className="border-l-2 border-brass bg-brass/5 px-3 py-2 text-[13px] text-paper">
+      Индекс ещё собирается, и готового окружения пока нет: расследование пройдёт
+      по одному диффу и найдёт заметно меньше. Дождитесь конца сборки, если важна полнота.
+    </p>
+  );
 }

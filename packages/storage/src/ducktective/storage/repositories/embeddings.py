@@ -3,6 +3,7 @@ from uuid import (
 )
 
 from sqlalchemy import (
+    func,
     insert,
     literal,
     select,
@@ -12,6 +13,9 @@ from sqlalchemy.ext.asyncio import (
     AsyncSession,
 )
 
+from ducktective.core.indexing.ports import (
+    VectorCoverage,
+)
 from ducktective.core.types import (
     CodeChunkId,
     ContentHash,
@@ -31,6 +35,24 @@ class SqlAlchemyEmbeddingStore:
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    async def count_coverage(self, repository_id: RepositoryId) -> VectorCoverage:
+        """Считает фрагменты и те из них, у которых уже есть вектор.
+
+        Два счётчика одним запросом: расхождение между ними — это ровно то,
+        что осталось досчитать, и делать из этого два обращения к базе
+        на каждый опрос интерфейса незачем.
+        """
+        embedded = select(ChunkEmbeddingModel.chunk_id).where(
+            ChunkEmbeddingModel.chunk_id == CodeChunkModel.id
+        )
+        statement = select(
+            func.count(),
+            func.count().filter(embedded.exists()),
+        ).where(CodeChunkModel.repository_id == repository_id)
+
+        chunks, with_vector = (await self._session.execute(statement)).one()
+        return VectorCoverage(chunks=int(chunks), embedded=int(with_vector))
 
     async def register_model(self, name: str, dimensions: int) -> EmbeddingModelId:
         existing = (
@@ -85,7 +107,18 @@ class SqlAlchemyEmbeddingStore:
 
         Отбирается один вектор на хеш: содержимое совпадает, значит и вектор
         для них один и тот же, а какой из дублей послужил источником — неважно.
+
+        Сначала проверяется, есть ли вообще что переносить. После стирания
+        индекса у репозитория не остаётся ни одного вектора, и перенос
+        заведомо пуст — а сам запрос при этом оказался опасным: с
+        подставленными значениями он исполнялся за восемь миллисекунд,
+        а тем же выражением с параметрами вставал на минуты. Причину
+        разницы установить не удалось, поэтому на пути пересборки его
+        просто нет.
         """
+        if not await self._has_vectors(repository_id, model_id):
+            return 0
+
         source = (
             select(
                 CodeChunkModel.content_hash.label("content_hash"),
@@ -123,6 +156,22 @@ class SqlAlchemyEmbeddingStore:
             .returning(ChunkEmbeddingModel.chunk_id)
         )
         return len(result.all())
+
+    async def _has_vectors(
+        self,
+        repository_id: RepositoryId,
+        model_id: EmbeddingModelId,
+    ) -> bool:
+        existing = (
+            select(ChunkEmbeddingModel.chunk_id)
+            .join(CodeChunkModel, CodeChunkModel.id == ChunkEmbeddingModel.chunk_id)
+            .where(
+                CodeChunkModel.repository_id == repository_id,
+                ChunkEmbeddingModel.embedding_model_id == model_id,
+            )
+            .exists()
+        )
+        return bool((await self._session.execute(select(existing))).scalar())
 
     async def store(
         self,

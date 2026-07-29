@@ -2,6 +2,9 @@ from collections.abc import (
     Awaitable,
     Callable,
 )
+from dataclasses import (
+    dataclass,
+)
 
 from mcp.server.mcpserver import (
     MCPServer,
@@ -17,33 +20,53 @@ from ducktective.application.exceptions import (
 from ducktective.application.indexing.read_state import (
     GetIndexState,
 )
+from ducktective.application.indexing.views import (
+    IndexStateView,
+)
 from ducktective.application.retrieval.read_index import (
     FindSymbolCallers,
     GetFileContext,
     GetSymbolDefinition,
     SearchCode,
+    SurveyRepositories,
 )
 from ducktective.core.types import (
     RepositoryId,
 )
 from ducktective.mcp_server.rendering import (
+    MAX_ANSWER_CHARS,
+    clipped,
+    describe_index,
     render_contracts,
     render_definitions,
     render_matches,
     render_neighbourhood,
+    render_repositories,
 )
 from ducktective.mcp_server.runtime import (
     McpRuntime,
 )
 
 
-_Action = Callable[[RepositoryId], Awaitable[str]]
-
 INSTRUCTIONS = """Навигация по кодовой базе, проиндексированной Ducktective.
 
 Символы, граф вызовов и фрагменты кода читаются из индекса, а не с диска,
-поэтому ответы отражают состояние последней индексации репозитория.
-Репозиторий называется именем или идентификатором."""
+поэтому ответы описывают зафиксированную ревизию: незакоммиченных правок
+в них нет. Ревизия названа в конце каждого ответа.
+
+Репозиторий называется именем или идентификатором; список даёт
+list_repositories. История коммитов, авторы и рабочая копия сюда не входят."""
+
+
+@dataclass(frozen=True, kw_only=True)
+class _Target:
+    """Репозиторий вместе с состоянием индекса, прочитанным один раз."""
+
+    repository_id: RepositoryId
+    index: IndexStateView
+
+
+_Action = Callable[[_Target], Awaitable[str]]
 
 
 def build_server(runtime: McpRuntime) -> MCPServer:
@@ -59,6 +82,16 @@ def build_server(runtime: McpRuntime) -> MCPServer:
     )
 
     @server.tool()
+    async def list_repositories() -> str:
+        """Перечисляет доступные репозитории и состояние их индексов.
+
+        С этого стоит начинать: остальные инструменты требуют имя репозитория,
+        а отвечает он, только когда индекс собран.
+        """
+        overviews = await SurveyRepositories(runtime.unit_of_work()).execute(runtime.tenant_id)
+        return render_repositories(overviews)
+
+    @server.tool()
     async def search_code(repository: str, query: str, limit: int = 10) -> str:
         """Ищет фрагменты кода по смыслу и по словам одновременно.
 
@@ -68,7 +101,7 @@ def build_server(runtime: McpRuntime) -> MCPServer:
         return await _guarded(
             runtime,
             repository,
-            lambda repository_id: _search(runtime, repository_id, query, limit),
+            lambda target: _search(runtime, target, query, limit),
         )
 
     @server.tool()
@@ -81,7 +114,7 @@ def build_server(runtime: McpRuntime) -> MCPServer:
         return await _guarded(
             runtime,
             repository,
-            lambda repository_id: _definition(runtime, repository_id, name, limit),
+            lambda target: _definition(runtime, target, name, limit),
         )
 
     @server.tool()
@@ -94,7 +127,7 @@ def build_server(runtime: McpRuntime) -> MCPServer:
         return await _guarded(
             runtime,
             repository,
-            lambda repository_id: _callers(runtime, repository_id, name, limit),
+            lambda target: _callers(runtime, target, name, limit),
         )
 
     @server.tool()
@@ -113,9 +146,9 @@ def build_server(runtime: McpRuntime) -> MCPServer:
         return await _guarded(
             runtime,
             repository,
-            lambda repository_id: _file_context(
+            lambda target: _file_context(
                 runtime,
-                repository_id,
+                target,
                 path,
                 start_line,
                 end_line,
@@ -126,49 +159,33 @@ def build_server(runtime: McpRuntime) -> MCPServer:
     return server
 
 
-async def _search(runtime: McpRuntime, repository_id: RepositoryId, query: str, limit: int) -> str:
+async def _search(runtime: McpRuntime, target: _Target, query: str, limit: int) -> str:
     use_case = SearchCode(runtime.unit_of_work(), runtime.search)
-    matches = await use_case.execute(runtime.tenant_id, repository_id, query, limit=limit)
+    matches = await use_case.execute(runtime.tenant_id, target.repository_id, query, limit=limit)
     if not matches:
-        return await _nothing_found(
-            runtime, repository_id, f"По запросу «{query}» ничего не нашлось"
-        )
+        return f"По запросу «{query}» ничего не нашлось"
     return render_matches(matches)
 
 
-async def _definition(
-    runtime: McpRuntime,
-    repository_id: RepositoryId,
-    name: str,
-    limit: int,
-) -> str:
+async def _definition(runtime: McpRuntime, target: _Target, name: str, limit: int) -> str:
     use_case = GetSymbolDefinition(runtime.unit_of_work(), runtime.symbols)
-    symbols = await use_case.execute(runtime.tenant_id, repository_id, name, limit=limit)
+    symbols = await use_case.execute(runtime.tenant_id, target.repository_id, name, limit=limit)
     if not symbols:
-        return await _nothing_found(runtime, repository_id, f"Символ «{name}» в индексе не найден")
+        return f"Символ «{name}» в индексе не найден"
     return render_definitions(symbols)
 
 
-async def _callers(
-    runtime: McpRuntime,
-    repository_id: RepositoryId,
-    name: str,
-    limit: int,
-) -> str:
+async def _callers(runtime: McpRuntime, target: _Target, name: str, limit: int) -> str:
     use_case = FindSymbolCallers(runtime.unit_of_work(), runtime.symbols)
-    callers = await use_case.execute(runtime.tenant_id, repository_id, name, limit=limit)
+    callers = await use_case.execute(runtime.tenant_id, target.repository_id, name, limit=limit)
     if not callers:
-        return await _nothing_found(
-            runtime,
-            repository_id,
-            f"Вызовов «{name}» в индексе нет",
-        )
+        return f"Вызовов «{name}» в индексе нет"
     return render_contracts(callers)
 
 
 async def _file_context(
     runtime: McpRuntime,
-    repository_id: RepositoryId,
+    target: _Target,
     path: str,
     start_line: int,
     end_line: int,
@@ -177,55 +194,39 @@ async def _file_context(
     use_case = GetFileContext(runtime.unit_of_work(), runtime.symbols)
     view = await use_case.execute(
         runtime.tenant_id,
-        repository_id,
+        target.repository_id,
         path,
         start_line=start_line,
         end_line=end_line,
         neighbours_limit=neighbours_limit,
     )
     if view.is_empty:
-        return await _nothing_found(
-            runtime,
-            repository_id,
-            f"В {path}:{start_line}-{end_line} проиндексированных символов нет",
-        )
+        return f"В {path}:{start_line}-{end_line} проиндексированных символов нет"
     return render_neighbourhood(view)
 
 
-async def _guarded(
-    runtime: McpRuntime,
-    reference: str,
-    action: _Action,
-) -> str:
-    """Разрешает репозиторий и выполняет запрос.
+async def _guarded(runtime: McpRuntime, reference: str, action: _Action) -> str:
+    """Разрешает репозиторий, выполняет запрос и подписывает ответ ревизией.
 
     Ошибки возвращаются текстом, а не исключением: для вызывающей модели
     «репозиторий назван неверно, вот доступные» — это полезный ответ,
     а протокольная ошибка — тупик.
+
+    Состояние индекса читается здесь один раз и служит двум целям: объяснить
+    пустой ответ и подписать непустой. Пустая выдача по несобранному индексу
+    неотличима от честного «нет такого», а непустая без ревизии не позволяет
+    судить, насколько она свежа.
     """
+    unit_of_work = runtime.unit_of_work()
     try:
-        repository = await ResolveCodeRepository(runtime.unit_of_work()).execute(
-            runtime.tenant_id,
-            reference,
-        )
+        repository = await ResolveCodeRepository(unit_of_work).execute(runtime.tenant_id, reference)
     except RepositoryNotResolvedError as error:
         available = ", ".join(error.available) or "ни одного"
         return f"Репозиторий «{error.reference}» не найден. Доступны: {available}"
     except PermissionDeniedError as error:
         return str(error)
 
-    return await action(repository.id)
+    state = await GetIndexState(unit_of_work).execute(runtime.tenant_id, repository.id)
+    answer = await action(_Target(repository_id=repository.id, index=state))
 
-
-async def _nothing_found(runtime: McpRuntime, repository_id: RepositoryId, message: str) -> str:
-    """Объясняет пустой ответ несобранным индексом, если дело в нём.
-
-    Пустая выдача по несобранному индексу неотличима от честного «нет такого»,
-    и без этой проверки клиент сделал бы неверный вывод о коде.
-    """
-    state = await GetIndexState(runtime.unit_of_work()).execute(runtime.tenant_id, repository_id)
-    if state.is_ready:
-        return message
-    if state.is_running:
-        return f"{message}. Индекс репозитория ещё собирается"
-    return f"{message}. Индекс репозитория не собран"
+    return f"{clipped(answer, MAX_ANSWER_CHARS)}\n\n— {repository.name}: {describe_index(state)}"

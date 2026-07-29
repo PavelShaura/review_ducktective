@@ -79,9 +79,9 @@ async def seed(
     async with unit_of_work:
         repository = CodeRepository.register(
             tenant_id=tenant_id,
-            name="edussuz",
+            name="sandbox",
             vcs_provider=VcsProvider.LOCAL,
-            local_path=Path("/repos/edussuz"),
+            local_path=Path("/repos/sandbox"),
         )
         unit_of_work.code_repositories.add(repository)
 

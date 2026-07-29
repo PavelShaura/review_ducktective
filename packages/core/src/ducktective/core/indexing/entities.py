@@ -1,6 +1,7 @@
 from dataclasses import (
     dataclass,
     field,
+    replace,
 )
 from datetime import (
     UTC,
@@ -220,6 +221,7 @@ class IndexStats:
     files_total: int = 0
     files_parsed: int = 0
     files_reused: int = 0
+    files_stored: int = 0
     files_deleted: int = 0
     symbols: int = 0
     chunks: int = 0
@@ -242,6 +244,7 @@ class IndexSnapshot(AggregateRoot):
     created_at: datetime
     parent_snapshot_id: IndexSnapshotId | None = None
     stage: SnapshotStage = SnapshotStage.PARSING
+    embedding_stopped: bool = False
     stats: IndexStats = field(default_factory=IndexStats)
     started_at: datetime | None = None
     finished_at: datetime | None = None
@@ -297,6 +300,17 @@ class IndexSnapshot(AggregateRoot):
             files_reused=files_reused,
         )
 
+    def record_stored(self, files_stored: int) -> None:
+        """Отмечает, сколько разобранных файлов уже записано.
+
+        Считается отдельно от разбора: разбор идёт по всем файлам дерева,
+        а записывать нужно только изменившиеся, и одна шкала на два разных
+        знаменателя показывала бы неправду.
+
+        Прежние числа сохраняются — здесь известно только про запись.
+        """
+        self.stats = replace(self.stats, files_stored=files_stored)
+
     def enter_stage(self, stage: SnapshotStage) -> None:
         """Переключает этап работы.
 
@@ -305,6 +319,19 @@ class IndexSnapshot(AggregateRoot):
         что отличает долгую работу от зависшей.
         """
         self.stage = stage
+
+    def stop_embedding(self) -> None:
+        """Просит прекратить досчёт векторов.
+
+        Отменять сам снапшот на этом этапе нельзя и не нужно: символы и граф
+        записаны, он честно готов. Прекратить можно только продолжение —
+        поэтому это отдельный признак, а не смена статуса.
+
+        Посчитанное сохраняется: следующий запуск досчитает остаток.
+        """
+        if self.stage is not SnapshotStage.EMBEDDING:
+            raise InvariantViolationError(f"Досчёт векторов не идёт: снапшот на этапе {self.stage}")
+        self.embedding_stopped = True
 
     def cancel(self) -> None:
         """Помечает индексацию отменённой.

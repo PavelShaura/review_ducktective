@@ -82,6 +82,7 @@ class IndexSnapshotModel(Base):
     parent_snapshot_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("index_snapshot.id", ondelete="SET NULL"),
         nullable=True,
+        index=True,
     )
     commit_sha: Mapped[str] = mapped_column(String(40), index=True)
     status: Mapped[SnapshotStatus] = mapped_column(
@@ -91,6 +92,7 @@ class IndexSnapshotModel(Base):
         Enum(SnapshotStage, name="snapshot_stage", values_callable=enum_values),
         server_default="parsing",
     )
+    embedding_stopped: Mapped[bool] = mapped_column(default=False, server_default="false")
     stats: Mapped[dict[str, int]] = mapped_column(JSONB, default=dict)
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
@@ -111,10 +113,12 @@ class SourceFileModel(Base):
     language: Mapped[str | None] = mapped_column(String(32), nullable=True)
     content_hash: Mapped[str] = mapped_column(String(64))
     first_seen_snapshot_id: Mapped[UUID] = mapped_column(
-        ForeignKey("index_snapshot.id", ondelete="CASCADE")
+        ForeignKey("index_snapshot.id", ondelete="CASCADE"),
+        index=True,
     )
     last_seen_snapshot_id: Mapped[UUID] = mapped_column(
-        ForeignKey("index_snapshot.id", ondelete="CASCADE")
+        ForeignKey("index_snapshot.id", ondelete="CASCADE"),
+        index=True,
     )
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
 
@@ -169,6 +173,7 @@ class CodeSymbolModel(Base):
     parent_symbol_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("code_symbol.id", ondelete="SET NULL"),
         nullable=True,
+        index=True,
     )
     kind: Mapped[SymbolKind] = mapped_column(
         Enum(SymbolKind, name="symbol_kind", values_callable=enum_values)
@@ -221,10 +226,14 @@ class SymbolEdgeModel(Base):
 
     id: Mapped[UUID] = mapped_column(primary_key=True)
     repository_id: Mapped[UUID] = mapped_column(ForeignKey("repository.id", ondelete="CASCADE"))
-    source_symbol_id: Mapped[UUID] = mapped_column(ForeignKey("code_symbol.id", ondelete="CASCADE"))
+    source_symbol_id: Mapped[UUID] = mapped_column(
+        ForeignKey("code_symbol.id", ondelete="CASCADE"),
+        index=True,
+    )
     target_symbol_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("code_symbol.id", ondelete="SET NULL"),
         nullable=True,
+        index=True,
     )
     target_qualified_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     target_name: Mapped[str | None] = mapped_column(
@@ -264,6 +273,7 @@ class CodeChunkModel(Base):
     symbol_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("code_symbol.id", ondelete="SET NULL"),
         nullable=True,
+        index=True,
     )
     content: Mapped[str] = mapped_column(Text)
     content_hash: Mapped[str] = mapped_column(String(64))
@@ -316,6 +326,7 @@ class ChunkEmbeddingModel(Base):
     )
     embedding_model_id: Mapped[UUID] = mapped_column(
         ForeignKey("embedding_model.id", ondelete="CASCADE"),
+        index=True,
         primary_key=True,
     )
     embedding: Mapped[list[float]] = mapped_column(Vector(EMBEDDING_DIMENSIONS))

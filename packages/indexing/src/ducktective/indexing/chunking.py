@@ -180,6 +180,7 @@ def _split_by_lines(fragment: Fragment) -> list[Fragment]:
                 text="\n".join(lines[start:end]),
                 symbol_id=fragment.symbol_id if start == 0 else None,
                 owner=fragment.owner,
+                is_module_level=fragment.is_module_level,
             )
         )
         if end >= len(lines):
@@ -203,18 +204,55 @@ def _slice(fragment: Fragment, start_line: int, end_line: int) -> Fragment:
 
 
 def _flush(module_lines: list[Fragment]) -> list[Fragment]:
-    """Собирает накопленный код между определениями в один фрагмент."""
+    """Собирает накопленный код между определениями, соблюдая размер чанка.
+
+    Собирать всё в один фрагмент нельзя: файл без определений — сплошные
+    константы, таблицы прав, реестры — иначе даёт один чанк на весь файл.
+    Такой чанк бесполезен для поиска и разрушителен для выдачи: попав в
+    ответ, он приносит с собой файл целиком.
+
+    Границы групп проходят по границам узлов, поэтому номера строк остаются
+    точными. По строкам режется только одиночный узел, который сам не влез, —
+    его текст непрерывен, и смещение считается от его собственного начала.
+    """
     if not module_lines:
         return []
 
-    return [
-        Fragment(
-            start_line=module_lines[0].start_line,
-            end_line=module_lines[-1].end_line,
-            text="\n".join(fragment.text for fragment in module_lines),
-            is_module_level=True,
-        )
-    ]
+    pieces: list[Fragment] = []
+    for group in _grouped_by_budget(module_lines):
+        collected = _module_fragment(group)
+        if collected.tokens <= MAX_CHUNK_TOKENS:
+            pieces.append(collected)
+            continue
+        pieces.extend(_split_by_lines(collected))
+
+    return pieces
+
+
+def _grouped_by_budget(module_lines: list[Fragment]) -> list[list[Fragment]]:
+    groups: list[list[Fragment]] = []
+    current: list[Fragment] = []
+    total = 0
+
+    for fragment in module_lines:
+        if current and total + fragment.tokens > MAX_CHUNK_TOKENS:
+            groups.append(current)
+            current = []
+            total = 0
+        current.append(fragment)
+        total += fragment.tokens
+
+    groups.append(current)
+    return groups
+
+
+def _module_fragment(group: list[Fragment]) -> Fragment:
+    return Fragment(
+        start_line=group[0].start_line,
+        end_line=group[-1].end_line,
+        text="\n".join(fragment.text for fragment in group),
+        is_module_level=True,
+    )
 
 
 def _merge_small(fragments: list[Fragment]) -> list[Fragment]:

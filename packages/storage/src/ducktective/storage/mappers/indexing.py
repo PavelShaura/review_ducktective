@@ -40,6 +40,7 @@ def snapshot_to_domain(model: IndexSnapshotModel) -> IndexSnapshot:
         commit_sha=CommitSha(model.commit_sha),
         status=model.status,
         stage=model.stage,
+        embedding_stopped=model.embedding_stopped,
         created_at=model.created_at,
         parent_snapshot_id=(
             IndexSnapshotId(model.parent_snapshot_id)
@@ -61,6 +62,7 @@ def snapshot_to_model(snapshot: IndexSnapshot) -> IndexSnapshotModel:
         commit_sha=snapshot.commit_sha,
         status=snapshot.status,
         stage=snapshot.stage,
+        embedding_stopped=snapshot.embedding_stopped,
         stats=asdict(snapshot.stats),
         failure_reason=snapshot.failure_reason,
         created_at=snapshot.created_at,
@@ -72,6 +74,7 @@ def snapshot_to_model(snapshot: IndexSnapshot) -> IndexSnapshotModel:
 def apply_snapshot_changes(model: IndexSnapshotModel, snapshot: IndexSnapshot) -> None:
     model.status = snapshot.status
     model.stage = snapshot.stage
+    model.embedding_stopped = snapshot.embedding_stopped
     model.stats = asdict(snapshot.stats)
     model.failure_reason = snapshot.failure_reason
     model.started_at = snapshot.started_at

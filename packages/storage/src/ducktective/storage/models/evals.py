@@ -88,6 +88,7 @@ class EvalRunModel(Base):
     prompt_version_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("prompt_version.id", ondelete="SET NULL"),
         nullable=True,
+        index=True,
     )
     label: Mapped[str] = mapped_column(String(128))
     model: Mapped[str] = mapped_column(String(128))
@@ -106,6 +107,7 @@ class EvalResultModel(Base):
     )
     eval_case_id: Mapped[UUID] = mapped_column(
         ForeignKey("eval_case.id", ondelete="CASCADE"),
+        index=True,
     )
     found_expected: Mapped[bool] = mapped_column(Boolean)
     findings_total: Mapped[int] = mapped_column(Integer)

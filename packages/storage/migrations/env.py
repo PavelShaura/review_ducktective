@@ -7,6 +7,10 @@ from logging.config import (
 from alembic import (
     context,
 )
+from dotenv import (
+    find_dotenv,
+    load_dotenv,
+)
 from sqlalchemy import (
     Connection,
     pool,
@@ -29,9 +33,24 @@ target_metadata = Base.metadata
 
 
 def _database_url() -> str:
+    """Адрес базы для миграций.
+
+    `.env` читается здесь, потому что миграции запускаются не приложением:
+    у него настройки собирает pydantic-settings, а у alembic своя точка входа,
+    и без этого `alembic upgrade head` падал там, где `ducktective serve`
+    поднимался — на одной и той же машине с одним и тем же файлом.
+
+    Файл не перекрывает окружение: заданный снаружи адрес — это осознанный
+    выбор развёртывания, и локальный `.env` не должен его молча отменять.
+    """
+    load_dotenv(find_dotenv(usecwd=True))
+
     url = os.environ.get("DATABASE_URL")
     if not url:
-        raise RuntimeError("Не задана переменная окружения DATABASE_URL")
+        raise RuntimeError(
+            "Не задан DATABASE_URL — ни в окружении, ни в .env каталога, "
+            "из которого запущен alembic"
+        )
     return url
 
 

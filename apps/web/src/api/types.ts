@@ -167,10 +167,16 @@ export interface IndexStats {
   files_total: number;
   files_parsed: number;
   files_reused: number;
+  files_stored: number;
   symbols: number;
   chunks: number;
   edges: number;
   edges_resolved: number;
+}
+
+export interface VectorCoverage {
+  chunks: number;
+  embedded: number;
 }
 
 export interface IndexState {
@@ -179,8 +185,12 @@ export interface IndexState {
   stage: SnapshotStage | null;
   stage_title: string | null;
   commit_sha: string | null;
+  started_at: string | null;
   finished_at: string | null;
   failure_reason: string | null;
   is_ready: boolean;
+  embedding_stopped: boolean;
+  context_ready: boolean;
+  vectors: VectorCoverage;
   stats: IndexStats | null;
 }

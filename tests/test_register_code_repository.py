@@ -27,12 +27,12 @@ from tests.fakes import (
 )
 
 
-def build_command(name: str = "edussuz") -> RegisterCodeRepositoryCommand:
+def build_command(name: str = "sandbox") -> RegisterCodeRepositoryCommand:
     return RegisterCodeRepositoryCommand(
         tenant_id=TenantId(uuid4()),
         name=name,
         vcs_provider=VcsProvider.LOCAL,
-        local_path=Path("/repos/edussuz"),
+        local_path=Path("/repos/sandbox"),
     )
 
 

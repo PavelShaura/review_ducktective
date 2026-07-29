@@ -52,12 +52,12 @@ async def create_tenant(session_factory: async_sessionmaker[AsyncSession]) -> Te
     return TenantId(tenant_id)
 
 
-def build_repository(tenant_id: TenantId, name: str = "edussuz") -> CodeRepository:
+def build_repository(tenant_id: TenantId, name: str = "sandbox") -> CodeRepository:
     return CodeRepository.register(
         tenant_id=tenant_id,
         name=name,
         vcs_provider=VcsProvider.LOCAL,
-        local_path=Path("/repos/edussuz"),
+        local_path=Path("/repos/sandbox"),
     )
 
 

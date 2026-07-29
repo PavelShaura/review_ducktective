@@ -10,11 +10,18 @@ import pytest
 from ducktective.application.exceptions import (
     PermissionDeniedError,
 )
+from ducktective.application.indexing import build_index as build_index_module
 from ducktective.application.indexing.build_index import (
     BuildIndex,
     BuildIndexCommand,
     IndexingCancelledError,
     IndexOutcome,
+)
+from ducktective.application.indexing.enqueue import (
+    EnqueueIndexing,
+)
+from ducktective.application.indexing.read_state import (
+    GetIndexState,
 )
 from ducktective.core.code_repository.entities import (
     CodeRepository,
@@ -47,9 +54,9 @@ def prepare(unit_of_work: FakeUnitOfWork) -> tuple[TenantId, RepositoryId]:
     tenant_id = TenantId(uuid4())
     repository = CodeRepository.register(
         tenant_id=tenant_id,
-        name="edussuz",
+        name="sandbox",
         vcs_provider=VcsProviderKind.LOCAL,
-        local_path=Path("/repos/edussuz"),
+        local_path=Path("/repos/sandbox"),
     )
     unit_of_work.code_repositories.add(repository)
     return tenant_id, repository.id
@@ -280,3 +287,90 @@ async def test_stage_moves_from_parsing_to_storing() -> None:
     outcome = await build(unit_of_work, vcs_provider, tenant_id, repository_id)
 
     assert outcome.snapshot.stage is SnapshotStage.LINKING
+
+
+async def test_storing_counts_written_files(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Одной транзакцией на тысячи файлов шкала застывала и выглядела поломкой.
+
+    Знаменатель у записи свой: пишутся только изменившиеся файлы, а не всё
+    дерево, поэтому счётчик записи считается отдельно от разбора.
+    """
+    monkeypatch.setattr(build_index_module, "STORE_BATCH_SIZE", 2)
+
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, repository_id = prepare(unit_of_work)
+    paths = [f"app/module_{number}.py" for number in range(5)]
+    vcs_provider = FakeVcsProvider(
+        tree={path: ContentHash(f"hash-{path}") for path in paths},
+        file_contents=dict.fromkeys(paths, MODULE),
+    )
+
+    outcome = await build(unit_of_work, vcs_provider, tenant_id, repository_id)
+
+    assert outcome.stats.files_parsed == 5
+    assert outcome.stats.files_stored == 5
+
+
+async def test_context_stays_available_while_the_index_is_rebuilt() -> None:
+    """Идущая пересборка не отнимает окружение у ревью.
+
+    Контекст берётся из последнего завершённого снапшота, поэтому запуск
+    расследования во время сборки не обесценивает его — но только если
+    завершённый снапшот вообще есть.
+    """
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, repository_id = prepare(unit_of_work)
+    vcs_provider = FakeVcsProvider(
+        tree={"app/report.py": ContentHash("hash-1")},
+        file_contents={"app/report.py": MODULE},
+    )
+    await build(unit_of_work, vcs_provider, tenant_id, repository_id)
+
+    await EnqueueIndexing(unit_of_work, FakeEventPublisher(), vcs_provider).execute(
+        tenant_id,
+        repository_id,
+        "HEAD",
+    )
+
+    state = await GetIndexState(unit_of_work).execute(tenant_id, repository_id)
+
+    assert state.status is SnapshotStatus.PENDING
+    assert state.is_ready is False
+    assert state.context_ready is True
+
+
+async def test_first_build_leaves_review_without_context() -> None:
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, repository_id = prepare(unit_of_work)
+
+    await EnqueueIndexing(unit_of_work, FakeEventPublisher(), FakeVcsProvider()).execute(
+        tenant_id,
+        repository_id,
+        "HEAD",
+    )
+
+    state = await GetIndexState(unit_of_work).execute(tenant_id, repository_id)
+
+    assert state.context_ready is False
+
+
+async def test_vector_coverage_is_reported_separately_from_readiness() -> None:
+    """Снапшот готов до подсчёта векторов, и это разные состояния.
+
+    Иначе индекс выглядит собранным, хотя поиск по смыслу ещё не работает,
+    и вывод о качестве ревью делается по неполному индексу.
+    """
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, repository_id = prepare(unit_of_work)
+    vcs_provider = FakeVcsProvider(
+        tree={"app/report.py": ContentHash("hash-1")},
+        file_contents={"app/report.py": MODULE},
+    )
+    await build(unit_of_work, vcs_provider, tenant_id, repository_id)
+
+    state = await GetIndexState(unit_of_work).execute(tenant_id, repository_id)
+
+    assert state.is_ready is True
+    assert state.vectors.chunks > 0
+    assert state.vectors.embedded == 0
+    assert state.vectors.is_complete is False

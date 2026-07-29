@@ -81,6 +81,7 @@ class ReviewRunModel(Base):
     created_by: Mapped[UUID | None] = mapped_column(
         ForeignKey("user_account.id", ondelete="SET NULL"),
         nullable=True,
+        index=True,
     )
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     started_at: Mapped[datetime | None] = mapped_column(nullable=True)
@@ -201,6 +202,7 @@ class FindingFeedbackModel(Base):
     user_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("user_account.id", ondelete="SET NULL"),
         nullable=True,
+        index=True,
     )
     verdict: Mapped[FeedbackVerdict] = mapped_column(
         Enum(FeedbackVerdict, name="feedback_verdict", values_callable=enum_values)

@@ -12,6 +12,7 @@ from ducktective.api.dependencies import (
     EventPublisherDependency,
     TaskQueueDependency,
     UnitOfWorkDependency,
+    VcsProviderDependency,
 )
 from ducktective.api.schemas.code_repository import (
     RegisterRepositoryRequest,
@@ -19,6 +20,7 @@ from ducktective.api.schemas.code_repository import (
 )
 from ducktective.api.schemas.indexing import (
     CancelIndexingResponse,
+    DeleteIndexResponse,
     IndexStateResponse,
     StartIndexingRequest,
     StartIndexingResponse,
@@ -40,6 +42,14 @@ from ducktective.application.exceptions import (
 from ducktective.application.indexing.cancel import (
     CancelIndexing,
 )
+from ducktective.application.indexing.delete import (
+    DeleteIndex,
+    IndexingInProgressError,
+)
+from ducktective.application.indexing.enqueue import (
+    EnqueueIndexing,
+    IndexingAlreadyQueuedError,
+)
 from ducktective.application.indexing.read_state import (
     GetIndexState,
 )
@@ -50,6 +60,7 @@ from ducktective.config.queues import (
 from ducktective.core.exceptions import (
     EntityNotFoundError,
     InvariantViolationError,
+    VcsOperationError,
 )
 from ducktective.core.types import (
     RepositoryId,
@@ -166,6 +177,8 @@ async def start_indexing(
     repository_id: UUID,
     payload: StartIndexingRequest,
     unit_of_work: UnitOfWorkDependency,
+    event_publisher: EventPublisherDependency,
+    vcs_provider: VcsProviderDependency,
     task_queue: TaskQueueDependency,
 ) -> StartIndexingResponse:
     """Ставит индексацию в очередь.
@@ -173,21 +186,55 @@ async def start_indexing(
     Запрос не ждёт результата: полная индексация чужого репозитория занимает
     минуты, а состояние потом опрашивается через GET.
     """
+    use_case = EnqueueIndexing(unit_of_work, event_publisher, vcs_provider)
+
     try:
-        await GetIndexState(unit_of_work).execute(
+        snapshot_id = await use_case.execute(
             TenantId(payload.tenant_id),
             RepositoryId(repository_id),
+            payload.revision,
         )
     except EntityNotFoundError as error:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
     except PermissionDeniedError as error:
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(error)) from error
+    except IndexingAlreadyQueuedError as error:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
+    except VcsOperationError as error:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(error)) from error
 
     await task_queue.enqueue_job(
         INDEX_TASK_NAME,
         str(repository_id),
         str(payload.tenant_id),
         payload.revision,
+        str(snapshot_id),
         _queue_name=INDEX_QUEUE,
     )
     return StartIndexingResponse(queued=True, revision=payload.revision)
+
+
+@router.delete("/{repository_id}/index", response_model=DeleteIndexResponse)
+async def delete_index(
+    repository_id: UUID,
+    tenant_id: UUID,
+    unit_of_work: UnitOfWorkDependency,
+    event_publisher: EventPublisherDependency,
+) -> DeleteIndexResponse:
+    """Стирает индекс, оставляя репозиторий и заведённые по нему дела.
+
+    Нужен, когда изменились правила разбора: инкрементальная сборка не
+    перечитывает неизменившиеся файлы и новых правил к ним не применит.
+    """
+    use_case = DeleteIndex(unit_of_work, event_publisher)
+
+    try:
+        removed = await use_case.execute(TenantId(tenant_id), RepositoryId(repository_id))
+    except EntityNotFoundError as error:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
+    except PermissionDeniedError as error:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(error)) from error
+    except IndexingInProgressError as error:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
+
+    return DeleteIndexResponse(removed_snapshots=removed)

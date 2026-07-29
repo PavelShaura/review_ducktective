@@ -46,13 +46,13 @@ from tests.fakes import (
 )
 
 
-REPOSITORY_PATH = Path("/repos/edussuz")
+REPOSITORY_PATH = Path("/repos/sandbox")
 
 
 def register_repository(unit_of_work: FakeUnitOfWork, tenant_id: TenantId) -> CodeRepository:
     repository = CodeRepository.register(
         tenant_id=tenant_id,
-        name="edussuz",
+        name="sandbox",
         vcs_provider=VcsProviderKind.LOCAL,
         local_path=REPOSITORY_PATH,
     )

@@ -18,6 +18,9 @@ from ducktective.core.indexing.entities import (
     SourceFile,
     SymbolEdge,
 )
+from ducktective.core.indexing.ports import (
+    VectorCoverage,
+)
 from ducktective.core.indexing.value_objects import (
     SnapshotStatus,
 )
@@ -175,6 +178,20 @@ class InMemoryIndexSnapshotRepository:
             return None
         return max(snapshots, key=lambda snapshot: snapshot.created_at)
 
+    async def remove_for_repository(self, repository_id: RepositoryId) -> int:
+        removed = [
+            snapshot_id
+            for snapshot_id, snapshot in [
+                *self._committed.items(),
+                *self._pending.items(),
+            ]
+            if snapshot.repository_id == repository_id
+        ]
+        for snapshot_id in removed:
+            self._committed.pop(snapshot_id, None)
+            self._pending.pop(snapshot_id, None)
+        return len(removed)
+
     def ready_ids(self, repository_id: RepositoryId) -> set[IndexSnapshotId]:
         """Снапшоты, доведённые до конца."""
         return {
@@ -300,6 +317,9 @@ class InMemorySymbolEdgeRepository:
         ]
         self._edges.extend(edges)
 
+    async def refresh_statistics(self) -> None:
+        """В памяти планировать нечего."""
+
     async def resolve_pending(self, repository_id: RepositoryId) -> int:
         known = self._known_symbols(repository_id)
 
@@ -347,6 +367,18 @@ class InMemoryEmbeddingStore:
         self._source_files = source_files
         self._models: dict[str, EmbeddingModelId] = {}
         self._vectors: dict[tuple[EmbeddingModelId, CodeChunkId], list[float]] = {}
+
+    async def count_coverage(self, repository_id: RepositoryId) -> VectorCoverage:
+        chunk_ids = {
+            chunk.id
+            for source_file in self._source_files.live_files(repository_id)
+            for chunk in source_file.chunks
+        }
+        embedded = {chunk_id for _, chunk_id in self._vectors}
+        return VectorCoverage(
+            chunks=len(chunk_ids),
+            embedded=len(chunk_ids & embedded),
+        )
 
     async def register_model(self, name: str, dimensions: int) -> EmbeddingModelId:
         return self._models.setdefault(name, EmbeddingModelId(uuid4()))

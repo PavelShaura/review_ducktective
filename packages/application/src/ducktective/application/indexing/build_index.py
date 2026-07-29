@@ -33,6 +33,7 @@ from ducktective.core.indexing.ports import (
 )
 from ducktective.core.indexing.value_objects import (
     SnapshotStage,
+    SnapshotStatus,
 )
 from ducktective.core.ports import (
     EventPublisher,
@@ -50,6 +51,13 @@ from ducktective.core.types import (
 
 PROGRESS_EVERY = 25
 
+STORE_BATCH_SIZE = 200
+"""Сколько разобранных файлов пишется одной транзакцией.
+
+Меньше — чаще коммиты и точнее шкала, больше — меньше накладных расходов.
+Двести файлов дают заметное движение на крупном репозитории, не превращая
+запись в тысячи транзакций."""
+
 
 class IndexingCancelledError(ApplicationError):
     """Индексацию попросили прекратить.
@@ -64,9 +72,17 @@ class IndexingCancelledError(ApplicationError):
 
 @dataclass(frozen=True, kw_only=True)
 class BuildIndexCommand:
+    """Задание на сборку.
+
+    Снапшот назван, когда задачу ставил интерфейс: он завёл его заранее,
+    чтобы очередь была видна и отменяема. У CLI его нет — там задача идёт
+    прямо в работу.
+    """
+
     tenant_id: TenantId
     repository_id: RepositoryId
     revision: str = "HEAD"
+    snapshot_id: IndexSnapshotId | None = None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -126,28 +142,75 @@ class BuildIndex(TransactionalUseCase):
                 command.repository_id
             )
             known_hashes = await self._unit_of_work.source_files.list_paths(command.repository_id)
+            queued = await self._queued_snapshot(command)
+            queued_sha = queued.commit_sha if queued else None
 
-        commit_sha = await self._vcs_provider.resolve_revision(repository_path, command.revision)
+        commit_sha = queued_sha or await self._vcs_provider.resolve_revision(
+            repository_path,
+            command.revision,
+        )
 
         async with self._unit_of_work:
-            snapshot = IndexSnapshot.create(
-                repository_id=command.repository_id,
+            snapshot_id = await self._start_snapshot(
+                command,
                 commit_sha=commit_sha,
-                parent_snapshot_id=previous.id if previous else None,
+                parent_id=previous.id if previous else None,
             )
-            snapshot.mark_running()
-            self._unit_of_work.index_snapshots.add(snapshot)
             await self._commit_and_publish()
 
         try:
             return await self._index(
-                command, snapshot.id, repository_path, commit_sha, known_hashes
+                command, snapshot_id, repository_path, commit_sha, known_hashes
             )
         except IndexingCancelledError:
             raise
         except Exception as error:
-            await self._mark_failed(snapshot.id, error)
+            await self._mark_failed(snapshot_id, error)
             raise
+
+    async def _queued_snapshot(self, command: BuildIndexCommand) -> IndexSnapshot | None:
+        """Снапшот, заведённый постановкой в очередь, если он ещё ждёт работы.
+
+        Отменённый здесь не возвращается, и это главное: задача остаётся
+        в очереди и после отмены — прекратить её можно только тем, что воркер
+        посмотрит на состояние снапшота, за которым его позвали.
+        """
+        if command.snapshot_id is None:
+            return None
+
+        snapshot = await self._unit_of_work.index_snapshots.get(command.snapshot_id)
+        if snapshot.status is SnapshotStatus.CANCELLED:
+            raise IndexingCancelledError
+
+        return snapshot if snapshot.status is SnapshotStatus.PENDING else None
+
+    async def _start_snapshot(
+        self,
+        command: BuildIndexCommand,
+        *,
+        commit_sha: CommitSha,
+        parent_id: IndexSnapshotId | None,
+    ) -> IndexSnapshotId:
+        """Переводит в работу снапшот, заведённый при постановке в очередь.
+
+        Интерфейс заводит его заранее, чтобы очередь была видна и отменяема;
+        CLI ставит задачу напрямую, и там заводить снапшот некому. Оба случая
+        должны приводить к одному состоянию, поэтому здесь либо подхват,
+        либо создание.
+        """
+        queued = await self._queued_snapshot(command)
+        if queued is not None:
+            queued.mark_running()
+            return queued.id
+
+        snapshot = IndexSnapshot.create(
+            repository_id=command.repository_id,
+            commit_sha=commit_sha,
+            parent_snapshot_id=parent_id,
+        )
+        snapshot.mark_running()
+        self._unit_of_work.index_snapshots.add(snapshot)
+        return snapshot.id
 
     async def _index(
         self,
@@ -295,14 +358,85 @@ class BuildIndex(TransactionalUseCase):
         unreadable: list[str],
         files_total: int,
     ) -> IndexOutcome:
+        for start in range(0, len(pending), STORE_BATCH_SIZE):
+            batch = pending[start : start + STORE_BATCH_SIZE]
+            await self._store_batch(repository_id, snapshot_id, batch=batch, stored=start)
+
         async with self._unit_of_work:
-            snapshot = await self._unit_of_work.index_snapshots.get(snapshot_id)
             known = await self._unit_of_work.source_files.load_many(
                 repository_id,
-                [item.path for item in pending] + unchanged + vanished,
+                unchanged + vanished,
+            )
+            _mark_seen(known, unchanged, snapshot_id)
+            _mark_vanished(known, vanished, snapshot_id)
+            await self._commit_and_publish()
+
+        await self._enter_stage(snapshot_id, SnapshotStage.LINKING)
+
+        async with self._unit_of_work:
+            await self._write_edges(repository_id, pending)
+            await self._commit_and_publish()
+
+        async with self._unit_of_work:
+            await self._unit_of_work.symbol_edges.refresh_statistics()
+            await self._unit_of_work.commit()
+
+        async with self._unit_of_work:
+            snapshot = await self._unit_of_work.index_snapshots.get(snapshot_id)
+            if snapshot.is_cancelled:
+                raise IndexingCancelledError
+
+            resolved = await self._unit_of_work.symbol_edges.resolve_pending(repository_id)
+
+            stats = IndexStats(
+                files_total=files_total,
+                files_parsed=len(pending),
+                files_reused=len(unchanged),
+                files_stored=len(pending),
+                files_deleted=len(vanished),
+                symbols=sum(len(item.parsed.symbols) for item in pending),
+                chunks=sum(len(item.parsed.chunks) for item in pending),
+                edges=sum(len(item.parsed.references) for item in pending),
+                edges_resolved=resolved,
+            )
+            snapshot.mark_ready(stats)
+            await self._commit_and_publish()
+
+            return IndexOutcome(
+                snapshot=snapshot,
+                stats=stats,
+                unreadable=tuple(unreadable),
             )
 
-            for item in pending:
+    async def _store_batch(
+        self,
+        repository_id: RepositoryId,
+        snapshot_id: IndexSnapshotId,
+        *,
+        batch: list[_PendingFile],
+        stored: int,
+    ) -> None:
+        """Записывает часть разобранных файлов и отмечает продвижение.
+
+        Запись разбита на пачки не ради памяти, а ради видимости: одной
+        транзакцией на тысячи файлов интерфейс получал застывшую шкалу
+        и выглядел зависшим на самом долгом этапе.
+
+        Незавершённый прогон оставляет записанное в базе, и это безопасно:
+        разобранными считаются только файлы завершённых снапшотов, поэтому
+        следующий запуск перечитает их заново.
+        """
+        async with self._unit_of_work:
+            snapshot = await self._unit_of_work.index_snapshots.get(snapshot_id)
+            if snapshot.is_cancelled:
+                raise IndexingCancelledError
+
+            known = await self._unit_of_work.source_files.load_many(
+                repository_id,
+                [item.path for item in batch],
+            )
+
+            for item in batch:
                 source_file = known.get(item.path)
                 if source_file is None:
                     source_file = SourceFile.create(
@@ -321,47 +455,25 @@ class BuildIndex(TransactionalUseCase):
                     snapshot_id=snapshot_id,
                 )
 
-            _mark_seen(known, unchanged, snapshot_id)
-            _mark_vanished(known, vanished, snapshot_id)
+            snapshot.record_stored(stored + len(batch))
             await self._commit_and_publish()
 
-        async with self._unit_of_work:
-            snapshot = await self._unit_of_work.index_snapshots.get(snapshot_id)
-            if snapshot.is_cancelled:
-                raise IndexingCancelledError
-
-            snapshot.enter_stage(SnapshotStage.LINKING)
-            resolved = await self._store_edges(repository_id, pending)
-
-            stats = IndexStats(
-                files_total=files_total,
-                files_parsed=len(pending),
-                files_reused=len(unchanged),
-                files_deleted=len(vanished),
-                symbols=sum(len(item.parsed.symbols) for item in pending),
-                chunks=sum(len(item.parsed.chunks) for item in pending),
-                edges=sum(len(item.parsed.references) for item in pending),
-                edges_resolved=resolved,
-            )
-            snapshot.mark_ready(stats)
-            await self._commit_and_publish()
-
-            return IndexOutcome(
-                snapshot=snapshot,
-                stats=stats,
-                unreadable=tuple(unreadable),
-            )
-
-    async def _store_edges(
+    async def _write_edges(
         self,
         repository_id: RepositoryId,
         pending: list[_PendingFile],
-    ) -> int:
+    ) -> None:
         """Перекладывает ссылки разобранных файлов в граф.
 
-        Рёбра пишутся неразрешёнными, а замыкаются одним проходом в конце:
+        Рёбра пишутся неразрешёнными, а замыкаются отдельным проходом:
         цель ссылки может лежать в файле, который разобран позже источника,
         либо появиться только в этом прогоне.
+
+        Запись и замыкание разнесены по транзакциям не ради красоты. Пока
+        рёбра лежат незакоммиченными, планировщик их не видит: статистика
+        обновляется только по видимым данным, и запрос замыкания строил план
+        на «в таблице три тысячи рёбер» вместо ста тысяч, и замыкание
+        обходилось часом работы вместо секунд.
         """
         edges = [
             SymbolEdge(
@@ -382,7 +494,6 @@ class BuildIndex(TransactionalUseCase):
             symbol_ids,
             edges,
         )
-        return await self._unit_of_work.symbol_edges.resolve_pending(repository_id)
 
 
 def _mark_seen(
