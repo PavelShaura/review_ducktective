@@ -69,6 +69,10 @@ class Settings(BaseSettings):
     review_queue_name: str = "ducktective:reviews"
     review_job_timeout_seconds: int = 1800
 
+    mcp_tenant_id: str = ""
+    mcp_http_host: str = "127.0.0.1"
+    mcp_http_port: int = 8090
+
     @property
     def cloud_providers_allowed(self) -> bool:
         """В air-gapped профиле облачные провайдеры запрещены на уровне конфигурации."""

@@ -20,10 +20,12 @@ dependencies = [
     "ducktective-api",
     "ducktective-reviewer",
     "ducktective-indexer",
+    "ducktective-mcp-server",
 ]
 
 [project.scripts]
 ducktective = "ducktective.api.cli:main"
+ducktective-mcp = "ducktective.mcp_server.__main__:main"
 
 [dependency-groups]
 dev = [
@@ -41,7 +43,7 @@ dev = [
 ]
 
 [tool.uv.workspace]
-members = ["packages/*", "apps/api", "apps/reviewer", "apps/indexer"]
+members = ["packages/*", "apps/api", "apps/reviewer", "apps/indexer", "apps/mcp_server"]
 
 [tool.uv.sources]
 ducktective-core = { workspace = true }
@@ -57,6 +59,7 @@ ducktective-observability = { workspace = true }
 ducktective-api = { workspace = true }
 ducktective-reviewer = { workspace = true }
 ducktective-indexer = { workspace = true }
+ducktective-mcp-server = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]
@@ -138,7 +141,7 @@ strict = true
 warn_unreachable = true
 disallow_any_explicit = false
 plugins = ["pydantic.mypy"]
-mypy_path = "packages/core/src:packages/config/src:packages/application/src:packages/storage/src:packages/vcs/src:packages/llm/src:packages/indexing/src:packages/retrieval/src:packages/evals/src:packages/observability/src:apps/api/src:apps/reviewer/src:apps/indexer/src"
+mypy_path = "packages/core/src:packages/config/src:packages/application/src:packages/storage/src:packages/vcs/src:packages/llm/src:packages/indexing/src:packages/retrieval/src:packages/evals/src:packages/observability/src:apps/api/src:apps/reviewer/src:apps/indexer/src:apps/mcp_server/src"
 namespace_packages = true
 explicit_package_bases = true
 
@@ -171,7 +174,7 @@ include_external_packages = true
 name = "Слои: интерфейсы → application → домен"
 type = "layers"
 layers = [
-    "ducktective.api",
+    "ducktective.api : ducktective.mcp_server",
     "ducktective.application",
     "ducktective.core",
 ]
@@ -213,6 +216,7 @@ type = "forbidden"
 source_modules = ["ducktective.storage"]
 forbidden_modules = [
     "ducktective.api",
+    "ducktective.mcp_server",
     "ducktective.application",
 ]
 
@@ -222,6 +226,7 @@ type = "forbidden"
 source_modules = ["ducktective.vcs"]
 forbidden_modules = [
     "ducktective.api",
+    "ducktective.mcp_server",
     "ducktective.application",
     "ducktective.storage",
 ]
@@ -232,6 +237,7 @@ type = "forbidden"
 source_modules = ["ducktective.llm"]
 forbidden_modules = [
     "ducktective.api",
+    "ducktective.mcp_server",
     "ducktective.application",
     "ducktective.storage",
 ]
@@ -242,6 +248,7 @@ type = "forbidden"
 source_modules = ["ducktective.indexing"]
 forbidden_modules = [
     "ducktective.api",
+    "ducktective.mcp_server",
     "ducktective.application",
     "ducktective.storage",
 ]
@@ -252,6 +259,7 @@ type = "forbidden"
 source_modules = ["ducktective.evals"]
 forbidden_modules = [
     "ducktective.api",
+    "ducktective.mcp_server",
 ]
 
 [[tool.importlinter.contracts]]
@@ -260,5 +268,6 @@ type = "forbidden"
 source_modules = ["ducktective.retrieval"]
 forbidden_modules = [
     "ducktective.api",
+    "ducktective.mcp_server",
     "ducktective.application",
 ]

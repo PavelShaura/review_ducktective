@@ -80,6 +80,22 @@ class SymbolReader(Protocol):
         """
         ...
 
+    async def find_by_name(
+        self,
+        repository_id: RepositoryId,
+        name: str,
+        *,
+        limit: int = 10,
+    ) -> list[SymbolContext]:
+        """Символы, названные этим именем.
+
+        Точка входа ретривала от имени, а не от диффа: внешний клиент знает
+        `ReviewRun.add_finding`, но не знает ни файла, ни строк. Совпадение
+        по полному имени точнее совпадения по последнему сегменту, поэтому
+        порядок выдачи задаёт точность совпадения, а не релевантность.
+        """
+        ...
+
     async def callees(
         self,
         symbol_ids: list[CodeSymbolId],

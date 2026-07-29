@@ -2,19 +2,28 @@ import logging
 import sys
 from typing import (
     Any,
+    TextIO,
 )
 
 import structlog
 
 
-def configure_logging(*, level: str = "INFO", json_output: bool = False) -> None:
+def configure_logging(
+    *,
+    level: str = "INFO",
+    json_output: bool = False,
+    stream: TextIO | None = None,
+) -> None:
     """Настраивает structlog и стандартный logging на единый вывод.
 
     В разработке удобнее читаемый вывод, в контейнере — JSON для сбора логов.
+
+    Поток вывода выбирается вызывающим, потому что у stdio-транспорта MCP
+    stdout занят самим протоколом: строка лога там ломает поток JSON-RPC.
     """
     logging.basicConfig(
         format="%(message)s",
-        stream=sys.stdout,
+        stream=stream or sys.stdout,
         level=getattr(logging, level.upper(), logging.INFO),
     )
 

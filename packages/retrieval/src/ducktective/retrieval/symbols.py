@@ -7,6 +7,8 @@ from uuid import (
 
 from sqlalchemy import (
     Select,
+    case,
+    or_,
     select,
 )
 from sqlalchemy.ext.asyncio import (
@@ -58,6 +60,36 @@ class PostgresSymbolReader:
                 CodeSymbolModel.end_line >= start_line,
             )
             .order_by(CodeSymbolModel.end_line - CodeSymbolModel.start_line)
+        )
+        return await self._read(statement)
+
+    async def find_by_name(
+        self,
+        repository_id: RepositoryId,
+        name: str,
+        *,
+        limit: int = 10,
+    ) -> list[SymbolContext]:
+        wanted = name.strip()
+        if not wanted:
+            return []
+
+        precision = case(
+            (CodeSymbolModel.qualified_name == wanted, 0),
+            else_=1,
+        )
+        statement = (
+            self._base_query()
+            .where(
+                CodeSymbolModel.repository_id == repository_id,
+                SourceFileModel.is_deleted.is_(False),
+                or_(
+                    CodeSymbolModel.qualified_name == wanted,
+                    CodeSymbolModel.qualified_name.endswith(f".{wanted}"),
+                ),
+            )
+            .order_by(precision, CodeSymbolModel.qualified_name)
+            .limit(limit)
         )
         return await self._read(statement)
 

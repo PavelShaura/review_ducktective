@@ -29,6 +29,10 @@ from ducktective.core.llm.value_objects import (
 from ducktective.core.retrieval.context import (
     DiffContext,
 )
+from ducktective.core.retrieval.ports import (
+    ChunkHit,
+    SymbolContext,
+)
 from ducktective.core.review.drafts import (
     FindingDraft,
 )
@@ -40,6 +44,7 @@ from ducktective.core.review.ports import (
     FileReviewResult,
 )
 from ducktective.core.types import (
+    CodeSymbolId,
     CommitSha,
     ContentHash,
     RepositoryId,
@@ -282,3 +287,76 @@ class FakeVcsProvider:
 
     async def list_tree(self, repository_path: Path, revision: str) -> dict[str, ContentHash]:
         return dict(self.tree)
+
+
+class FakeSymbolReader:
+    """Читатель символов на заранее заданных ответах."""
+
+    def __init__(
+        self,
+        *,
+        covering: list[SymbolContext] | None = None,
+        callees: list[SymbolContext] | None = None,
+        callers: list[SymbolContext] | None = None,
+        by_name: dict[str, list[SymbolContext]] | None = None,
+    ) -> None:
+        self._covering = covering or []
+        self._callees = callees or []
+        self._callers = callers or []
+        self._by_name = by_name or {}
+        self.asked_lines: list[tuple[int, int]] = []
+        self.asked_names: list[str] = []
+        self.asked_caller_ids: list[list[CodeSymbolId]] = []
+
+    async def symbols_covering(
+        self,
+        repository_id: RepositoryId,
+        path: str,
+        start_line: int,
+        end_line: int,
+    ) -> list[SymbolContext]:
+        self.asked_lines.append((start_line, end_line))
+        return self._covering
+
+    async def find_by_name(
+        self,
+        repository_id: RepositoryId,
+        name: str,
+        *,
+        limit: int = 10,
+    ) -> list[SymbolContext]:
+        self.asked_names.append(name)
+        return self._by_name.get(name, [])[:limit]
+
+    async def callees(
+        self,
+        symbol_ids: list[CodeSymbolId],
+        *,
+        limit: int = 20,
+    ) -> list[SymbolContext]:
+        return self._callees[:limit]
+
+    async def callers(
+        self,
+        symbol_ids: list[CodeSymbolId],
+        *,
+        limit: int = 20,
+    ) -> list[SymbolContext]:
+        self.asked_caller_ids.append(symbol_ids)
+        return self._callers[:limit]
+
+
+class FakeChunkSearch:
+    def __init__(self, hits: list[ChunkHit] | None = None) -> None:
+        self.hits = hits or []
+        self.queries: list[str] = []
+
+    async def search_chunks(
+        self,
+        repository_id: RepositoryId,
+        query: str,
+        *,
+        limit: int = 20,
+    ) -> list[ChunkHit]:
+        self.queries.append(query)
+        return self.hits[:limit]

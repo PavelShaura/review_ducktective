@@ -30,6 +30,10 @@ from ducktective.core.types import (
 from ducktective.retrieval.diff_context import (
     DiffContextBuilder,
 )
+from tests.fakes import (
+    FakeChunkSearch,
+    FakeSymbolReader,
+)
 
 
 REPOSITORY_ID = RepositoryId(uuid4())
@@ -93,64 +97,12 @@ def review_file(path: str = "app/report.py", new_start: int = 10, new_lines: int
     )
 
 
-class FakeSymbolReader:
-    def __init__(
-        self,
-        *,
-        covering: list[SymbolContext] | None = None,
-        callees: list[SymbolContext] | None = None,
-        callers: list[SymbolContext] | None = None,
-    ) -> None:
-        self._covering = covering or []
-        self._callees = callees or []
-        self._callers = callers or []
-        self.asked_lines: list[tuple[int, int]] = []
-
-    async def symbols_covering(
-        self,
-        repository_id: RepositoryId,
-        path: str,
-        start_line: int,
-        end_line: int,
-    ) -> list[SymbolContext]:
-        self.asked_lines.append((start_line, end_line))
-        return self._covering
-
-    async def callees(
-        self,
-        symbol_ids: list[CodeSymbolId],
-        *,
-        limit: int = 20,
-    ) -> list[SymbolContext]:
-        return self._callees
-
-    async def callers(
-        self,
-        symbol_ids: list[CodeSymbolId],
-        *,
-        limit: int = 20,
-    ) -> list[SymbolContext]:
-        return self._callers
-
-
-class FakeSearch:
-    def __init__(self, hits: list[ChunkHit] | None = None) -> None:
-        self.hits = hits or []
-
-    async def search_chunks(
-        self,
-        repository_id: RepositoryId,
-        query: str,
-        *,
-        limit: int = 20,
-    ) -> list[ChunkHit]:
-        return self.hits
-
-
 async def test_changed_lines_resolve_to_symbols() -> None:
     reader = FakeSymbolReader(covering=[symbol("app.report.Builder.build")])
 
-    context = await DiffContextBuilder(reader, FakeSearch()).build(REPOSITORY_ID, review_file())
+    context = await DiffContextBuilder(reader, FakeChunkSearch()).build(
+        REPOSITORY_ID, review_file()
+    )
 
     assert reader.asked_lines == [(10, 14)]
     assert [piece.qualified_name for piece in context.of_origin(ContextOrigin.CHANGED_SYMBOL)] == [
@@ -167,7 +119,9 @@ async def test_module_symbol_is_not_taken_as_changed() -> None:
         ]
     )
 
-    context = await DiffContextBuilder(reader, FakeSearch()).build(REPOSITORY_ID, review_file())
+    context = await DiffContextBuilder(reader, FakeChunkSearch()).build(
+        REPOSITORY_ID, review_file()
+    )
 
     assert [piece.qualified_name for piece in context.of_origin(ContextOrigin.CHANGED_SYMBOL)] == [
         "app.report.Builder.build"
@@ -180,7 +134,9 @@ async def test_callers_answer_what_breaks() -> None:
         callers=[symbol("app.api.handler", path="app/api.py")],
     )
 
-    context = await DiffContextBuilder(reader, FakeSearch()).build(REPOSITORY_ID, review_file())
+    context = await DiffContextBuilder(reader, FakeChunkSearch()).build(
+        REPOSITORY_ID, review_file()
+    )
 
     assert [piece.qualified_name for piece in context.of_origin(ContextOrigin.CALLER)] == [
         "app.api.handler"
@@ -202,7 +158,9 @@ async def test_neighbours_are_reduced_to_their_contract() -> None:
         ],
     )
 
-    context = await DiffContextBuilder(reader, FakeSearch()).build(REPOSITORY_ID, review_file())
+    context = await DiffContextBuilder(reader, FakeChunkSearch()).build(
+        REPOSITORY_ID, review_file()
+    )
 
     callee = context.of_origin(ContextOrigin.CALLEE)[0]
     assert "x = 1" not in callee.text
@@ -213,14 +171,16 @@ async def test_changed_symbol_is_taken_whole() -> None:
     body = "def build(self):\n    return self.compute()"
     reader = FakeSymbolReader(covering=[symbol("app.report.Builder.build", text=body)])
 
-    context = await DiffContextBuilder(reader, FakeSearch()).build(REPOSITORY_ID, review_file())
+    context = await DiffContextBuilder(reader, FakeChunkSearch()).build(
+        REPOSITORY_ID, review_file()
+    )
 
     assert context.of_origin(ContextOrigin.CHANGED_SYMBOL)[0].text == body
 
 
 async def test_similar_places_come_from_other_files() -> None:
     reader = FakeSymbolReader(covering=[symbol("app.report.Builder.build")])
-    search = FakeSearch([chunk("app/report.py"), chunk("app/billing.py")])
+    search = FakeChunkSearch([chunk("app/report.py"), chunk("app/billing.py")])
 
     context = await DiffContextBuilder(reader, search).build(REPOSITORY_ID, review_file())
 
@@ -239,7 +199,7 @@ async def test_budget_stops_collection_and_is_reported() -> None:
         ]
     )
 
-    context = await DiffContextBuilder(reader, FakeSearch(), token_budget=40).build(
+    context = await DiffContextBuilder(reader, FakeChunkSearch(), token_budget=40).build(
         REPOSITORY_ID,
         review_file(),
     )
@@ -254,7 +214,7 @@ async def test_structural_neighbours_outrank_search_results() -> None:
         covering=[symbol("app.report.Builder.build")],
         callers=[symbol("app.api.handler", path="app/api.py")],
     )
-    search = FakeSearch([chunk("app/other.py")])
+    search = FakeChunkSearch([chunk("app/other.py")])
 
     context = await DiffContextBuilder(reader, search).build(REPOSITORY_ID, review_file())
 
@@ -263,7 +223,7 @@ async def test_structural_neighbours_outrank_search_results() -> None:
 
 
 async def test_file_without_known_symbols_yields_empty_context() -> None:
-    context = await DiffContextBuilder(FakeSymbolReader(), FakeSearch()).build(
+    context = await DiffContextBuilder(FakeSymbolReader(), FakeChunkSearch()).build(
         REPOSITORY_ID,
         review_file(),
     )

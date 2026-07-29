@@ -60,6 +60,44 @@ uv run arq ducktective.reviewer.worker.WorkerSettings   # ревью
 uv run arq ducktective.indexer.worker.WorkerSettings    # индексация
 ```
 
+## MCP-сервер
+
+Навигация по собранному индексу как набор инструментов для внешнего агента:
+`search_code`, `get_definition`, `find_callers`, `get_file_context`.
+
+По умолчанию транспорт stdio — клиент поднимает сервер сам. Рабочим каталогом
+при этом оказывается каталог клиента, поэтому путь к `.env` указывается явно:
+
+```bash
+claude mcp add ducktective -- \
+  /путь/к/review_ducktective/.venv/bin/ducktective-mcp \
+  --env-file /путь/к/review_ducktective/.env
+```
+
+То же самое конфигурацией клиента:
+
+```json
+{
+  "mcpServers": {
+    "ducktective": {
+      "command": "/путь/к/review_ducktective/.venv/bin/ducktective-mcp",
+      "args": ["--env-file", "/путь/к/review_ducktective/.env"]
+    }
+  }
+}
+```
+
+Отдельно живущий сервис поднимается тем же исполняемым файлом:
+
+```bash
+uv run ducktective-mcp --transport http --port 8090
+```
+
+Файл настроек задаётся ключом `--env-file` или переменной `DUCKTECTIVE_ENV_FILE`;
+названный файл перекрывает окружение. Тенант — ключом `--tenant` или
+`MCP_TENANT_ID`: у stdio нет идентичности вызывающего, и сервер работает от того,
+кто его запустил. Репозиторий инструменты принимают именем или идентификатором.
+
 ## Индексация
 
 Перед тем как ревью сможет опираться на кодовую базу, её нужно разобрать:
@@ -242,6 +280,7 @@ packages/review_graph  узлы LangGraph и сборка графа
 apps/api               FastAPI: REST + WebSocket
 apps/indexer           воркер индексации
 apps/reviewer          воркер ревью
+apps/mcp_server        MCP-инструменты навигации по индексу
 ```
 
 Решения уровня кода — в `docs/adr/`.
