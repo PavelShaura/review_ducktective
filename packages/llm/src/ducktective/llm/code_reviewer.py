@@ -105,7 +105,11 @@ class LlmCodeReviewer:
             try:
                 return response, _parse_payload(response.content)
             except LlmOutputError as error:
-                last_error = error
+                last_error = (
+                    _truncated_error(response.model, requirements)
+                    if response.is_truncated
+                    else error
+                )
 
         raise last_error if last_error else LlmOutputError("Модель не вернула ответ")
 
@@ -129,6 +133,17 @@ class LlmCodeReviewer:
             model=response.model,
             is_cache_hit=response.is_cache_hit,
         )
+
+
+def _truncated_error(model: str, requirements: ModelRequirements) -> LlmOutputError:
+    """Обрыв на лимите — не то же самое, что сбившаяся с формата модель.
+
+    Разница видна только по finish_reason, а чинится по-разному: лимитом,
+    бюджетом контекста или моделью, не тратящей выход на размышления.
+    """
+    return LlmOutputError(
+        f"Модель {model} оборвала ответ на лимите {requirements.max_output_tokens} токенов"
+    )
 
 
 def _correction(error: LlmOutputError | None) -> LlmMessage:

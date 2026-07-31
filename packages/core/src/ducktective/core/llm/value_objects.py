@@ -49,3 +49,5 @@ class LlmResponse:
     usage: LlmUsage = field(default_factory=LlmUsage)
     latency_ms: int = 0
     is_cache_hit: bool = False
+    is_truncated: bool = False
+    """Модель упёрлась в лимит выходных токенов, и ответ оборван на полуслове."""

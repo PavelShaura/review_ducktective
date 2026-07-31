@@ -69,6 +69,12 @@ class LiteLlmClient:
         requirements: ModelRequirements,
         json_schema: dict[str, Any] | None = None,
     ) -> LlmResponse:
+        """Ответ модели, по возможности из кэша.
+
+        Оборванный на лимите ответ в кэш не кладётся: он не разберётся ни
+        сейчас, ни через неделю, а повторный прогон того же диффа получил бы
+        из кэша тот же мусор вместо новой попытки.
+        """
         choice = self._router.select(requirements)
         cache_key = build_cache_key(
             model=choice.model,
@@ -84,7 +90,7 @@ class LiteLlmClient:
 
         response = await self._invoke(choice, messages, requirements, json_schema)
 
-        if self._cache is not None:
+        if self._cache is not None and not response.is_truncated:
             await self._cache.put(cache_key, response)
         return response
 
@@ -135,8 +141,28 @@ class LiteLlmClient:
             latency_ms = int((time.monotonic() - started_at) * 1000)
             return _build_response(completion, choice, latency_ms)
 
-        raise LlmInvocationError(
-            f"Модель {choice.model} недоступна после {self._max_attempts} попыток: {last_error}"
+        raise self._unavailable_error(choice.model, last_error)
+
+    def _unavailable_error(self, model: str, last_error: Exception | None) -> LlmInvocationError:
+        """Разделяет причины: они чинятся по-разному.
+
+        Не ответившая вовремя модель требует другого таймаута или модели
+        полегче, а недоступный сервер — вообще другого разбирательства.
+        """
+        if isinstance(last_error, Timeout):
+            return LlmInvocationError(
+                f"Модель {model} не ответила за {self._timeout_seconds:.0f} с "
+                f"({self._max_attempts} попыт.)"
+            )
+
+        if isinstance(last_error, RateLimitError):
+            return LlmInvocationError(
+                f"Модель {model} ограничивает частоту запросов "
+                f"({self._max_attempts} попыт.): {last_error}"
+            )
+
+        return LlmInvocationError(
+            f"Модель {model} недоступна после {self._max_attempts} попыток: {last_error}"
         )
 
 
@@ -159,7 +185,8 @@ def _context_overflow_error(model: str, error: Exception) -> LlmContextOverflowE
 
 
 def _build_response(completion: Any, choice: Any, latency_ms: int) -> LlmResponse:
-    content = completion.choices[0].message.content or ""
+    choice_data = completion.choices[0]
+    content = choice_data.message.content or ""
     usage = getattr(completion, "usage", None)
 
     return LlmResponse(
@@ -172,6 +199,7 @@ def _build_response(completion: Any, choice: Any, latency_ms: int) -> LlmRespons
             cost_usd=_estimate_cost(completion),
         ),
         latency_ms=latency_ms,
+        is_truncated=getattr(choice_data, "finish_reason", None) == "length",
     )
 
 

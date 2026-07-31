@@ -13,8 +13,36 @@ const AVERAGE_SECONDS_PER_FILE = 25;
  */
 const REASON_SEPARATOR = /\n|;\s+(?=\S+:\s)/;
 
-/** Разбирает сообщение LlmContextOverflowError на модель, размер промпта и окно. */
-const CONTEXT_OVERFLOW_PATTERN = /модели (\S+): (\d+) токенов при окне (\d+)/;
+/**
+ * Сбои модели, у которых есть разбираемая структура. Порядок важен: строка
+ * проверяется до первого совпадения. Всё, что не совпало, показывается текстом.
+ */
+const FAILURE_PATTERNS: {
+  pattern: RegExp;
+  reason: string;
+  read: (match: RegExpExecArray) => { model: string; prompt: string | null; limit: string };
+}[] = [
+  {
+    pattern: /модели (\S+): (\d+) токенов при окне (\d+)/,
+    reason: "не поместился в окно",
+    read: (match) => ({ model: match[1]!, prompt: match[2]!, limit: `${match[3]!} токенов` }),
+  },
+  {
+    pattern: /Модель (\S+) оборвала ответ на лимите (\d+) токенов/,
+    reason: "ответ оборван",
+    read: (match) => ({ model: match[1]!, prompt: null, limit: `${match[2]!} токенов` }),
+  },
+  {
+    pattern: /Модель (\S+) не ответила за (\d+) с/,
+    reason: "не ответила",
+    read: (match) => ({ model: match[1]!, prompt: null, limit: `${match[2]!} с` }),
+  },
+  {
+    pattern: /Модель (\S+) ограничивает частоту/,
+    reason: "частота запросов",
+    read: (match) => ({ model: match[1]!, prompt: null, limit: "—" }),
+  },
+];
 
 interface Props {
   run: ReviewRun;
@@ -185,8 +213,8 @@ function ReasonTable({ rows }: { rows: ParsedReason[] }) {
             <th className="case-label py-1.5 pr-4 font-normal">файл</th>
             <th className="case-label py-1.5 pr-4 font-normal">причина</th>
             <th className="case-label py-1.5 pr-4 font-normal">модель</th>
-            <th className="case-label py-1.5 pr-4 text-right font-normal">токенов</th>
-            <th className="case-label py-1.5 text-right font-normal">окно</th>
+            <th className="case-label py-1.5 pr-4 text-right font-normal">промпт</th>
+            <th className="case-label py-1.5 text-right font-normal">предел</th>
           </tr>
         </thead>
         <tbody>
@@ -195,7 +223,7 @@ function ReasonTable({ rows }: { rows: ParsedReason[] }) {
               <td className="py-2 pr-4">
                 <span className="file-chip">{row.path}</span>
               </td>
-              {row.tokens === null ? (
+              {row.model === null ? (
                 <td className="py-2 text-[14px] text-paper-dim" colSpan={4}>
                   {row.detail}
                 </td>
@@ -204,9 +232,11 @@ function ReasonTable({ rows }: { rows: ParsedReason[] }) {
                   <td className="py-2 pr-4 text-[14px] text-paper-dim">{row.detail}</td>
                   <td className="py-2 pr-4 font-mono text-[13px] text-paper-dim">{row.model}</td>
                   <td className="py-2 pr-4 text-right font-mono text-[14px] text-critical">
-                    {row.tokens}
+                    {row.prompt ?? "—"}
                   </td>
-                  <td className="py-2 text-right font-mono text-[14px] text-paper">{row.window}</td>
+                  <td className="py-2 text-right font-mono text-[14px] text-paper">
+                    {row.limit ?? "—"}
+                  </td>
                 </>
               )}
             </tr>
@@ -221,8 +251,8 @@ interface ParsedReason {
   path: string | null;
   detail: string;
   model: string | null;
-  tokens: string | null;
-  window: string | null;
+  prompt: string | null;
+  limit: string | null;
 }
 
 function parseReason(line: string): ParsedReason {
@@ -230,17 +260,18 @@ function parseReason(line: string): ParsedReason {
   const path = separator === -1 ? null : line.slice(0, separator);
 
   if (path === null || path.includes(" ")) {
-    return { path: null, detail: line, model: null, tokens: null, window: null };
+    return { path: null, detail: line, model: null, prompt: null, limit: null };
   }
 
   const detail = line.slice(separator + 2);
-  const overflow = CONTEXT_OVERFLOW_PATTERN.exec(detail);
-  const [, model, tokens, window] = overflow ?? [];
-  if (model === undefined || tokens === undefined || window === undefined) {
-    return { path, detail, model: null, tokens: null, window: null };
+  for (const { pattern, reason, read } of FAILURE_PATTERNS) {
+    const match = pattern.exec(detail);
+    if (match !== null) {
+      return { path, detail: reason, ...read(match) };
+    }
   }
 
-  return { path, detail: "не поместился в окно", model, tokens, window };
+  return { path, detail, model: null, prompt: null, limit: null };
 }
 
 function Fact({ label, value }: { label: string; value: string }) {
