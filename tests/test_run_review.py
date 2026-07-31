@@ -272,6 +272,23 @@ async def test_failed_file_does_not_break_run() -> None:
     assert len(result.findings) == 1
 
 
+async def test_partial_failure_is_visible_on_completed_run() -> None:
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, run = prepare(unit_of_work)
+    reviewer = FakeCodeReviewer(
+        {SERVICE_FILE: [build_draft()]},
+        failing_paths={"app/helpers.py"},
+    )
+
+    result = await run_with(unit_of_work, tenant_id, run, reviewer)
+
+    assert result.status is ReviewStatus.COMPLETED
+    assert result.failure_reason is not None
+    assert "app/helpers.py" in result.failure_reason
+    assert "1 из 2" in result.failure_reason
+    assert result.failure_reason.count("\n") == 1
+
+
 async def test_run_fails_when_every_file_fails() -> None:
     unit_of_work = FakeUnitOfWork()
     tenant_id, run = prepare(unit_of_work)

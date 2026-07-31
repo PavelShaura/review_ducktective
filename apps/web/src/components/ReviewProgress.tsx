@@ -6,6 +6,16 @@ import type { ReviewRun } from "@/api/types";
 
 const AVERAGE_SECONDS_PER_FILE = 25;
 
+/**
+ * Причины разделены переносом строки, но в делах, заведённых раньше, они
+ * склеены точкой с запятой. Она разделяет только там, где дальше начинается
+ * путь: внутри текста ошибки точка с запятой ничего не разрывает.
+ */
+const REASON_SEPARATOR = /\n|;\s+(?=\S+:\s)/;
+
+/** Разбирает сообщение LlmContextOverflowError на модель, размер промпта и окно. */
+const CONTEXT_OVERFLOW_PATTERN = /модели (\S+): (\d+) токенов при окне (\d+)/;
+
 interface Props {
   run: ReviewRun;
 }
@@ -99,19 +109,138 @@ function RestartButton({ runId }: { runId: string }) {
   );
 }
 
+/**
+ * Прогон дошёл до конца, но часть файлов осталась непроверенной. Без такой
+ * отметки они выглядят как файлы без замечаний, и пустой результат читается
+ * как «всё чисто».
+ */
+export function ReviewDegraded({ run }: Props) {
+  if (!run.failure_reason) {
+    return null;
+  }
+
+  return (
+    <section className="border border-brass/50 bg-brass/10 px-5 py-4">
+      <h2 className="font-display text-2xl font-semibold text-paper">
+        Расследование прошло не полностью
+      </h2>
+      <Reasons text={run.failure_reason} />
+    </section>
+  );
+}
+
 export function ReviewFailure({ run }: Props) {
   return (
-    <section className="border border-critical/40 bg-critical/5 px-5 py-4">
-      <h2 className="font-display text-2xl font-semibold text-paper">
+    <section className="border-2 border-critical/70 bg-critical/10 px-5 py-4">
+      <span className="stamp inline-block text-[12px] text-critical">провал</span>
+      <h2 className="mt-2 font-display text-3xl font-semibold text-critical">
         Расследование не удалось
       </h2>
-      <p className="mt-2 text-[16px] text-paper-dim">
-        {run.failure_reason ??
-          "Причина не сохранилась. Загляните в журнал воркера — там будет подробность."}
-      </p>
+      {run.failure_reason ? (
+        <Reasons text={run.failure_reason} />
+      ) : (
+        <p className="mt-2 text-[16px] text-paper-dim">
+          Причина не сохранилась. Загляните в журнал воркера — там будет подробность.
+        </p>
+      )}
       <RestartButton runId={run.id} />
     </section>
   );
+}
+
+/**
+ * Причина хранится текстом: структуры в базе нет, разбор идёт здесь. Строки
+ * знакомого вида раскладываются по колонкам, всё прочее показывается как есть,
+ * чтобы незнакомая ошибка не пропала из виду.
+ */
+function Reasons({ text }: { text: string }) {
+  const lines = text
+    .split(REASON_SEPARATOR)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  const rows = lines.map(parseReason);
+  const failures = rows.filter((row) => row.path !== null);
+  const notes = rows.filter((row) => row.path === null);
+
+  return (
+    <div className="mt-3 space-y-3">
+      {notes.map((note, index) => (
+        <p key={`note-${index}`} className="text-[15px] leading-relaxed text-paper-dim">
+          {note.detail}
+        </p>
+      ))}
+
+      {failures.length > 0 ? <ReasonTable rows={failures} /> : null}
+    </div>
+  );
+}
+
+function ReasonTable({ rows }: { rows: ParsedReason[] }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full border-collapse text-left">
+        <thead>
+          <tr className="rule border-b">
+            <th className="case-label py-1.5 pr-4 font-normal">файл</th>
+            <th className="case-label py-1.5 pr-4 font-normal">причина</th>
+            <th className="case-label py-1.5 pr-4 font-normal">модель</th>
+            <th className="case-label py-1.5 pr-4 text-right font-normal">токенов</th>
+            <th className="case-label py-1.5 text-right font-normal">окно</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, index) => (
+            <tr key={`${index}-${row.path}`} className="align-top">
+              <td className="py-2 pr-4">
+                <span className="file-chip">{row.path}</span>
+              </td>
+              {row.tokens === null ? (
+                <td className="py-2 text-[14px] text-paper-dim" colSpan={4}>
+                  {row.detail}
+                </td>
+              ) : (
+                <>
+                  <td className="py-2 pr-4 text-[14px] text-paper-dim">{row.detail}</td>
+                  <td className="py-2 pr-4 font-mono text-[13px] text-paper-dim">{row.model}</td>
+                  <td className="py-2 pr-4 text-right font-mono text-[14px] text-critical">
+                    {row.tokens}
+                  </td>
+                  <td className="py-2 text-right font-mono text-[14px] text-paper">{row.window}</td>
+                </>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+interface ParsedReason {
+  path: string | null;
+  detail: string;
+  model: string | null;
+  tokens: string | null;
+  window: string | null;
+}
+
+function parseReason(line: string): ParsedReason {
+  const separator = line.indexOf(": ");
+  const path = separator === -1 ? null : line.slice(0, separator);
+
+  if (path === null || path.includes(" ")) {
+    return { path: null, detail: line, model: null, tokens: null, window: null };
+  }
+
+  const detail = line.slice(separator + 2);
+  const overflow = CONTEXT_OVERFLOW_PATTERN.exec(detail);
+  const [, model, tokens, window] = overflow ?? [];
+  if (model === undefined || tokens === undefined || window === undefined) {
+    return { path, detail, model: null, tokens: null, window: null };
+  }
+
+  return { path, detail: "не поместился в окно", model, tokens, window };
 }
 
 function Fact({ label, value }: { label: string; value: string }) {

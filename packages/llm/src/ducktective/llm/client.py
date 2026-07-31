@@ -1,3 +1,5 @@
+import asyncio
+import re
 import time
 from typing import (
     Any,
@@ -6,11 +8,13 @@ from typing import (
 import litellm
 from litellm.exceptions import (
     APIError,
+    ContextWindowExceededError,
     RateLimitError,
     Timeout,
 )
 
 from ducktective.core.exceptions import (
+    LlmContextOverflowError,
     LlmInvocationError,
 )
 from ducktective.core.llm.ports import (
@@ -31,6 +35,9 @@ from ducktective.llm.router import (
 
 
 RETRYABLE_ERRORS = (RateLimitError, Timeout, APIError)
+RETRY_BACKOFF_SECONDS = 1.0
+PROMPT_TOKENS_PATTERN = re.compile(r'"n_prompt_tokens"\s*:\s*(\d+)')
+CONTEXT_SIZE_PATTERN = re.compile(r'"n_ctx"\s*:\s*(\d+)')
 
 
 class LiteLlmClient:
@@ -112,10 +119,13 @@ class LiteLlmClient:
             started_at = time.monotonic()
             try:
                 completion = await litellm.acompletion(**payload)
+            except ContextWindowExceededError as error:
+                raise _context_overflow_error(choice.model, error) from error
             except RETRYABLE_ERRORS as error:
                 last_error = error
                 if attempt == self._max_attempts:
                     break
+                await asyncio.sleep(RETRY_BACKOFF_SECONDS * 2 ** (attempt - 1))
                 continue
             except Exception as error:
                 raise LlmInvocationError(
@@ -128,6 +138,24 @@ class LiteLlmClient:
         raise LlmInvocationError(
             f"Модель {choice.model} недоступна после {self._max_attempts} попыток: {last_error}"
         )
+
+
+def _context_overflow_error(model: str, error: Exception) -> LlmContextOverflowError:
+    """Достаёт размеры из ответа сервера.
+
+    Без цифр сообщение не подсказывает, что чинить: одно и то же переполнение
+    лечится и увеличением окна модели, и сокращением контекста.
+    """
+    text = str(error)
+    prompt_tokens = PROMPT_TOKENS_PATTERN.search(text)
+    context_size = CONTEXT_SIZE_PATTERN.search(text)
+    if prompt_tokens is None or context_size is None:
+        return LlmContextOverflowError(f"Промпт не поместился в окно контекста модели {model}")
+
+    return LlmContextOverflowError(
+        f"Промпт не поместился в окно контекста модели {model}: "
+        f"{prompt_tokens.group(1)} токенов при окне {context_size.group(1)}"
+    )
 
 
 def _build_response(completion: Any, choice: Any, latency_ms: int) -> LlmResponse:

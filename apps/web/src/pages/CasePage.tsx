@@ -8,7 +8,12 @@ import { FileDiff } from "@/components/FileDiff";
 import { FindingCard } from "@/components/FindingCard";
 import { ContextMark } from "@/components/ContextMark";
 import { SEVERITY_LABEL, SEVERITY_ORDER, SEVERITY_TEXT } from "@/components/SeverityMark";
-import { ReviewCancelled, ReviewFailure, ReviewProgress } from "@/components/ReviewProgress";
+import {
+  ReviewCancelled,
+  ReviewDegraded,
+  ReviewFailure,
+  ReviewProgress,
+} from "@/components/ReviewProgress";
 import { isInProgress, StatusMark } from "@/components/StatusMark";
 import { VERDICT_LABEL, VERDICT_ORDER, VERDICT_TEXT } from "@/components/VerdictStamp";
 import { formatDateTime, shortSha } from "@/lib/format";
@@ -69,6 +74,8 @@ export default function CasePage() {
       {isRunning ? <ReviewProgress run={run.data} /> : null}
       {hasFailed ? <ReviewFailure run={run.data} /> : null}
       {wasCancelled ? <ReviewCancelled run={run.data} /> : null}
+
+      {isRunning || hasFailed || wasCancelled ? null : <ReviewDegraded run={run.data} />}
 
       {isRunning || hasFailed || wasCancelled ? null : (
         <SeverityFilter

@@ -348,6 +348,15 @@ class ReviewRun(AggregateRoot):
         self.failure_reason = reason
         self.finished_at = datetime.now(UTC)
 
+    def record_degradation(self, reason: str) -> None:
+        """Отмечает, что прогон дошёл до конца не полностью.
+
+        Сбой на одном файле не отменяет остальных, поэтому прогон остаётся
+        успешным, а причина пишется рядом со статусом, а не вместо него:
+        иначе непроверенные файлы выглядят как файлы без замечаний.
+        """
+        self.failure_reason = reason
+
     def cancel(self) -> None:
         """Прекращает прогон по просьбе человека.
 

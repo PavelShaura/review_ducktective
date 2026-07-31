@@ -233,8 +233,10 @@ class RunReview(TransactionalUseCase):
                         duplicates += 1
 
             if failures and not drafts_by_file:
-                run.mark_failed("; ".join(failures))
+                run.mark_failed("\n".join(failures))
             else:
+                if failures:
+                    run.record_degradation(_describe_failures(failures, len(files)))
                 run.mark_completed()
 
             await self._commit_and_publish()
@@ -248,6 +250,16 @@ class RunReview(TransactionalUseCase):
                 failed_files=tuple(failures),
                 files_with_context=contextual_files,
             )
+
+
+def _describe_failures(failures: list[str], total_files: int) -> str:
+    """Причины, по которым часть файлов осталась без ревью.
+
+    Доля важнее перечня: она сразу говорит, стоит ли доверять пустому
+    результату по остальным файлам. Файл на строку — иначе перечень
+    из нескольких путей с цифрами нечитаем.
+    """
+    return "\n".join([f"Не проверено файлов: {len(failures)} из {total_files}.", *failures])
 
 
 def _accumulate(total: LlmUsage, addition: LlmUsage) -> LlmUsage:
