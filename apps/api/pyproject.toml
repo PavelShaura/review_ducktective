@@ -17,6 +17,7 @@ dependencies = [
     "redis>=5.2",
     "arq>=0.26",
     "ducktective-llm",
+    "ducktective-review-graph",
     "rich>=13.9",
 ]
 
@@ -28,6 +29,7 @@ ducktective-storage = { workspace = true }
 ducktective-vcs = { workspace = true }
 ducktective-observability = { workspace = true }
 ducktective-llm = { workspace = true }
+ducktective-review-graph = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

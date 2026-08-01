@@ -44,6 +44,9 @@ from ducktective.core.retrieval.context import (
     ContextPiece,
     DiffContext,
 )
+from ducktective.core.retrieval.ports import (
+    ContextBuilder,
+)
 from ducktective.core.review.drafts import (
     EvidenceDraft,
     FindingDraft,
@@ -65,6 +68,9 @@ from ducktective.core.types import (
     QualifiedName,
     RepositoryId,
     TenantId,
+)
+from ducktective.review_graph import (
+    LangGraphReviewPipeline,
 )
 from ducktective.vcs.diff_parser import (
     UnifiedDiffParser,
@@ -145,13 +151,20 @@ async def run_with(
     return (await review_with(unit_of_work, tenant_id, run, reviewer)).run
 
 
+def pipeline_for(
+    reviewer: FakeCodeReviewer,
+    context_builder: ContextBuilder | None = None,
+) -> LangGraphReviewPipeline:
+    return LangGraphReviewPipeline([reviewer], context_builder=context_builder)
+
+
 async def review_with(
     unit_of_work: FakeUnitOfWork,
     tenant_id: TenantId,
     run: ReviewRun,
     reviewer: FakeCodeReviewer,
 ) -> ReviewOutcome:
-    use_case = RunReview(unit_of_work, FakeEventPublisher(), reviewer)
+    use_case = RunReview(unit_of_work, FakeEventPublisher(), pipeline_for(reviewer))
     return await use_case.execute(tenant_id, run.id)
 
 
@@ -354,7 +367,7 @@ async def test_context_reaches_the_reviewer() -> None:
     reviewer = FakeCodeReviewer()
     builder = FakeContextBuilder(context_with("def handler(): ..."))
 
-    await RunReview(unit_of_work, FakeEventPublisher(), reviewer, builder).execute(
+    await RunReview(unit_of_work, FakeEventPublisher(), pipeline_for(reviewer, builder)).execute(
         tenant_id,
         run.id,
     )
@@ -374,8 +387,7 @@ async def test_quote_from_context_confirms_a_finding() -> None:
     outcome = await RunReview(
         unit_of_work,
         FakeEventPublisher(),
-        reviewer,
-        FakeContextBuilder(context_with(caller_line)),
+        pipeline_for(reviewer, FakeContextBuilder(context_with(caller_line))),
     ).execute(tenant_id, run.id)
 
     assert outcome.discarded_without_evidence == 0
@@ -393,8 +405,7 @@ async def test_quote_from_nowhere_is_still_discarded() -> None:
     outcome = await RunReview(
         unit_of_work,
         FakeEventPublisher(),
-        reviewer,
-        FakeContextBuilder(context_with("совсем другой код")),
+        pipeline_for(reviewer, FakeContextBuilder(context_with("совсем другой код"))),
     ).execute(tenant_id, run.id)
 
     assert outcome.discarded_without_evidence == 1
@@ -410,8 +421,7 @@ async def test_broken_index_does_not_stop_the_run() -> None:
     outcome = await RunReview(
         unit_of_work,
         FakeEventPublisher(),
-        reviewer,
-        FakeContextBuilder(failing=True),
+        pipeline_for(reviewer, FakeContextBuilder(failing=True)),
     ).execute(tenant_id, run.id)
 
     assert outcome.run.status is ReviewStatus.COMPLETED
@@ -424,7 +434,7 @@ async def test_run_without_builder_works_as_before() -> None:
     tenant_id, run = prepare(unit_of_work)
     reviewer = FakeCodeReviewer()
 
-    outcome = await RunReview(unit_of_work, FakeEventPublisher(), reviewer).execute(
+    outcome = await RunReview(unit_of_work, FakeEventPublisher(), pipeline_for(reviewer)).execute(
         tenant_id,
         run.id,
     )
@@ -442,8 +452,7 @@ async def test_context_usage_is_stored_on_the_run() -> None:
     outcome = await RunReview(
         unit_of_work,
         FakeEventPublisher(),
-        reviewer,
-        FakeContextBuilder(context_with("def handler(): ...")),
+        pipeline_for(reviewer, FakeContextBuilder(context_with("def handler(): ..."))),
     ).execute(tenant_id, run.id)
 
     assert outcome.run.files_with_context == len(reviewer.reviewed_paths)
@@ -457,8 +466,7 @@ async def test_empty_context_does_not_count_as_used() -> None:
     outcome = await RunReview(
         unit_of_work,
         FakeEventPublisher(),
-        FakeCodeReviewer(),
-        FakeContextBuilder(),
+        pipeline_for(FakeCodeReviewer(), FakeContextBuilder()),
     ).execute(tenant_id, run.id)
 
     assert outcome.run.files_with_context == 0

@@ -22,6 +22,9 @@ from ducktective.core.types import (
     CommitSha,
     TenantId,
 )
+from ducktective.review_graph import (
+    LangGraphReviewPipeline,
+)
 from ducktective.reviewer.worker import (
     run_review_task,
 )
@@ -63,7 +66,7 @@ def build_context(
     return {
         "session_factory": None,
         "redis": None,
-        "code_reviewer": reviewer,
+        "pipeline": LangGraphReviewPipeline([reviewer]),
         "context_builder": None,
     }
 

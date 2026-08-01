@@ -34,7 +34,7 @@ from ducktective.core.review.entities import (
     ReviewRun,
 )
 from ducktective.core.review.ports import (
-    CodeReviewer,
+    ReviewPipeline,
 )
 from ducktective.core.review.value_objects import (
     ReviewSource,
@@ -108,6 +108,16 @@ class _IndexedRepositoryContext:
         return await self._inner.build(self._repository_id, file)
 
 
+def redirect_context(
+    context_builder: ContextBuilder | None,
+    indexed_repository_id: RepositoryId | None,
+) -> ContextBuilder | None:
+    """Направляет сборку контекста в проиндексированный репозиторий."""
+    if context_builder is None or indexed_repository_id is None:
+        return context_builder
+    return _IndexedRepositoryContext(context_builder, indexed_repository_id)
+
+
 class EvaluationHarness:
     """Прогоняет набор случаев через тот же путь, что и настоящее ревью.
 
@@ -119,21 +129,9 @@ class EvaluationHarness:
     повторный прогон перестаёт быть повторным.
     """
 
-    def __init__(
-        self,
-        reviewer: CodeReviewer,
-        diff_parser: DiffParser,
-        *,
-        context_builder: ContextBuilder | None = None,
-        indexed_repository_id: RepositoryId | None = None,
-    ) -> None:
-        self._reviewer = reviewer
+    def __init__(self, pipeline: ReviewPipeline, diff_parser: DiffParser) -> None:
+        self._pipeline = pipeline
         self._diff_parser = diff_parser
-        self._context_builder = (
-            _IndexedRepositoryContext(context_builder, indexed_repository_id)
-            if context_builder is not None and indexed_repository_id is not None
-            else context_builder
-        )
 
     async def run(
         self,
@@ -197,8 +195,7 @@ class EvaluationHarness:
             outcome = await RunReview(
                 unit_of_work,
                 NullEventPublisher(),
-                self._reviewer,
-                self._context_builder,
+                self._pipeline,
             ).execute(tenant_id, run.id)
         except DomainError as error:
             return CaseOutcome(case=case, failure=str(error))

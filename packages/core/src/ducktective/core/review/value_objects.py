@@ -66,6 +66,19 @@ class EvidenceKind(StrEnum):
     TOOL_OUTPUT = "tool_output"
 
 
+SEVERITY_RANK = {
+    Severity.CRITICAL: 3,
+    Severity.MAJOR: 2,
+    Severity.MINOR: 1,
+    Severity.NITPICK: 0,
+}
+"""Порядок уровней от старшего к младшему.
+
+Нужен там, где находки сравниваются между собой: порог `--fail-on`, отбор
+представителя при слиянии дублей.
+"""
+
+
 TERMINAL_STATUSES = frozenset(
     {
         ReviewStatus.COMPLETED,

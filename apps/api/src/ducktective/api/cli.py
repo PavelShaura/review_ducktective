@@ -84,6 +84,9 @@ from ducktective.core.retrieval.ports import (
 from ducktective.core.review.entities import (
     ReviewRun,
 )
+from ducktective.core.review.ports import (
+    ReviewPipeline,
+)
 from ducktective.core.review.value_objects import (
     FindingStatus,
     Severity,
@@ -99,6 +102,7 @@ from ducktective.evals.cases import (
 from ducktective.evals.harness import (
     EvaluationHarness,
     EvaluationOutcome,
+    redirect_context,
 )
 from ducktective.evals.reporting import (
     render_evaluation,
@@ -122,6 +126,9 @@ from ducktective.llm.factory import (
 )
 from ducktective.retrieval.session_scope import (
     SessionScopedContextBuilder,
+)
+from ducktective.review_graph import (
+    LangGraphReviewPipeline,
 )
 from ducktective.storage.database import (
     build_engine,
@@ -165,8 +172,7 @@ SEVERITY_RANK = {
 class ReviewContext:
     unit_of_work: UnitOfWork
     event_publisher: EventPublisher
-    code_reviewer: LlmCodeReviewer
-    context_builder: ContextBuilder | None = None
+    pipeline: ReviewPipeline
 
 
 def main() -> None:
@@ -338,8 +344,7 @@ async def _review(arguments: argparse.Namespace) -> int:
                 outcome = await RunReview(
                     context.unit_of_work,
                     context.event_publisher,
-                    context.code_reviewer,
-                    context.context_builder,
+                    context.pipeline,
                 ).execute(tenant_id, prepared.id)
                 run = outcome.run
     except (EmptyDiffError, NoMatchingFilesError) as error:
@@ -380,10 +385,11 @@ async def _evaluate(arguments: argparse.Namespace) -> int:
 
     try:
         harness = EvaluationHarness(
-            _build_reviewer(settings, redis_client=None),
+            _build_pipeline(
+                _build_reviewer(settings, redis_client=None),
+                context_builder=redirect_context(context_builder, indexed_repository_id),
+            ),
             UnifiedDiffParser(),
-            context_builder=context_builder,
-            indexed_repository_id=indexed_repository_id,
         )
         with console.status(
             f"[dim]Прогоняю {len(dataset.cases)} случаев × {arguments.repeat}…[/]",
@@ -522,7 +528,7 @@ async def _build_context(settings: Settings, *, no_store: bool) -> AsyncIterator
         yield ReviewContext(
             unit_of_work=InMemoryUnitOfWork(),
             event_publisher=NullEventPublisher(),
-            code_reviewer=_build_reviewer(settings, redis_client=None),
+            pipeline=_build_pipeline(_build_reviewer(settings, redis_client=None)),
         )
         return
 
@@ -533,8 +539,10 @@ async def _build_context(settings: Settings, *, no_store: bool) -> AsyncIterator
         yield ReviewContext(
             unit_of_work=SqlAlchemyUnitOfWork(session_factory),
             event_publisher=RedisEventPublisher(redis_client),
-            code_reviewer=_build_reviewer(settings, redis_client=redis_client),
-            context_builder=_build_context_builder(settings, session_factory),
+            pipeline=_build_pipeline(
+                _build_reviewer(settings, redis_client=redis_client),
+                context_builder=_build_context_builder(settings, session_factory),
+            ),
         )
     finally:
         await redis_client.aclose()
@@ -562,6 +570,19 @@ def _build_context_builder(
         embedder,
         token_budget=settings.context_token_budget,
     )
+
+
+def _build_pipeline(
+    reviewer: LlmCodeReviewer,
+    *,
+    context_builder: ContextBuilder | None = None,
+) -> ReviewPipeline:
+    """Собирает граф ревью.
+
+    Ревьюер пока один: специализированные узлы появляются на шаге 4.2, а граф
+    от их числа не зависит — он получает набор и разводит по нему файлы.
+    """
+    return LangGraphReviewPipeline([reviewer], context_builder=context_builder)
 
 
 def _build_reviewer(settings: Settings, *, redis_client: Redis | None) -> LlmCodeReviewer:

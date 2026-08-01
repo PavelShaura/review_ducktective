@@ -19,6 +19,10 @@ from ducktective.core.review.entities import (
     ReviewFile,
     ReviewRun,
 )
+from ducktective.core.review.pipeline import (
+    PipelineOutcome,
+    PipelineRequest,
+)
 from ducktective.core.types import (
     RepositoryId,
     ReviewRunId,
@@ -63,3 +67,29 @@ class CodeReviewer(Protocol):
         requirements: ModelRequirements,
         context: DiffContext | None = None,
     ) -> FileReviewResult: ...
+
+
+class CancellationCheck(Protocol):
+    """Спрашивает, не попросили ли прекратить расследование.
+
+    Конвейер отвечает за то, когда спросить, а use case — за то, где хранится
+    ответ. Прервать сам запрос к модели нечем, поэтому проверка имеет смысл
+    только между файлами.
+    """
+
+    async def __call__(self) -> bool: ...
+
+
+class ReviewPipeline(Protocol):
+    """Путь от подготовленных файлов до проверенных находок.
+
+    Объявлен портом, потому что use case зависит от того, что дифф можно
+    прогнать через конвейер, но не от того, что конвейер — граф LangGraph.
+    """
+
+    async def run(
+        self,
+        request: PipelineRequest,
+        *,
+        cancellation: CancellationCheck | None = None,
+    ) -> PipelineOutcome: ...
