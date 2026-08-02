@@ -68,6 +68,7 @@ def build_context(
         "redis": None,
         "pipeline": LangGraphReviewPipeline([reviewer]),
         "context_builder": None,
+        "max_output_tokens": 4096,
     }
 
 

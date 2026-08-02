@@ -82,9 +82,11 @@ export interface ReviewRun {
   status: ReviewStatus;
   base_sha: string;
   head_sha: string;
+  head_subject: string | null;
   totals: Record<string, number>;
   failure_reason: string | null;
   files_with_context: number;
+  reviewable_files: number;
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
@@ -98,6 +100,7 @@ export interface ReviewRunSummary {
   status: ReviewStatus;
   base_sha: string;
   head_sha: string;
+  head_subject: string | null;
   totals: Record<string, number>;
   severity_counts: Record<string, number>;
   findings_total: number;

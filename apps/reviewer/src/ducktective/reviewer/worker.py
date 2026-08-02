@@ -42,7 +42,7 @@ from ducktective.llm.embedder import (
     LiteLlmEmbedder,
 )
 from ducktective.llm.factory import (
-    build_code_reviewer,
+    build_code_reviewers,
 )
 from ducktective.observability.logging import (
     configure_logging,
@@ -94,21 +94,20 @@ async def startup(ctx: dict[str, Any]) -> None:
         ),
         token_budget=settings.context_token_budget,
     )
+    ctx["max_output_tokens"] = settings.llm_max_output_tokens
     ctx["pipeline"] = LangGraphReviewPipeline(
-        [
-            build_code_reviewer(
-                redis_client=redis_client,
-                local_provider=settings.local_llm_provider,
-                local_model=settings.local_review_model,
-                local_base_url=settings.local_llm_base_url,
-                local_api_key=settings.local_llm_api_key,
-                cloud_model=settings.cloud_review_model,
-                cloud_api_key=settings.anthropic_api_key,
-                cloud_enabled=settings.cloud_providers_allowed,
-                cache_ttl_seconds=settings.llm_cache_ttl_seconds,
-                timeout_seconds=settings.llm_timeout_seconds,
-            )
-        ],
+        build_code_reviewers(
+            redis_client=redis_client,
+            local_provider=settings.local_llm_provider,
+            local_model=settings.local_review_model,
+            local_base_url=settings.local_llm_base_url,
+            local_api_key=settings.local_llm_api_key,
+            cloud_model=settings.cloud_review_model,
+            cloud_api_key=settings.anthropic_api_key,
+            cloud_enabled=settings.cloud_providers_allowed,
+            cache_ttl_seconds=settings.llm_cache_ttl_seconds,
+            timeout_seconds=settings.llm_timeout_seconds,
+        ),
         context_builder=ctx["context_builder"],
     )
 
@@ -137,6 +136,7 @@ async def run_review_task(ctx: dict[str, Any], run_id: str, tenant_id: str) -> d
         SqlAlchemyUnitOfWork(ctx["session_factory"]),
         RedisEventPublisher(ctx["redis"]),
         ctx["pipeline"],
+        max_output_tokens=ctx["max_output_tokens"],
     )
 
     logger.info("review.started", run_id=run_id)

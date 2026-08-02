@@ -271,6 +271,23 @@ async def test_local_only_policy_forbids_cloud() -> None:
     assert reviewer.reviewed_paths == [SERVICE_FILE, "app/helpers.py"]
 
 
+async def test_output_limit_from_settings_reaches_the_model() -> None:
+    """Место под ответ вычитается из окна модели, поэтому лимит настраивается."""
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, run = prepare(unit_of_work)
+    reviewer = FakeCodeReviewer()
+
+    use_case = RunReview(
+        unit_of_work,
+        FakeEventPublisher(),
+        pipeline_for(reviewer),
+        max_output_tokens=1800,
+    )
+    await use_case.execute(tenant_id, run.id)
+
+    assert {item.max_output_tokens for item in reviewer.seen_requirements} == {1800}
+
+
 async def test_failed_file_does_not_break_run() -> None:
     unit_of_work = FakeUnitOfWork()
     tenant_id, run = prepare(unit_of_work)

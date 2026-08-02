@@ -258,6 +258,7 @@ class ReviewRun(AggregateRoot):
     head_sha: CommitSha
     status: ReviewStatus
     created_at: datetime
+    head_subject: str | None = None
     created_by: UserId | None = None
     external_pull_request_id: str | None = None
     started_at: datetime | None = None
@@ -278,6 +279,7 @@ class ReviewRun(AggregateRoot):
         repository_id: RepositoryId,
         source: ReviewSource,
         diff: Diff,
+        head_subject: str | None = None,
         created_by: UserId | None = None,
         external_pull_request_id: str | None = None,
     ) -> Self:
@@ -293,6 +295,7 @@ class ReviewRun(AggregateRoot):
             head_sha=diff.head_sha,
             status=ReviewStatus.QUEUED,
             created_at=datetime.now(UTC),
+            head_subject=head_subject,
             created_by=created_by,
             external_pull_request_id=external_pull_request_id,
             files=[_build_file(diff_file) for diff_file in diff.files],

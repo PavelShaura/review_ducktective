@@ -132,6 +132,19 @@ async def test_every_reviewer_sees_every_file() -> None:
     assert outcome.proposed == 2
 
 
+async def test_specialised_reviewer_is_not_called_without_its_signals() -> None:
+    """План — ограничитель стоимости: лишний проход стоит минуты (D-018)."""
+    security = named(FakeCodeReviewer(), "reviewer:security")
+    correctness = named(FakeCodeReviewer({SERVICE_FILE: [build_draft()]}), "reviewer:correctness")
+    pipeline = LangGraphReviewPipeline([security, correctness])
+
+    outcome = await pipeline.run(build_request())
+
+    assert security.reviewed_paths == []
+    assert sorted(correctness.reviewed_paths) == [HELPERS_FILE, SERVICE_FILE]
+    assert len(outcome.findings) == 1
+
+
 async def test_duplicate_keeps_the_draft_that_survives_verification() -> None:
     """Иначе черновик с выдуманной цитатой вытесняет достоверного двойника."""
     invented = named(
@@ -164,6 +177,31 @@ async def test_displaced_draft_is_counted_by_its_own_defect() -> None:
     assert outcome.discarded_outside_diff == 1
     assert outcome.discarded_as_duplicate == 0
     assert len(outcome.findings) == 1
+
+
+async def test_file_read_by_one_reviewer_is_not_counted_as_unreviewed() -> None:
+    """Сбой случается на паре «файл × ревьюер», а отчитываются файлами."""
+    failing = named(FakeCodeReviewer(failing_paths={SERVICE_FILE}), "reviewer:one")
+    reading = named(FakeCodeReviewer({SERVICE_FILE: [build_draft()]}), "reviewer:two")
+    pipeline = LangGraphReviewPipeline([failing, reading])
+
+    outcome = await pipeline.run(build_request())
+
+    assert outcome.unreviewed_files == ()
+    assert outcome.reviewed_files == 2
+    assert len(outcome.findings) == 1
+
+
+async def test_same_failure_from_every_reviewer_is_reported_once() -> None:
+    """Обрыв на лимите настигает всех четверых на одном и том же файле."""
+    first = named(FakeCodeReviewer(failing_paths={SERVICE_FILE}), "reviewer:one")
+    second = named(FakeCodeReviewer(failing_paths={SERVICE_FILE}), "reviewer:two")
+    pipeline = LangGraphReviewPipeline([first, second])
+
+    outcome = await pipeline.run(build_request())
+
+    assert outcome.unreviewed_files == (SERVICE_FILE,)
+    assert len(outcome.failed_files) == 1
 
 
 async def test_failed_file_does_not_stop_the_others() -> None:

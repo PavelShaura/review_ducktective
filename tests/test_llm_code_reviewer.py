@@ -27,6 +27,9 @@ from ducktective.core.review.entities import (
     ReviewFile,
     ReviewHunk,
 )
+from ducktective.core.review.reviewers import (
+    ReviewerKind,
+)
 from ducktective.core.review.value_objects import (
     FindingCategory,
     Severity,
@@ -38,6 +41,7 @@ from ducktective.core.types import (
 from ducktective.llm.code_reviewer import (
     DEFAULT_ATTEMPTS,
     LlmCodeReviewer,
+    system_prompt,
 )
 from tests.fakes import (
     FakeLlmClient,
@@ -152,6 +156,46 @@ async def test_prompt_contains_file_metadata_and_patch() -> None:
     assert "app/service.py" in user_message
     assert "Language: python" in user_message
     assert "@@ -10,2 +10,3 @@" in user_message
+
+
+async def test_reviewer_speaks_with_the_prompt_of_its_specialisation() -> None:
+    file = build_file()
+    client = FakeLlmClient('{"findings": []}')
+    reviewer = LlmCodeReviewer(client, kind=ReviewerKind.SECURITY)
+
+    await reviewer.review_file(
+        file,
+        patch_text=file.to_unified_patch(),
+        requirements=ModelRequirements(),
+    )
+
+    assert reviewer.name == "reviewer:security"
+    assert "security engineer" in client.calls[0][0].content
+
+
+@pytest.mark.parametrize("kind", list(ReviewerKind))
+def test_every_prompt_carries_the_common_part(kind: ReviewerKind) -> None:
+    """Рубрика severity и формат ответа одинаковы у всех четверых."""
+    prompt = system_prompt(kind)
+
+    assert prompt.startswith("You are")
+    assert "Severity rubric" in prompt
+    assert "Return JSON only" in prompt
+
+
+@pytest.mark.parametrize("kind", list(ReviewerKind))
+def test_prompts_say_nothing_about_linters(kind: ReviewerKind) -> None:
+    """Территория линтера в ревью не обсуждается — ни запретом, ни разрешением."""
+    prompt = system_prompt(kind).lower()
+
+    assert "linter" not in prompt
+    assert "type checker" not in prompt
+
+
+def test_focus_differs_between_reviewers() -> None:
+    prompts = {system_prompt(kind) for kind in ReviewerKind}
+
+    assert len(prompts) == len(ReviewerKind)
 
 
 class FlakyLlmClient:

@@ -40,6 +40,14 @@ class VcsProvider(Protocol):
         """Изменения, подготовленные к коммиту, но ещё не закоммиченные."""
         ...
 
+    async def get_commit_subject(self, repository_path: Path, revision: str) -> str | None:
+        """Первая строка сообщения коммита.
+
+        Не обязана существовать: у проиндексированных, но не закоммиченных
+        изменений сообщения ещё нет.
+        """
+        ...
+
     async def get_file_content(
         self,
         repository_path: Path,

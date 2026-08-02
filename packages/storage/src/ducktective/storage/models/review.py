@@ -65,6 +65,7 @@ class ReviewRunModel(Base):
     external_pull_request_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     base_sha: Mapped[str] = mapped_column(String(64))
     head_sha: Mapped[str] = mapped_column(String(64))
+    head_subject: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[ReviewStatus] = mapped_column(
         Enum(ReviewStatus, name="review_status", values_callable=enum_values)
     )

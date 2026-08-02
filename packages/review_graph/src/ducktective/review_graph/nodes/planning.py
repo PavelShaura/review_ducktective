@@ -6,6 +6,12 @@ from langgraph.types import (
     Send,
 )
 
+from ducktective.core.review.planning import (
+    select_reviewers,
+)
+from ducktective.core.review.reviewers import (
+    reviewer_kind_of,
+)
 from ducktective.review_graph.const import (
     AGGREGATE_NODE,
     REVIEW_NODE,
@@ -24,24 +30,36 @@ def plan_review_node(
 ) -> StateNode:
     """Решает, кто и какой файл смотрит.
 
-    Пока ревьюер один и получает все файлы. Здесь же появится выбор подмножества
-    по языку, пути и содержимому файла: четыре прохода на каждый файл при
-    локальной модели превращают прогон в многочасовой, и ограничивать стоимость
-    больше негде.
+    Единственный узел, где принимается решение о стоимости прогона (D-018):
+    четыре прохода на каждый файл при локальной модели превращают прогон
+    на десять файлов в двухчасовой, а ревьюеры по построению независимы —
+    ограничивать их число больше негде.
+
+    Сам отбор — доменное правило, узел лишь переводит вид ревьюера в имя
+    собранного. Ревьюер, за именем которого не стоит известной домену
+    специализации, получает все файлы: политика о нём ничего не знает
+    и потому его не сокращает.
     """
+    specialised = {
+        kind: name for name in reviewer_names if (kind := reviewer_kind_of(name)) is not None
+    }
+    unspecialised = tuple(name for name in reviewer_names if reviewer_kind_of(name) is None)
 
     async def plan_review(state: ReviewGraphState) -> dict[str, Any]:
-        tasks = tuple(
-            FileReviewTask(
-                file=file,
-                context=state.contexts.get(file.path),
-                reviewer_name=name,
-                requirements=state.request.requirements,
+        tasks: list[FileReviewTask] = []
+        for file in state.request.files:
+            context = state.contexts.get(file.path)
+            selected = select_reviewers(file, context=context, available=specialised.keys())
+            tasks.extend(
+                FileReviewTask(
+                    file=file,
+                    context=context,
+                    reviewer_name=name,
+                    requirements=state.request.requirements,
+                )
+                for name in (*(specialised[kind] for kind in selected), *unspecialised)
             )
-            for file in state.request.files
-            for name in reviewer_names
-        )
-        return {"tasks": tasks}
+        return {"tasks": tuple(tasks)}
 
     return plan_review
 

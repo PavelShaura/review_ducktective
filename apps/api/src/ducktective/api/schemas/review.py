@@ -258,15 +258,25 @@ class CancelRunResponse(BaseModel):
 
 
 class ReviewRunResponse(BaseModel):
+    """Прогон целиком.
+
+    `reviewable_files` — сколько файлов вообще отдавалось модели. Правило отбора
+    живёт в домене и исключает не только слишком большие патчи, но и удалённые
+    файлы. Клиенту его неоткуда знать, а считая по-своему, он делит одно число
+    на другое из другого счёта.
+    """
+
     id: UUID
     repository_id: UUID
     source: ReviewSource
     status: ReviewStatus
     base_sha: str
     head_sha: str
+    head_subject: str | None
     totals: dict[str, int]
     failure_reason: str | None
     files_with_context: int
+    reviewable_files: int
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
@@ -282,9 +292,11 @@ class ReviewRunResponse(BaseModel):
             status=run.status,
             base_sha=run.base_sha,
             head_sha=run.head_sha,
+            head_subject=run.head_subject,
             totals=run.severity_totals,
             failure_reason=run.failure_reason,
             files_with_context=run.files_with_context,
+            reviewable_files=len(run.reviewable_files()),
             created_at=run.created_at,
             started_at=run.started_at,
             finished_at=run.finished_at,
@@ -299,6 +311,7 @@ class ReviewRunSummary(BaseModel):
     status: ReviewStatus
     base_sha: str
     head_sha: str
+    head_subject: str | None
     totals: dict[str, int]
     severity_counts: dict[str, int]
     findings_total: int
@@ -314,6 +327,7 @@ class ReviewRunSummary(BaseModel):
             status=run.status,
             base_sha=run.base_sha,
             head_sha=run.head_sha,
+            head_subject=run.head_subject,
             totals=run.severity_totals,
             severity_counts=run.severity_counts,
             findings_total=len(run.findings),

@@ -3,6 +3,7 @@ import asyncio
 import json
 from collections.abc import (
     AsyncIterator,
+    Sequence,
 )
 from contextlib import (
     asynccontextmanager,
@@ -87,6 +88,10 @@ from ducktective.core.review.entities import (
 from ducktective.core.review.ports import (
     ReviewPipeline,
 )
+from ducktective.core.review.reviewers import (
+    ReviewerKind,
+    reviewer_name,
+)
 from ducktective.core.review.value_objects import (
     FindingStatus,
     Severity,
@@ -114,15 +119,15 @@ from ducktective.indexing.python_parser import (
     PythonParser,
 )
 from ducktective.llm.code_reviewer import (
-    SINGLE_PASS_PROMPT_FILE,
+    PROMPT_SET_NAME,
     LlmCodeReviewer,
-    load_prompt,
+    system_prompt,
 )
 from ducktective.llm.embedder import (
     LiteLlmEmbedder,
 )
 from ducktective.llm.factory import (
-    build_code_reviewer,
+    build_code_reviewers,
 )
 from ducktective.retrieval.session_scope import (
     SessionScopedContextBuilder,
@@ -345,6 +350,7 @@ async def _review(arguments: argparse.Namespace) -> int:
                     context.unit_of_work,
                     context.event_publisher,
                     context.pipeline,
+                    max_output_tokens=settings.llm_max_output_tokens,
                 ).execute(tenant_id, prepared.id)
                 run = outcome.run
     except (EmptyDiffError, NoMatchingFilesError) as error:
@@ -386,7 +392,7 @@ async def _evaluate(arguments: argparse.Namespace) -> int:
     try:
         harness = EvaluationHarness(
             _build_pipeline(
-                _build_reviewer(settings, redis_client=None),
+                _build_reviewers(settings, redis_client=None),
                 context_builder=redirect_context(context_builder, indexed_repository_id),
             ),
             UnifiedDiffParser(),
@@ -431,6 +437,16 @@ async def _find_indexed_repository(
     return repository.id
 
 
+def _prompt_set_text() -> str:
+    """Промпты всех ревьюеров одной записью.
+
+    Прогон качества сравнивается с другим прогоном, и сравнивать его можно
+    только зная, чем именно ревьюили. Ревьюеров теперь несколько, поэтому
+    версией промпта считается набор целиком, а не текст одного из них.
+    """
+    return "\n\n".join(f"# {reviewer_name(kind)}\n\n{system_prompt(kind)}" for kind in ReviewerKind)
+
+
 async def _save_evaluation(
     settings: Settings,
     dataset: EvalDataset,
@@ -443,8 +459,8 @@ async def _save_evaluation(
                 dataset,
                 outcome,
                 model=settings.local_review_model,
-                prompt=load_prompt(SINGLE_PASS_PROMPT_FILE),
-                prompt_name=SINGLE_PASS_PROMPT_FILE,
+                prompt=_prompt_set_text(),
+                prompt_name=PROMPT_SET_NAME,
             )
             await session.commit()
     finally:
@@ -528,7 +544,7 @@ async def _build_context(settings: Settings, *, no_store: bool) -> AsyncIterator
         yield ReviewContext(
             unit_of_work=InMemoryUnitOfWork(),
             event_publisher=NullEventPublisher(),
-            pipeline=_build_pipeline(_build_reviewer(settings, redis_client=None)),
+            pipeline=_build_pipeline(_build_reviewers(settings, redis_client=None)),
         )
         return
 
@@ -540,7 +556,7 @@ async def _build_context(settings: Settings, *, no_store: bool) -> AsyncIterator
             unit_of_work=SqlAlchemyUnitOfWork(session_factory),
             event_publisher=RedisEventPublisher(redis_client),
             pipeline=_build_pipeline(
-                _build_reviewer(settings, redis_client=redis_client),
+                _build_reviewers(settings, redis_client=redis_client),
                 context_builder=_build_context_builder(settings, session_factory),
             ),
         )
@@ -573,20 +589,19 @@ def _build_context_builder(
 
 
 def _build_pipeline(
-    reviewer: LlmCodeReviewer,
+    reviewers: Sequence[LlmCodeReviewer],
     *,
     context_builder: ContextBuilder | None = None,
 ) -> ReviewPipeline:
-    """Собирает граф ревью.
-
-    Ревьюер пока один: специализированные узлы появляются на шаге 4.2, а граф
-    от их числа не зависит — он получает набор и разводит по нему файлы.
-    """
-    return LangGraphReviewPipeline([reviewer], context_builder=context_builder)
+    return LangGraphReviewPipeline(reviewers, context_builder=context_builder)
 
 
-def _build_reviewer(settings: Settings, *, redis_client: Redis | None) -> LlmCodeReviewer:
-    return build_code_reviewer(
+def _build_reviewers(
+    settings: Settings,
+    *,
+    redis_client: Redis | None,
+) -> tuple[LlmCodeReviewer, ...]:
+    return build_code_reviewers(
         redis_client=redis_client,
         local_provider=settings.local_llm_provider,
         local_model=settings.local_review_model,

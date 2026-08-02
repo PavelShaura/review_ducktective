@@ -112,6 +112,18 @@ class LocalGitProvider:
         """Дифф проиндексированных изменений относительно HEAD."""
         return await self._run(repository_path, "diff", *DIFF_ARGUMENTS, "--cached")
 
+    async def get_commit_subject(self, repository_path: Path, revision: str) -> str | None:
+        """Первая строка сообщения коммита.
+
+        Подпись дела, а не его содержимое: не разрешилась ревизия — дело
+        останется без подписи, но заводиться от этого не перестанет.
+        """
+        try:
+            subject = await self._run(repository_path, "log", "-1", "--format=%s", revision)
+        except VcsOperationError:
+            return None
+        return subject.strip() or None
+
     async def get_file_content(
         self,
         repository_path: Path,

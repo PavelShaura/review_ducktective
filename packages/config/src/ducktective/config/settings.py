@@ -54,6 +54,14 @@ class Settings(BaseSettings):
     cloud_review_model: str = "anthropic/claude-sonnet-5"
     llm_timeout_seconds: float = 180.0
     llm_cache_ttl_seconds: int = 7 * 24 * 3600
+    llm_max_output_tokens: int = 4096
+    """Сколько токенов ответа запрашивается у модели.
+
+    Место под ответ резервируется в окне модели, поэтому значение вычитается
+    из того, что остаётся под сам дифф: при окне 8192 запрошенные 4096 съедают
+    половину. У reasoning-моделей на размышления уходит большая часть выхода,
+    и там снижать это число нельзя — нужно поднимать окно.
+    """
 
     anthropic_api_key: str = ""
     openai_api_key: str = ""

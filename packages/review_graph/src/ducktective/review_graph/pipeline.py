@@ -59,6 +59,11 @@ class LangGraphReviewPipeline:
             config={"max_concurrency": self._max_concurrent_reviews},
         )
         state = ReviewGraphState.model_validate(raw)
+        read_paths = {
+            item.file.path
+            for item in state.results
+            if item.failure is None and not item.is_cancelled
+        }
 
         return PipelineOutcome(
             findings=state.findings,
@@ -67,13 +72,34 @@ class LangGraphReviewPipeline:
             discarded_outside_diff=state.discarded_outside_diff,
             discarded_without_evidence=state.discarded_without_evidence,
             discarded_as_duplicate=state.discarded_as_duplicate,
-            failed_files=tuple(item.failure for item in state.results if item.failure),
-            files_with_context=state.files_with_context,
-            reviewed_files=sum(
-                1 for item in state.results if item.failure is None and not item.is_cancelled
+            failed_files=_failure_reasons(state.results),
+            unreviewed_files=tuple(
+                sorted(
+                    {
+                        item.file.path
+                        for item in state.results
+                        if item.failure is not None and item.file.path not in read_paths
+                    }
+                )
             ),
+            files_with_context=state.files_with_context,
+            reviewed_files=len(read_paths),
             is_cancelled=any(item.is_cancelled for item in state.results),
         )
+
+
+def _failure_reasons(results: list[FileDrafts]) -> tuple[str, ...]:
+    """Причины сбоев, по одной на каждую свою.
+
+    Ревьюеров несколько, и упираются они в одно и то же: обрыв на лимите
+    выхода настигает всех четверых на одном и том же большом файле. Четыре
+    одинаковые строки в отчёте не добавляют к нему ничего, кроме длины.
+    """
+    seen: dict[str, None] = {}
+    for item in results:
+        if item.failure is not None:
+            seen.setdefault(item.failure, None)
+    return tuple(seen)
 
 
 def _total_usage(results: list[FileDrafts]) -> LlmUsage:

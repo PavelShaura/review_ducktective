@@ -91,6 +91,7 @@ class PrepareReviewRun(TransactionalUseCase):
                 raise PermissionDeniedError("Репозиторий принадлежит другому тенанту")
             repository_path = repository.local_path
 
+        head_subject = None
         if command.staged:
             base_sha = await self._vcs_provider.resolve_revision(repository_path, "HEAD")
             head_sha = CommitSha(STAGED_REVISION)
@@ -103,6 +104,7 @@ class PrepareReviewRun(TransactionalUseCase):
                 base=command.base,
                 head=command.head,
             )
+            head_subject = await self._vcs_provider.get_commit_subject(repository_path, head_sha)
 
         diff = self._diff_parser.parse(patch_text, base_sha=base_sha, head_sha=head_sha)
         if diff.is_empty:
@@ -118,6 +120,7 @@ class PrepareReviewRun(TransactionalUseCase):
                 repository_id=command.repository_id,
                 source=command.source,
                 diff=diff,
+                head_subject=head_subject,
                 created_by=command.created_by,
                 external_pull_request_id=command.external_pull_request_id,
             )

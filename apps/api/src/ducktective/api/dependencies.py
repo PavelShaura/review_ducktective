@@ -17,7 +17,7 @@ from ducktective.llm.code_reviewer import (
     LlmCodeReviewer,
 )
 from ducktective.llm.factory import (
-    build_code_reviewer,
+    build_code_reviewers,
 )
 from ducktective.storage.events.redis_publisher import (
     RedisEventPublisher,
@@ -59,9 +59,9 @@ def get_task_queue(request: Request) -> ArqRedis:
     return queue
 
 
-def get_code_reviewer(request: Request) -> LlmCodeReviewer:
+def get_code_reviewers(request: Request) -> tuple[LlmCodeReviewer, ...]:
     settings = get_settings(request)
-    return build_code_reviewer(
+    return build_code_reviewers(
         redis_client=request.app.state.redis,
         local_provider=settings.local_llm_provider,
         local_model=settings.local_review_model,
@@ -80,5 +80,5 @@ UnitOfWorkDependency = Annotated[SqlAlchemyUnitOfWork, Depends(get_unit_of_work)
 EventPublisherDependency = Annotated[RedisEventPublisher, Depends(get_event_publisher)]
 VcsProviderDependency = Annotated[LocalGitProvider, Depends(get_vcs_provider)]
 DiffParserDependency = Annotated[UnifiedDiffParser, Depends(get_diff_parser)]
-CodeReviewerDependency = Annotated[LlmCodeReviewer, Depends(get_code_reviewer)]
+CodeReviewersDependency = Annotated[tuple[LlmCodeReviewer, ...], Depends(get_code_reviewers)]
 TaskQueueDependency = Annotated[ArqRedis, Depends(get_task_queue)]

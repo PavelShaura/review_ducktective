@@ -32,6 +32,14 @@ const CHANGE_LABEL: Record<string, string> = {
   renamed: "переименован",
 };
 
+/** Тип изменения различается цветом штампа, а не только словом. */
+const CHANGE_TAG: Record<string, string> = {
+  added: "tag-added",
+  modified: "tag-modified",
+  deleted: "tag-deleted",
+  renamed: "tag-renamed",
+};
+
 const EXPAND_STEP = 20;
 
 /** Совпадает с MAX_CONTEXT_WINDOW_LINES на сервере: больше он всё равно не отдаст. */
@@ -54,18 +62,20 @@ export function FileDiff({ runId, file, findings }: Props) {
         type="button"
         onClick={() => setIsOpen((open) => !open)}
         aria-expanded={isOpen}
-        className="flex w-full items-center gap-3 px-5 py-3 text-left transition-colors hover:bg-ink-hover"
+        className="file-tab flex w-full items-center gap-3 px-5 py-3 text-left"
       >
-        <span aria-hidden className="font-mono text-[13px] text-paper-dim">
+        <span aria-hidden className="font-mono text-[13px] opacity-60">
           {isOpen ? "▾" : "▸"}
         </span>
-        <span className="truncate font-mono text-[14px] text-paper">{file.path}</span>
-        <span className="case-label ml-auto shrink-0">
-          {CHANGE_LABEL[file.change_type] ?? file.change_type}
-          <span className="mx-2 text-diff-add">+{file.added_lines}</span>
-          <span className="text-diff-del">−{file.removed_lines}</span>
+        <span className="truncate font-mono text-[14px] font-bold">{file.path}</span>
+        <span className="ml-auto flex shrink-0 items-center gap-1.5">
+          <span className={`tag tag-stamp ${CHANGE_TAG[file.change_type] ?? "tag-modified"}`}>
+            {CHANGE_LABEL[file.change_type] ?? file.change_type}
+          </span>
+          <span className="tag tag-add">+{file.added_lines}</span>
+          <span className="tag tag-del">−{file.removed_lines}</span>
           {findings.length > 0 ? (
-            <span className="ml-3 text-brass">находок {findings.length}</span>
+            <span className="tag tag-findings">находок {findings.length}</span>
           ) : null}
         </span>
       </button>

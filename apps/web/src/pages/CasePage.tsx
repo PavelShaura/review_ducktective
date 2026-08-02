@@ -152,7 +152,7 @@ function findWithoutFiles(
 
 function CaseHeader({ run }: { run: ReviewRun }) {
   return (
-    <header className="border border-tweed-dim bg-ink-raised px-5 py-4">
+    <header className="case-file px-5 py-4">
       <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
         <span className="case-label">дело</span>
         <h1 className="font-display text-3xl font-semibold tracking-tight text-brass">
@@ -163,6 +163,8 @@ function CaseHeader({ run }: { run: ReviewRun }) {
           <ContextMark run={run} />
         </span>
       </div>
+
+      {run.head_subject ? <p className="case-subject mt-3">{run.head_subject}</p> : null}
 
       <dl className="mt-3 grid grid-cols-2 gap-x-8 gap-y-1.5 sm:grid-cols-4">
         <Fact label="ревизии" value={`${shortSha(run.base_sha)} → ${shortSha(run.head_sha)}`} />

@@ -194,6 +194,31 @@ async def test_staged_mode_uses_index_instead_of_revisions() -> None:
     assert run.head_sha == STAGED_REVISION
     assert run.base_sha == "sha-HEAD"
     assert len(run.files) == 2
+    assert run.head_subject is None
+
+
+async def test_run_is_captioned_by_the_head_commit() -> None:
+    """Восемь символов хеша не говорят, что за изменение расследуется."""
+    unit_of_work = FakeUnitOfWork()
+    publisher = FakeEventPublisher()
+    tenant_id = TenantId(uuid4())
+    repository = register_repository(unit_of_work, tenant_id)
+    vcs_provider = FakeVcsProvider(
+        MODIFIED_AND_ADDED_PATCH,
+        commit_subject="feat(review): вынести проверку доказательств в домен",
+    )
+    use_case = PrepareReviewRun(unit_of_work, publisher, vcs_provider, UnifiedDiffParser())
+
+    run = await use_case.execute(
+        PrepareReviewRunCommand(
+            tenant_id=tenant_id,
+            repository_id=repository.id,
+            base="main",
+            head="feature",
+        )
+    )
+
+    assert run.head_subject == "feat(review): вынести проверку доказательств в домен"
 
 
 async def test_staged_mode_without_changes_is_reported() -> None:

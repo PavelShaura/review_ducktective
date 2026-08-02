@@ -1,7 +1,14 @@
+from collections.abc import (
+    Iterable,
+)
+
 from redis.asyncio import (
     Redis,
 )
 
+from ducktective.core.review.reviewers import (
+    ReviewerKind,
+)
 from ducktective.llm.cache import (
     RedisResponseCache,
 )
@@ -51,7 +58,7 @@ def build_model_router(
     )
 
 
-def build_code_reviewer(
+def build_code_reviewers(
     *,
     redis_client: Redis | None,
     local_provider: str,
@@ -63,14 +70,18 @@ def build_code_reviewer(
     cloud_enabled: bool,
     cache_ttl_seconds: int,
     timeout_seconds: float,
-) -> LlmCodeReviewer:
-    """Собирает ревьюера целиком.
+    kinds: Iterable[ReviewerKind] = ReviewerKind,
+) -> tuple[LlmCodeReviewer, ...]:
+    """Собирает набор ревьюеров целиком.
 
     Фабрика принимает примитивы, а не объект настроек: пакет моделей не должен
     зависеть от конфигурации приложений, но собирать зависимости в каждом
     приложении заново — источник расхождений.
 
-    Без Redis ревьюер работает без кэша: в автономном режиме внешних сервисов
+    Клиент один на всех: он не хранит состояния прогона, а общий кэш ответов
+    экономит повтор там, где два ревьюера получили одинаковую подсказку.
+
+    Без Redis ревьюеры работают без кэша: в автономном режиме внешних сервисов
     нет, а повторные прогоны там редки.
     """
     router = build_model_router(
@@ -88,4 +99,4 @@ def build_code_reviewer(
         else None
     )
     client = LiteLlmClient(router, cache=cache, timeout_seconds=timeout_seconds)
-    return LlmCodeReviewer(client)
+    return tuple(LlmCodeReviewer(client, kind=kind) for kind in kinds)

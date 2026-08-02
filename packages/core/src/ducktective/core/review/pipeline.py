@@ -46,6 +46,14 @@ class PipelineOutcome:
     discarded_without_evidence: int = 0
     discarded_as_duplicate: int = 0
     failed_files: tuple[str, ...] = ()
+    unreviewed_files: tuple[str, ...] = ()
+    """Файлы, которых не прочитал ни один ревьюер.
+
+    Считается отдельно от `failed_files`: сбой случается на паре «файл ×
+    ревьюер», и файл, упавший у одного из четверых, всё же проревьюен. Меряя
+    беду в парах, прогон отчитывается о непроверенных файлах, которых нет.
+    """
+
     files_with_context: int = 0
     reviewed_files: int = 0
     is_cancelled: bool = False

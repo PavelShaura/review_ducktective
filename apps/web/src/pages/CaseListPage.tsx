@@ -66,7 +66,12 @@ function RepositorySection({ repository }: { repository: Repository }) {
         <DeleteRepositoryButton repositoryId={repository.id} name={repository.name} />
       </div>
 
-      {runs.data && runs.data.length > 0 ? (
+      {runs.isError ? (
+        <p className="border border-critical/50 bg-ink-raised px-5 py-6 text-[15px] text-critical">
+          Дела этого репозитория не читаются: сервис ответил ошибкой. Загляните в журнал
+          API — заведённые дела никуда не делись.
+        </p>
+      ) : runs.data && runs.data.length > 0 ? (
         <ol className="space-y-3">
           {runs.data.map((run) => (
             <CaseRow key={run.id} run={run} />
@@ -86,27 +91,34 @@ function CaseRow({ run }: { run: ReviewRunSummary }) {
 
   return (
     <li className="flex items-center gap-3 rounded-case border border-tweed-dim bg-ink-raised pr-4 transition-colors hover:border-brass hover:bg-ink-hover">
-      <Link
-        to={`/cases/${run.id}`}
-        className="flex min-w-0 flex-1 flex-wrap items-center gap-x-5 gap-y-2 px-5 py-4"
-      >
-        <span className="font-mono text-[14px] text-brass">{shortSha(run.id)}</span>
-
-        <span className="font-mono text-[14px] text-paper-dim">
-          {shortSha(run.base_sha)} → {shortSha(run.head_sha)}
+      <Link to={`/cases/${run.id}`} className="min-w-0 flex-1 px-5 py-4">
+        <span className="flex min-w-0 items-baseline gap-x-4">
+          <span className="shrink-0 font-mono text-[14px] text-brass">{shortSha(run.id)}</span>
+          {run.head_subject ? (
+            <span className="truncate font-display text-[17px] font-semibold text-paper">
+              {run.head_subject}
+            </span>
+          ) : null}
+          <span className="ml-auto shrink-0">
+            <StatusMark status={run.status} />
+          </span>
         </span>
 
-        <StatusMark status={run.status} />
+        <span className="mt-1.5 flex flex-wrap items-center gap-x-5 gap-y-2">
+          <span className="font-mono text-[13px] text-paper-dim">
+            {shortSha(run.base_sha)} → {shortSha(run.head_sha)}
+          </span>
 
-        <span className="ml-auto flex flex-wrap items-center gap-3">
-          {run.findings_total === 0 ? (
-            <span className="case-label">чисто</span>
-          ) : (
-            SEVERITY_ORDER.filter((severity) => counts[severity]).map((severity) => (
-              <SeverityCount key={severity} severity={severity} count={counts[severity] ?? 0} />
-            ))
-          )}
-          <span className="case-label">файлов {run.changed_files}</span>
+          <span className="ml-auto flex flex-wrap items-center gap-3">
+            {run.findings_total === 0 ? (
+              <span className="case-label">чисто</span>
+            ) : (
+              SEVERITY_ORDER.filter((severity) => counts[severity]).map((severity) => (
+                <SeverityCount key={severity} severity={severity} count={counts[severity] ?? 0} />
+              ))
+            )}
+            <span className="case-label">файлов {run.changed_files}</span>
+          </span>
         </span>
       </Link>
 

@@ -16,9 +16,13 @@ const SETTLED_STATUSES = new Set(["completed", "failed", "cancelled"]);
  * Счёт файлов с контекстом записывается вместе с находками, то есть в самом
  * конце. До этого момента ноль означает «ещё не считали», а не «индекса нет»,
  * и говорить о диффе без окружения рано.
+ *
+ * Знаменатель приходит с сервера. Считая его здесь, интерфейс делил на число
+ * из другого счёта: удалённые файлы модели не отдаются, но в списке остаются,
+ * и полный охват выглядел как «13 из 14».
  */
 export function ContextMark({ run }: Props) {
-  const reviewable = run.files.filter((file) => !file.is_too_large).length;
+  const reviewable = run.reviewable_files;
   const covered = run.files_with_context;
 
   if (covered > 0) {

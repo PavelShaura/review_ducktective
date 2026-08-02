@@ -70,6 +70,33 @@
       repeating-linear-gradient(-45deg, var(--color-paper) 0 1px, transparent 1px 4px);
   }
 
+  /* Те же нити, что на фоне страницы, но пригодные как слой заливки: поверхности
+     из них набирают фактуру, не расходясь с общим полотном. Светлым поверхностям
+     нужна своя нить — на бумаге волокно темнее самой бумаги, а не светлее. */
+  :root {
+    --texture-tweed: repeating-linear-gradient(
+        45deg,
+        color-mix(in srgb, var(--color-paper) 4%, transparent) 0 1px,
+        transparent 1px 3px
+      ),
+      repeating-linear-gradient(
+        -45deg,
+        color-mix(in srgb, var(--color-paper) 3%, transparent) 0 1px,
+        transparent 1px 4px
+      );
+
+    --texture-paper: repeating-linear-gradient(
+        45deg,
+        color-mix(in srgb, var(--color-tweed) 7%, transparent) 0 1px,
+        transparent 1px 3px
+      ),
+      repeating-linear-gradient(
+        -45deg,
+        color-mix(in srgb, var(--color-tweed) 5%, transparent) 0 1px,
+        transparent 1px 4px
+      );
+  }
+
   :focus-visible {
     outline: 2px solid var(--color-brass);
     outline-offset: 2px;
@@ -92,6 +119,153 @@
 
   .rule {
     border-top: 1px solid var(--color-tweed-dim);
+  }
+
+  /* Корешок файла — строка, которой файл открывают. Код под ней светлее самой
+     страницы, поэтому корешок уводится в тень: иначе заголовок и содержимое
+     читаются как одна поверхность и границы файла не видно. */
+  /* Корешок файла — бумажный ярлык на папке: единственная светлая поверхность
+     интерфейса. Код под ним тёмный, и спутать ярлык с содержимым больше нельзя.
+     Тёмный текст по светлому требует и веса: тонкий шрифт на бумаге выглядит
+     выцветшим. */
+  .file-tab {
+    background:
+      var(--texture-paper),
+      linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--color-paper) 38%, var(--color-tweed) 62%),
+        color-mix(in srgb, var(--color-paper) 26%, var(--color-tweed) 74%)
+      );
+    color: var(--color-ink);
+    border-bottom: 1px solid transparent;
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.3),
+      0 1px 3px rgb(0 0 0 / 0.45);
+    transition: background 150ms ease;
+  }
+
+  .file-tab:hover {
+    background:
+      var(--texture-paper),
+      linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--color-paper) 46%, var(--color-tweed) 54%),
+        color-mix(in srgb, var(--color-paper) 34%, var(--color-tweed) 66%)
+      );
+  }
+
+  /* Раскрытый файл: латунь на торце и отбивка от кода. */
+  .file-tab[aria-expanded="true"] {
+    border-bottom-color: var(--color-tweed);
+    box-shadow:
+      inset 4px 0 0 var(--color-brass-dim),
+      inset 0 1px 0 rgb(255 255 255 / 0.3),
+      0 3px 8px -3px rgb(0 0 0 / 0.7);
+  }
+
+  /* Метки рядом с путём: на бумаге они тонут, поэтому у каждой своя подложка
+     и своя рамка. Плюс и минус читаются цветом раньше, чем цифрой. */
+  /* Метки на ярлыке набраны как штампы: заливка вместо контура. На бумаге
+     полупрозрачный фон выцветает, и цифры прироста теряются раньше всего —
+     а именно по ним файл и выбирают. */
+  .tag {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    border-radius: 3px;
+    padding: 0.1rem 0.45rem;
+    border: 1px solid rgb(0 0 0 / 0.3);
+    white-space: nowrap;
+    color: var(--color-paper);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.3);
+  }
+
+  /* Тип изменения набран капителью, числа — цифрами: даже в одном цвете
+     «добавлен» и «+36» не спутать. */
+  .tag-stamp {
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+  }
+
+  .tag-added {
+    background: color-mix(in srgb, var(--color-diff-add) 42%, black);
+  }
+
+  .tag-modified {
+    background: color-mix(in srgb, var(--color-tweed) 46%, black);
+  }
+
+  .tag-deleted {
+    background: color-mix(in srgb, var(--color-diff-del) 42%, black);
+  }
+
+  .tag-renamed {
+    background: color-mix(in srgb, var(--color-minor) 34%, black);
+  }
+
+  .tag-add {
+    background: color-mix(in srgb, var(--color-diff-add) 42%, black);
+  }
+
+  .tag-del {
+    background: color-mix(in srgb, var(--color-diff-del) 42%, black);
+  }
+
+  /* Находки — единственная метка, ради которой файл открывают: латунь целиком,
+     тёмным по светлому. По светлоте латунь близка к папке, поэтому форму держит
+     тёмная обводка, а не сама заливка. */
+  .tag-findings {
+    color: var(--color-ink);
+    background: var(--color-brass);
+    border-color: color-mix(in srgb, var(--color-ink) 75%, var(--color-brass));
+    font-weight: 700;
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--color-ink) 30%, transparent),
+      0 1px 3px rgb(0 0 0 / 0.45);
+  }
+
+  /* Обложка дела. Шапка соседствует с сообщениями о ходе прогона, и без
+     собственной фактуры они читаются как один блок: та же рамка, тот же фон.
+     Папка лежит поверх стола — отсюда градиент, блик по верхней кромке
+     и падающая тень. */
+  .case-file {
+    background:
+      var(--texture-tweed),
+      linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--color-ink-raised) 84%, var(--color-paper) 16%),
+        var(--color-ink-raised) 60%,
+        color-mix(in srgb, var(--color-ink-raised) 88%, black)
+      );
+    border: 1px solid var(--color-tweed);
+    border-radius: 3px;
+    box-shadow:
+      inset 0 1px 0 color-mix(in srgb, var(--color-paper) 18%, transparent),
+      0 16px 30px -16px rgb(0 0 0 / 0.85);
+  }
+
+  /* Название дела — табличка, привинченная к обложке. Заголовок коммита
+     единственное в шапке, что написано человеком, поэтому он и выступает:
+     блик по верхней кромке, тень под нижней, латунь на торце. */
+  .case-subject {
+    font-family: var(--font-display);
+    font-size: 19px;
+    line-height: 1.4;
+    color: var(--color-paper);
+    background:
+      var(--texture-tweed),
+      linear-gradient(180deg, var(--color-ink-hover), var(--color-ink-sunken));
+    border: 1px solid var(--color-tweed-dim);
+    border-left: 3px solid var(--color-brass);
+    border-radius: 3px;
+    padding: 0.5rem 0.85rem;
+    max-width: 68ch;
+    box-shadow:
+      inset 0 1px 0 color-mix(in srgb, var(--color-paper) 18%, transparent),
+      inset 0 -2px 4px rgb(0 0 0 / 0.4),
+      0 3px 7px -2px rgb(0 0 0 / 0.65);
+    text-shadow: 0 1px 0 rgb(0 0 0 / 0.55);
   }
 
   /* Плашка замечания лежит поверх кода и должна читаться как отдельный предмет.

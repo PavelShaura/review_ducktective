@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { api } from "@/api/client";
 import type { FeedbackVerdict, Finding } from "@/api/types";
+import { FindingOrigin } from "@/components/FindingOrigin";
 import {
   SEVERITY_BORDER,
   SEVERITY_LABEL,
@@ -39,7 +40,10 @@ export function FindingCard({ runId, finding }: Props) {
               {SEVERITY_LABEL[finding.severity]}
             </span>
             <span className="mx-2 opacity-40">·</span>
-            {finding.category}
+            <FindingOrigin
+              category={finding.category}
+              producerName={finding.producer_name}
+            />
             <span className="mx-2 opacity-40">·</span>
             строки {finding.line_start}
             {finding.line_end === finding.line_start ? "" : `–${finding.line_end}`}

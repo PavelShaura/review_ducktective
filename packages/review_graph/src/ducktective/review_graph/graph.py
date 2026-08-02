@@ -64,8 +64,8 @@ def build_review_graph(
 
     Разбор диффа и привязка ханков к символам сюда не входят: первое делает
     `PrepareReviewRun` до постановки в очередь, второе — сборщик контекста.
-    Узлы статического анализа и оформления вывода появятся вместе с пакетом
-    анализаторов и применением патчей — пустых узлов в графе нет.
+    Узел оформления вывода появится вместе с применением патчей — пустых
+    узлов в графе нет.
     """
     builder: StateGraph[ReviewGraphState, ReviewRuntimeContext, ReviewGraphState, ReviewGraphState]
     builder = StateGraph(ReviewGraphState, context_schema=ReviewRuntimeContext)

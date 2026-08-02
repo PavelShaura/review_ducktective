@@ -40,6 +40,10 @@ from ducktective.core.review.entities import (
 from ducktective.core.review.ports import (
     FileReviewResult,
 )
+from ducktective.core.review.reviewers import (
+    ReviewerKind,
+    reviewer_name,
+)
 from ducktective.core.review.value_objects import (
     FindingCategory,
     Severity,
@@ -60,7 +64,8 @@ ORIGIN_TITLES = {
 }
 
 PROMPTS_DIRECTORY = Path(__file__).parent / "prompts"
-SINGLE_PASS_PROMPT_FILE = "single_pass_review.md"
+COMMON_PROMPT_FILE = "review_common.md"
+PROMPT_SET_NAME = "reviewers/specialised-v1"
 JSON_BLOCK_PATTERN = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
 
 
@@ -69,18 +74,35 @@ def load_prompt(file_name: str) -> str:
     return (PROMPTS_DIRECTORY / file_name).read_text(encoding="utf-8")
 
 
+@cache
+def system_prompt(kind: ReviewerKind) -> str:
+    """Промпт специализации поверх общей части.
+
+    Общая часть — правила доказательств, граница с линтером, рубрика severity
+    и формат вывода — одна на всех: четыре копии одного текста разъезжаются
+    на первой же правке, и разница в результатах перестаёт быть объяснимой.
+    """
+    return f"{load_prompt(f'reviewers/{kind.value}.md')}\n\n{load_prompt(COMMON_PROMPT_FILE)}"
+
+
 class LlmCodeReviewer:
     """Ревьюер одного файла: один вызов модели на файл.
 
-    Промежуточный вариант до появления графа со специализированными узлами:
-    один промпт покрывает все категории находок.
+    Специализация задаётся видом — от него зависят имя ревьюера и промпт
+    фокуса. Кого позвать на конкретный файл, решает не ревьюер, а план прогона.
     """
 
-    name = "reviewer:single-pass"
-
-    def __init__(self, llm_client: LlmClient, *, attempts: int = DEFAULT_ATTEMPTS) -> None:
+    def __init__(
+        self,
+        llm_client: LlmClient,
+        *,
+        kind: ReviewerKind = ReviewerKind.CORRECTNESS,
+        attempts: int = DEFAULT_ATTEMPTS,
+    ) -> None:
         self._llm_client = llm_client
+        self._kind = kind
         self._attempts = attempts
+        self.name = reviewer_name(kind)
 
     async def _ask(
         self,
@@ -122,7 +144,7 @@ class LlmCodeReviewer:
         context: DiffContext | None = None,
     ) -> FileReviewResult:
         messages = [
-            LlmMessage(role=LlmRole.SYSTEM, content=load_prompt(SINGLE_PASS_PROMPT_FILE)),
+            LlmMessage(role=LlmRole.SYSTEM, content=system_prompt(self._kind)),
             LlmMessage(role=LlmRole.USER, content=_build_user_message(file, patch_text, context)),
         ]
         response, payload = await self._ask(messages, requirements)
@@ -140,9 +162,12 @@ def _truncated_error(model: str, requirements: ModelRequirements) -> LlmOutputEr
 
     Разница видна только по finish_reason, а чинится по-разному: лимитом,
     бюджетом контекста или моделью, не тратящей выход на размышления.
+
+    Лимит назван лимитом ответа: рядом в отчёте стоит окно модели, и два
+    числа в токенах, из которых одно безымянное, читаются как одно и то же.
     """
     return LlmOutputError(
-        f"Модель {model} оборвала ответ на лимите {requirements.max_output_tokens} токенов"
+        f"Модель {model} исчерпала лимит ответа в {requirements.max_output_tokens} токенов"
     )
 
 

@@ -34,6 +34,9 @@ from ducktective.core.types import (
 )
 
 
+DEFAULT_MAX_OUTPUT_TOKENS = ModelRequirements().max_output_tokens
+
+
 class ReviewCancelledError(ApplicationError):
     """Расследование попросили прекратить.
 
@@ -90,9 +93,12 @@ class RunReview(TransactionalUseCase):
         unit_of_work: UnitOfWork,
         event_publisher: EventPublisher,
         pipeline: ReviewPipeline,
+        *,
+        max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
     ) -> None:
         super().__init__(unit_of_work, event_publisher)
         self._pipeline = pipeline
+        self._max_output_tokens = max_output_tokens
 
     async def _is_cancelled(self, run_id: ReviewRunId) -> bool:
         async with self._unit_of_work:
@@ -114,6 +120,7 @@ class RunReview(TransactionalUseCase):
                 requirements=ModelRequirements(
                     needs_deep_reasoning=True,
                     cloud_allowed=repository.cloud_processing_allowed,
+                    max_output_tokens=self._max_output_tokens,
                 ),
             )
             run.mark_running()
@@ -142,7 +149,11 @@ class RunReview(TransactionalUseCase):
             else:
                 if result.failed_files:
                     run.record_degradation(
-                        _describe_failures(result.failed_files, len(request.files))
+                        _describe_failures(
+                            result.failed_files,
+                            unreviewed=len(result.unreviewed_files),
+                            total_files=len(request.files),
+                        )
                     )
                 run.mark_completed()
 
@@ -159,11 +170,17 @@ class RunReview(TransactionalUseCase):
             )
 
 
-def _describe_failures(failures: tuple[str, ...], total_files: int) -> str:
+def _describe_failures(failures: tuple[str, ...], *, unreviewed: int, total_files: int) -> str:
     """Причины, по которым часть файлов осталась без ревью.
 
     Доля важнее перечня: она сразу говорит, стоит ли доверять пустому
-    результату по остальным файлам. Файл на строку — иначе перечень
-    из нескольких путей с цифрами нечитаем.
+    результату по остальным файлам. Считается она по файлам, которых
+    не прочитал никто: сбой случается на паре «файл × ревьюер», и файл,
+    упавший у одного из четверых, проревьюен — просто не всеми глазами.
     """
-    return "\n".join([f"Не проверено файлов: {len(failures)} из {total_files}.", *failures])
+    headline = (
+        f"Не проверено файлов: {unreviewed} из {total_files}."
+        if unreviewed
+        else "Часть ревьюеров не дочитала свои файлы — замечаний может быть меньше обычного."
+    )
+    return "\n".join([headline, *failures])

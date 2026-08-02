@@ -216,6 +216,7 @@ class FakeCodeReviewer:
         self.failing_paths = failing_paths or set()
         self.reviewed_paths: list[str] = []
         self.seen_contexts: list[DiffContext | None] = []
+        self.seen_requirements: list[ModelRequirements] = []
 
     async def review_file(
         self,
@@ -230,6 +231,7 @@ class FakeCodeReviewer:
 
         self.reviewed_paths.append(file.path)
         self.seen_contexts.append(context)
+        self.seen_requirements.append(requirements)
         return FileReviewResult(
             drafts=self.drafts_by_path.get(file.path, []),
             usage=LlmUsage(input_tokens=100, output_tokens=25),
@@ -248,9 +250,11 @@ class FakeVcsProvider:
         file_contents: dict[str, str] | None = None,
         staged_patch_text: str | None = None,
         tree: dict[str, ContentHash] | None = None,
+        commit_subject: str | None = None,
     ) -> None:
         self.patch_text = patch_text
         self.staged_patch_text = staged_patch_text
+        self.commit_subject = commit_subject
         self.known_revisions = known_revisions
         self.file_contents = file_contents or {}
         self.tree = tree or {}
@@ -275,6 +279,9 @@ class FakeVcsProvider:
     async def get_staged_patch(self, repository_path: Path) -> str:
         self.requested_paths.append(repository_path)
         return self.staged_patch_text if self.staged_patch_text is not None else self.patch_text
+
+    async def get_commit_subject(self, repository_path: Path, revision: str) -> str | None:
+        return self.commit_subject
 
     async def get_file_content(
         self,

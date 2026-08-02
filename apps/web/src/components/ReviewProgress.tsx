@@ -25,17 +25,23 @@ const FAILURE_PATTERNS: {
   {
     pattern: /модели (\S+): (\d+) токенов при окне (\d+)/,
     reason: "не поместился в окно",
-    read: (match) => ({ model: match[1]!, prompt: match[2]!, limit: `${match[3]!} токенов` }),
+    read: (match) => ({ model: match[1]!, prompt: match[2]!, limit: `окно ${match[3]!}` }),
   },
   {
+    pattern: /Модель (\S+) исчерпала лимит ответа в (\d+) токенов/,
+    reason: "ответ оборван",
+    read: (match) => ({ model: match[1]!, prompt: null, limit: `ответ ${match[2]!}` }),
+  },
+  {
+    /* Формулировка до 2026-08-02: дела, заведённые раньше, лежат в базе с ней. */
     pattern: /Модель (\S+) оборвала ответ на лимите (\d+) токенов/,
     reason: "ответ оборван",
-    read: (match) => ({ model: match[1]!, prompt: null, limit: `${match[2]!} токенов` }),
+    read: (match) => ({ model: match[1]!, prompt: null, limit: `ответ ${match[2]!}` }),
   },
   {
     pattern: /Модель (\S+) не ответила за (\d+) с/,
     reason: "не ответила",
-    read: (match) => ({ model: match[1]!, prompt: null, limit: `${match[2]!} с` }),
+    read: (match) => ({ model: match[1]!, prompt: null, limit: `таймаут ${match[2]!} с` }),
   },
   {
     pattern: /Модель (\S+) ограничивает частоту/,
@@ -43,6 +49,28 @@ const FAILURE_PATTERNS: {
     read: (match) => ({ model: match[1]!, prompt: null, limit: "—" }),
   },
 ];
+
+/**
+ * Совет на каждую разбираемую причину. Ключ — та же подпись, что стоит
+ * в колонке «причина», поэтому таблица и совет не расходятся.
+ */
+const FAILURE_ADVICE: Record<string, string> = {
+  "не поместился в окно":
+    "Подсказка не влезла в контекстное окно модели. Поднимите окно (n_ctx) до 16384 — " +
+    "меньше для ревью не хватает — или уменьшите CONTEXT_TOKEN_BUDGET в .env, пожертвовав " +
+    "окружением из индекса.",
+  "ответ оборван":
+    "Модель исписала весь отведённый ответ и не закончила. Место под ответ резервируется " +
+    "в окне: системный промпт (~1300 токенов) + CONTEXT_TOKEN_BUDGET + LLM_MAX_OUTPUT_TOKENS " +
+    "вычитаются из окна, остаток — всё, что осталось на дифф. Поднимите окно модели; " +
+    "если она рассуждает вслух, снижать LLM_MAX_OUTPUT_TOKENS бесполезно — размышления " +
+    "занимают большую часть ответа.",
+  "не ответила":
+    "Модель не уложилась в отведённое время. Поднимите LLM_TIMEOUT_SECONDS в .env либо " +
+    "возьмите модель полегче: при 19 токенах в секунду один файл занимает две-три минуты.",
+  "частота запросов":
+    "Провайдер ограничил частоту обращений. Подождите и отправьте дело на расследование заново.",
+};
 
 interface Props {
   run: ReviewRun;
@@ -200,6 +228,35 @@ function Reasons({ text }: { text: string }) {
       ))}
 
       {failures.length > 0 ? <ReasonTable rows={failures} /> : null}
+      <Advice rows={failures} />
+    </div>
+  );
+}
+
+/**
+ * Что делать с этими сбоями. Причина названа кодом настройки, а не намёком:
+ * все три лечатся правкой `.env` или окна модели, и человек должен уйти
+ * отсюда со строкой, которую можно вписать, а не с догадкой.
+ */
+function Advice({ rows }: { rows: ParsedReason[] }) {
+  const advice = [...new Set(rows.map((row) => FAILURE_ADVICE[row.detail]))].filter(
+    (text): text is string => text !== undefined,
+  );
+
+  if (advice.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="rule border-t pt-3">
+      <p className="case-label">что с этим делать</p>
+      <ul className="mt-1.5 space-y-1.5">
+        {advice.map((text) => (
+          <li key={text} className="text-[14px] leading-relaxed text-paper-dim">
+            {text}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -213,8 +270,8 @@ function ReasonTable({ rows }: { rows: ParsedReason[] }) {
             <th className="case-label py-1.5 pr-4 font-normal">файл</th>
             <th className="case-label py-1.5 pr-4 font-normal">причина</th>
             <th className="case-label py-1.5 pr-4 font-normal">модель</th>
-            <th className="case-label py-1.5 pr-4 text-right font-normal">промпт</th>
-            <th className="case-label py-1.5 text-right font-normal">предел</th>
+            <th className="case-label py-1.5 pr-4 text-right font-normal">промпт, токенов</th>
+            <th className="case-label py-1.5 text-right font-normal">упёрлось в</th>
           </tr>
         </thead>
         <tbody>
@@ -231,7 +288,14 @@ function ReasonTable({ rows }: { rows: ParsedReason[] }) {
                 <>
                   <td className="py-2 pr-4 text-[14px] text-paper-dim">{row.detail}</td>
                   <td className="py-2 pr-4 font-mono text-[13px] text-paper-dim">{row.model}</td>
-                  <td className="py-2 pr-4 text-right font-mono text-[14px] text-critical">
+                  <td
+                    className="py-2 pr-4 text-right font-mono text-[14px] text-critical"
+                    title={
+                      row.prompt === null
+                        ? "Размер подсказки называет только сервер и только когда она не поместилась в окно"
+                        : undefined
+                    }
+                  >
                     {row.prompt ?? "—"}
                   </td>
                   <td className="py-2 text-right font-mono text-[14px] text-paper">
