@@ -16,6 +16,7 @@ from ducktective.core.diff.value_objects import (
 )
 from ducktective.core.exceptions import (
     LlmOutputError,
+    LlmOutputTruncatedError,
 )
 from ducktective.core.llm.ports import (
     LlmClient,
@@ -125,7 +126,7 @@ class LlmCodeReviewer:
                 json_schema=schema,
             )
             try:
-                return response, _parse_payload(response.content)
+                return response, _parse_payload(response.content, model=response.model)
             except LlmOutputError as error:
                 last_error = (
                     _truncated_error(response.model, requirements)
@@ -166,8 +167,9 @@ def _truncated_error(model: str, requirements: ModelRequirements) -> LlmOutputEr
     Лимит назван лимитом ответа: рядом в отчёте стоит окно модели, и два
     числа в токенах, из которых одно безымянное, читаются как одно и то же.
     """
-    return LlmOutputError(
-        f"Модель {model} исчерпала лимит ответа в {requirements.max_output_tokens} токенов"
+    return LlmOutputTruncatedError(
+        f"Модель {model} исчерпала лимит ответа в {requirements.max_output_tokens} токенов",
+        model=model,
     )
 
 
@@ -238,15 +240,18 @@ def _render_context(context: DiffContext) -> str:
     return "\n".join(sections)
 
 
-def _parse_payload(content: str) -> ReviewPayload:
-    raw_json = _extract_json(content)
+def _parse_payload(content: str, *, model: str) -> ReviewPayload:
+    raw_json = _extract_json(content, model=model)
     try:
         return ReviewPayload.model_validate_json(raw_json)
     except ValidationError as error:
-        raise LlmOutputError(f"Ответ модели не соответствует схеме: {error}") from error
+        raise LlmOutputError(
+            f"Ответ модели не соответствует схеме: {error}",
+            model=model,
+        ) from error
 
 
-def _extract_json(content: str) -> str:
+def _extract_json(content: str, *, model: str) -> str:
     """Достаёт JSON из ответа.
 
     Модели без строгого structured output регулярно оборачивают результат
@@ -263,13 +268,16 @@ def _extract_json(content: str) -> str:
     first_brace = stripped.find("{")
     last_brace = stripped.rfind("}")
     if first_brace == -1 or last_brace <= first_brace:
-        raise LlmOutputError("В ответе модели нет JSON-объекта")
+        raise LlmOutputError("В ответе модели нет JSON-объекта", model=model)
 
     candidate = stripped[first_brace : last_brace + 1]
     try:
         json.loads(candidate)
     except json.JSONDecodeError as error:
-        raise LlmOutputError(f"Не удалось разобрать JSON из ответа модели: {error}") from error
+        raise LlmOutputError(
+            f"Не удалось разобрать JSON из ответа модели: {error}",
+            model=model,
+        ) from error
     return candidate
 
 

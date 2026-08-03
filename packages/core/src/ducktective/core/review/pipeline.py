@@ -7,6 +7,9 @@ from ducktective.core.llm.value_objects import (
     LlmUsage,
     ModelRequirements,
 )
+from ducktective.core.review.degradation import (
+    NodeDegradation,
+)
 from ducktective.core.review.entities import (
     Finding,
     ReviewFile,
@@ -45,6 +48,13 @@ class PipelineOutcome:
     discarded_outside_diff: int = 0
     discarded_without_evidence: int = 0
     discarded_as_duplicate: int = 0
+    degradations: tuple[NodeDegradation, ...] = ()
+    """Кто именно не отработал и на каком файле.
+
+    `failed_files` пересказывает то же самое строками для человека,
+    а разбирательство начинается с вопроса, какой узел упал.
+    """
+
     failed_files: tuple[str, ...] = ()
     unreviewed_files: tuple[str, ...] = ()
     """Файлы, которых не прочитал ни один ревьюер.

@@ -1,6 +1,9 @@
 from datetime import (
     datetime,
 )
+from typing import (
+    Any,
+)
 from uuid import (
     UUID,
 )
@@ -70,6 +73,7 @@ class ReviewRunModel(Base):
         Enum(ReviewStatus, name="review_status", values_callable=enum_values)
     )
     totals: Mapped[dict[str, int]] = mapped_column(JSONB, default=dict)
+    config: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, server_default=text("'{}'"))
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     tokens_input: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
     tokens_output: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))

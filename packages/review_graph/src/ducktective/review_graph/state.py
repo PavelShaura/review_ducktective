@@ -20,6 +20,9 @@ from ducktective.core.llm.value_objects import (
 from ducktective.core.retrieval.context import (
     DiffContext,
 )
+from ducktective.core.review.degradation import (
+    NodeDegradation,
+)
 from ducktective.core.review.drafts import (
     FindingDraft,
 )
@@ -75,7 +78,7 @@ class FileDrafts(BaseModel):
     reviewer_name: str
     drafts: tuple[InstanceOf[FindingDraft], ...] = ()
     usage: InstanceOf[LlmUsage] = Field(default_factory=LlmUsage)
-    failure: str | None = None
+    degradation: InstanceOf[NodeDegradation] | None = None
     is_cancelled: bool = False
 
 
@@ -103,6 +106,14 @@ class ReviewGraphState(BaseModel):
 
     contexts: dict[str, InstanceOf[DiffContext]] = Field(default_factory=dict)
     files_with_context: int = 0
+    degradations: Annotated[list[InstanceOf[NodeDegradation]], operator.add] = Field(
+        default_factory=list
+    )
+    """Отметки узлов, не ветвящихся по файлам.
+
+    Ревьюеры кладут свои в `results`: там отметка едет вместе с файлом,
+    по которому считаются непрочитанные.
+    """
 
     tasks: tuple[FileReviewTask, ...] = ()
     results: Annotated[list[FileDrafts], operator.add] = Field(default_factory=list)

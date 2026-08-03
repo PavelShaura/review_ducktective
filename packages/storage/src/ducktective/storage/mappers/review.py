@@ -1,7 +1,15 @@
+from typing import (
+    Any,
+)
 from uuid import (
     uuid4,
 )
 
+from ducktective.core.review.degradation import (
+    DegradationKind,
+    NodeDegradation,
+    ReviewStage,
+)
 from ducktective.core.review.entities import (
     Evidence,
     Finding,
@@ -31,6 +39,9 @@ from ducktective.storage.models.review import (
 )
 
 
+DEGRADATIONS_KEY = "degradations"
+
+
 def to_domain(model: ReviewRunModel) -> ReviewRun:
     return ReviewRun(
         id=ReviewRunId(model.id),
@@ -53,6 +64,7 @@ def to_domain(model: ReviewRunModel) -> ReviewRun:
         files_with_context=model.files_with_context,
         files=[_file_to_domain(file_model) for file_model in model.files],
         findings=[_finding_to_domain(finding_model) for finding_model in model.findings],
+        degradations=_degradations_to_domain(model.config),
     )
 
 
@@ -68,6 +80,7 @@ def to_model(run: ReviewRun) -> ReviewRunModel:
         head_subject=run.head_subject,
         status=run.status,
         totals=run.severity_totals,
+        config=_config_from_domain(run),
         failure_reason=run.failure_reason,
         created_by=run.created_by,
         created_at=run.created_at,
@@ -90,6 +103,7 @@ def apply_changes(model: ReviewRunModel, run: ReviewRun) -> None:
     """
     model.status = run.status
     model.totals = run.severity_totals
+    model.config = _config_from_domain(run)
     model.failure_reason = run.failure_reason
     model.started_at = run.started_at
     model.finished_at = run.finished_at
@@ -112,6 +126,65 @@ def apply_changes(model: ReviewRunModel, run: ReviewRun) -> None:
 
         finding_model.status = matching_finding.status
         _append_new_feedback(finding_model, matching_finding)
+
+
+def _config_from_domain(run: ReviewRun) -> dict[str, Any]:
+    """Настройки прогона одним jsonb.
+
+    Отметки о деградации лежат под своим ключом, а не колонкой на каждую:
+    рядом с ними по `03-data-model.md` встанут выбранные ревьюеры и модели,
+    и заводить под каждый такой список миграцию значит платить схемой
+    за то, что читается только глазами.
+    """
+    if not run.degradations:
+        return {}
+    return {
+        DEGRADATIONS_KEY: [
+            {
+                "stage": mark.stage.value,
+                "file_path": mark.file_path,
+                "kind": mark.kind.value,
+                "detail": mark.detail,
+                "reviewer": mark.reviewer,
+                "model": mark.model,
+            }
+            for mark in run.degradations
+        ]
+    }
+
+
+def _degradations_to_domain(config: dict[str, Any] | None) -> list[NodeDegradation]:
+    """Читает отметки, пропуская те, что не читаются.
+
+    Прогон открывается ради находок, и незнакомая запись в служебном поле —
+    не повод показать человеку ошибку вместо результата.
+    """
+    raw = (config or {}).get(DEGRADATIONS_KEY, [])
+    if not isinstance(raw, list):
+        return []
+
+    marks: list[NodeDegradation] = []
+    for entry in raw:
+        mark = _degradation_to_domain(entry)
+        if mark is not None:
+            marks.append(mark)
+    return marks
+
+
+def _degradation_to_domain(entry: object) -> NodeDegradation | None:
+    if not isinstance(entry, dict):
+        return None
+    try:
+        return NodeDegradation(
+            stage=ReviewStage(entry["stage"]),
+            file_path=str(entry["file_path"]),
+            kind=DegradationKind(entry["kind"]),
+            detail=str(entry["detail"]),
+            reviewer=entry.get("reviewer"),
+            model=entry.get("model"),
+        )
+    except (KeyError, ValueError):
+        return None
 
 
 def _append_new_feedback(finding_model: FindingModel, finding: Finding) -> None:

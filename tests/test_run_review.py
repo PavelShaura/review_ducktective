@@ -47,6 +47,9 @@ from ducktective.core.retrieval.context import (
 from ducktective.core.retrieval.ports import (
     ContextBuilder,
 )
+from ducktective.core.review.degradation import (
+    ReviewStage,
+)
 from ducktective.core.review.drafts import (
     EvidenceDraft,
     FindingDraft,
@@ -317,6 +320,33 @@ async def test_partial_failure_is_visible_on_completed_run() -> None:
     assert "app/helpers.py" in result.failure_reason
     assert "1 из 2" in result.failure_reason
     assert result.failure_reason.count("\n") == 1
+
+
+async def test_partial_failure_names_the_node_on_the_run() -> None:
+    """Общая фраза не говорит, кто упал, — разбирательство начинается с этого."""
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, run = prepare(unit_of_work)
+    reviewer = FakeCodeReviewer(
+        {SERVICE_FILE: [build_draft()]},
+        failing_paths={"app/helpers.py"},
+    )
+
+    result = await run_with(unit_of_work, tenant_id, run, reviewer)
+
+    assert [(mark.stage, mark.file_path, mark.reviewer) for mark in result.degradations] == [
+        (ReviewStage.REVIEW, "app/helpers.py", "reviewer:fake")
+    ]
+
+
+async def test_restart_forgets_the_marks_of_the_previous_attempt() -> None:
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, run = prepare(unit_of_work)
+    reviewer = FakeCodeReviewer(failing_paths={SERVICE_FILE, "app/helpers.py"})
+
+    result = await run_with(unit_of_work, tenant_id, run, reviewer)
+    result.restart()
+
+    assert result.degradations == []
 
 
 async def test_run_fails_when_every_file_fails() -> None:

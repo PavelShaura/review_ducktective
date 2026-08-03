@@ -2,9 +2,30 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { api } from "@/api/client";
-import type { ReviewRun } from "@/api/types";
+import type { DegradationKind, NodeDegradation, ReviewRun, ReviewStage } from "@/api/types";
 
 const AVERAGE_SECONDS_PER_FILE = 25;
+
+const REVIEWER_NAME_PREFIX = "reviewer:";
+
+const STAGE_LABELS: Record<ReviewStage, string> = {
+  build_context: "окружение",
+  plan_review: "план",
+  review: "ревью",
+  aggregate: "слияние",
+  verify: "проверка",
+};
+
+const KIND_LABELS: Record<DegradationKind, string> = {
+  context_overflow: "не поместился в окно",
+  output_exhausted: "ответ оборван",
+  invalid_output: "ответ не разобран",
+  timeout: "не ответила",
+  rate_limited: "частота запросов",
+  provider_unavailable: "модель недоступна",
+  context_unavailable: "окружение не собралось",
+  unknown: "сбой",
+};
 
 /**
  * Причины разделены переносом строки, но в делах, заведённых раньше, они
@@ -50,26 +71,38 @@ const FAILURE_PATTERNS: {
   },
 ];
 
-/**
- * Совет на каждую разбираемую причину. Ключ — та же подпись, что стоит
- * в колонке «причина», поэтому таблица и совет не расходятся.
- */
-const FAILURE_ADVICE: Record<string, string> = {
-  "не поместился в окно":
+/** Что делать с каждым видом сбоя. Совет привязан к виду, а не к формулировке. */
+const KIND_ADVICE: Partial<Record<DegradationKind, string>> = {
+  context_overflow:
     "Подсказка не влезла в контекстное окно модели. Поднимите окно (n_ctx) до 16384 — " +
     "меньше для ревью не хватает — или уменьшите CONTEXT_TOKEN_BUDGET в .env, пожертвовав " +
     "окружением из индекса.",
-  "ответ оборван":
+  output_exhausted:
     "Модель исписала весь отведённый ответ и не закончила. Место под ответ резервируется " +
     "в окне: системный промпт (~1300 токенов) + CONTEXT_TOKEN_BUDGET + LLM_MAX_OUTPUT_TOKENS " +
     "вычитаются из окна, остаток — всё, что осталось на дифф. Поднимите окно модели; " +
     "если она рассуждает вслух, снижать LLM_MAX_OUTPUT_TOKENS бесполезно — размышления " +
     "занимают большую часть ответа.",
-  "не ответила":
+  timeout:
     "Модель не уложилась в отведённое время. Поднимите LLM_TIMEOUT_SECONDS в .env либо " +
     "возьмите модель полегче: при 19 токенах в секунду один файл занимает две-три минуты.",
-  "частота запросов":
+  rate_limited:
     "Провайдер ограничил частоту обращений. Подождите и отправьте дело на расследование заново.",
+  context_unavailable:
+    "Окружение из индекса собрать не удалось, и эти файлы прочитаны по одному диффу — " +
+    "качество на них ниже обычного. Проверьте состояние индекса репозитория и соберите " +
+    "его заново.",
+};
+
+/**
+ * Тот же совет для дел, заведённых до появления отметок по узлам: у них вид
+ * сбоя приходится узнавать по формулировке, а ключ здесь — подпись причины.
+ */
+const FAILURE_ADVICE: Record<string, string | undefined> = {
+  "не поместился в окно": KIND_ADVICE.context_overflow,
+  "ответ оборван": KIND_ADVICE.output_exhausted,
+  "не ответила": KIND_ADVICE.timeout,
+  "частота запросов": KIND_ADVICE.rate_limited,
 };
 
 interface Props {
@@ -171,16 +204,19 @@ function RestartButton({ runId }: { runId: string }) {
  * как «всё чисто».
  */
 export function ReviewDegraded({ run }: Props) {
-  if (!run.failure_reason) {
+  if (!run.failure_reason && run.degradations.length === 0) {
     return null;
   }
+
+  const filesWereLost =
+    Boolean(run.failure_reason) || run.degradations.some((mark) => mark.stage === "review");
 
   return (
     <section className="border border-brass/50 bg-brass/10 px-5 py-4">
       <h2 className="font-display text-2xl font-semibold text-paper">
-        Расследование прошло не полностью
+        {filesWereLost ? "Расследование прошло не полностью" : "Расследование прошло без окружения"}
       </h2>
-      <Reasons text={run.failure_reason} />
+      <Failures run={run} />
     </section>
   );
 }
@@ -192,8 +228,8 @@ export function ReviewFailure({ run }: Props) {
       <h2 className="mt-2 font-display text-3xl font-semibold text-critical">
         Расследование не удалось
       </h2>
-      {run.failure_reason ? (
-        <Reasons text={run.failure_reason} />
+      {run.failure_reason || run.degradations.length > 0 ? (
+        <Failures run={run} />
       ) : (
         <p className="mt-2 text-[16px] text-paper-dim">
           Причина не сохранилась. Загляните в журнал воркера — там будет подробность.
@@ -202,6 +238,113 @@ export function ReviewFailure({ run }: Props) {
       <RestartButton runId={run.id} />
     </section>
   );
+}
+
+/**
+ * Отметки узлов, если они есть, и разбор текста, если их нет.
+ *
+ * Дела, заведённые до появления `review_run.config`, знают о сбое одну фразу
+ * на весь прогон — их по-прежнему читает разбор текста. Новые приходят
+ * разложенными, и гадать по формулировке уже незачем.
+ */
+function Failures({ run }: Props) {
+  if (run.degradations.length === 0) {
+    return run.failure_reason ? <Reasons text={run.failure_reason} /> : null;
+  }
+
+  return (
+    <div className="mt-3 space-y-3">
+      {summaryOf(run.failure_reason).map((note, index) => (
+        <p key={`note-${index}`} className="text-[15px] leading-relaxed text-paper-dim">
+          {note}
+        </p>
+      ))}
+      <DegradationTable marks={run.degradations} />
+      <KindAdvice marks={run.degradations} />
+    </div>
+  );
+}
+
+/**
+ * Общая фраза о прогоне без перечня сбоев: перечень уже стоит таблицей.
+ * Строку с путём в начале узнаём так же, как её узнаёт разбор старых дел.
+ */
+function summaryOf(failureReason: string | null): string[] {
+  if (!failureReason) {
+    return [];
+  }
+  return failureReason
+    .split(REASON_SEPARATOR)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && parseReason(line).path === null);
+}
+
+function DegradationTable({ marks }: { marks: NodeDegradation[] }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full border-collapse text-left">
+        <thead>
+          <tr className="rule border-b">
+            <th className="case-label py-1.5 pr-4 font-normal">файл</th>
+            <th className="case-label py-1.5 pr-4 font-normal">кто</th>
+            <th className="case-label py-1.5 pr-4 font-normal">причина</th>
+            <th className="case-label py-1.5 font-normal">модель</th>
+          </tr>
+        </thead>
+        <tbody>
+          {marks.map((mark, index) => (
+            <tr key={`${index}-${mark.file_path}`} className="align-top">
+              <td className="py-2 pr-4">
+                <span className="file-chip">{mark.file_path}</span>
+              </td>
+              <td className="py-2 pr-4 text-[14px] text-paper-dim">{actorOf(mark)}</td>
+              <td className="py-2 pr-4">
+                <span className="text-[14px] text-paper">{KIND_LABELS[mark.kind]}</span>
+                <span className="mt-0.5 block text-[13px] leading-snug text-paper-dim/80">
+                  {mark.detail}
+                </span>
+              </td>
+              <td className="py-2 font-mono text-[13px] text-paper-dim">{mark.model ?? "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function KindAdvice({ marks }: { marks: NodeDegradation[] }) {
+  const advice = [...new Set(marks.map((mark) => KIND_ADVICE[mark.kind]))].filter(
+    (text): text is string => text !== undefined,
+  );
+
+  if (advice.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="rule border-t pt-3">
+      <p className="case-label">что с этим делать</p>
+      <ul className="mt-1.5 space-y-1.5">
+        {advice.map((text) => (
+          <li key={text} className="text-[14px] leading-relaxed text-paper-dim">
+            {text}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/**
+ * Ревьюер важнее этапа: на этапе ревью он и есть тот, кто упал, а имя этапа
+ * там ничего не добавляет. Остальные этапы называются своим именем.
+ */
+function actorOf(mark: NodeDegradation): string {
+  if (mark.reviewer) {
+    return mark.reviewer.replace(REVIEWER_NAME_PREFIX, "");
+  }
+  return STAGE_LABELS[mark.stage];
 }
 
 /**

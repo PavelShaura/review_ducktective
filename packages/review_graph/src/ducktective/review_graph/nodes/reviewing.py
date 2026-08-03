@@ -12,6 +12,12 @@ from langgraph.runtime import (
 from ducktective.core.exceptions import (
     DomainError,
 )
+from ducktective.core.review.degradation import (
+    NodeDegradation,
+    ReviewStage,
+    classify_failure,
+    failing_model,
+)
 from ducktective.core.review.ports import (
     CodeReviewer,
 )
@@ -60,7 +66,19 @@ def review_node(
                 context=state.context,
             )
         except DomainError as error:
-            return _results(FileDrafts(**_common(state), failure=f"{state.file.path}: {error}"))
+            return _results(
+                FileDrafts(
+                    **_common(state),
+                    degradation=NodeDegradation(
+                        stage=ReviewStage.REVIEW,
+                        file_path=state.file.path,
+                        kind=classify_failure(error),
+                        detail=str(error),
+                        reviewer=state.reviewer_name,
+                        model=failing_model(error),
+                    ),
+                )
+            )
 
         return _results(
             FileDrafts(

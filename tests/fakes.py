@@ -17,7 +17,7 @@ from ducktective.core.events import (
 )
 from ducktective.core.exceptions import (
     EntityNotFoundError,
-    LlmInvocationError,
+    LlmUnavailableError,
     VcsOperationError,
 )
 from ducktective.core.llm.value_objects import (
@@ -227,7 +227,10 @@ class FakeCodeReviewer:
         context: DiffContext | None = None,
     ) -> FileReviewResult:
         if file.path in self.failing_paths:
-            raise LlmInvocationError(f"Модель недоступна для {file.path}")
+            raise LlmUnavailableError(
+                f"Модель недоступна для {file.path}",
+                model="fake-model",
+            )
 
         self.reviewed_paths.append(file.path)
         self.seen_contexts.append(context)

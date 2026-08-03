@@ -14,6 +14,10 @@ from ducktective.core.llm.value_objects import (
 from ducktective.core.retrieval.context import (
     DiffContext,
 )
+from ducktective.core.review.degradation import (
+    DegradationKind,
+    ReviewStage,
+)
 from ducktective.core.review.drafts import (
     EvidenceDraft,
     FindingDraft,
@@ -253,3 +257,37 @@ async def test_broken_index_leaves_the_run_without_context() -> None:
 
     assert outcome.files_with_context == 0
     assert len(outcome.findings) == 1
+
+
+async def test_failure_names_the_reviewer_and_the_file() -> None:
+    """С четырьмя ревьюерами «часть файлов не прочитана» не говорит, кем."""
+    failing = named(FakeCodeReviewer(failing_paths={SERVICE_FILE}), "reviewer:one")
+    reading = named(FakeCodeReviewer({SERVICE_FILE: [build_draft()]}), "reviewer:two")
+    pipeline = LangGraphReviewPipeline([failing, reading])
+
+    outcome = await pipeline.run(build_request())
+
+    marks = [mark for mark in outcome.degradations if mark.stage is ReviewStage.REVIEW]
+    assert [(mark.reviewer, mark.file_path) for mark in marks] == [("reviewer:one", SERVICE_FILE)]
+    assert marks[0].kind is DegradationKind.PROVIDER_UNAVAILABLE
+
+
+async def test_broken_index_is_marked_by_the_node_that_broke() -> None:
+    """Ревью по одному диффу — не то же самое, что ревью с окружением."""
+    reviewer = FakeCodeReviewer({SERVICE_FILE: [build_draft()]})
+    pipeline = LangGraphReviewPipeline([reviewer], context_builder=FailingContextBuilder())
+
+    outcome = await pipeline.run(build_request())
+
+    stages = {mark.stage for mark in outcome.degradations}
+    assert stages == {ReviewStage.BUILD_CONTEXT}
+    assert all(mark.kind is DegradationKind.CONTEXT_UNAVAILABLE for mark in outcome.degradations)
+
+
+async def test_run_without_an_index_is_not_a_degradation() -> None:
+    """Отсутствие сборщика — заявленный режим работы, а не сбой."""
+    pipeline = LangGraphReviewPipeline([FakeCodeReviewer({SERVICE_FILE: [build_draft()]})])
+
+    outcome = await pipeline.run(build_request())
+
+    assert outcome.degradations == ()

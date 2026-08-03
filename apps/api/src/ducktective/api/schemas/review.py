@@ -20,6 +20,11 @@ from ducktective.core.diff.value_objects import (
     ChangeType,
     DiffSide,
 )
+from ducktective.core.review.degradation import (
+    DegradationKind,
+    NodeDegradation,
+    ReviewStage,
+)
 from ducktective.core.review.entities import (
     Finding,
     FindingFeedback,
@@ -257,6 +262,33 @@ class CancelRunResponse(BaseModel):
     cancelled: bool
 
 
+class NodeDegradationResponse(BaseModel):
+    """Один сбой: кто, где и почему не отработал.
+
+    Вид причины приходит с сервера отдельным полем, а не вычитывается
+    клиентом из текста: разбирать готовую фразу регуляркой — значит
+    ломать интерфейс каждой правкой формулировки.
+    """
+
+    stage: ReviewStage
+    file_path: str
+    kind: DegradationKind
+    detail: str
+    reviewer: str | None
+    model: str | None
+
+    @classmethod
+    def from_domain(cls, mark: NodeDegradation) -> "NodeDegradationResponse":
+        return cls(
+            stage=mark.stage,
+            file_path=mark.file_path,
+            kind=mark.kind,
+            detail=mark.detail,
+            reviewer=mark.reviewer,
+            model=mark.model,
+        )
+
+
 class ReviewRunResponse(BaseModel):
     """Прогон целиком.
 
@@ -275,6 +307,7 @@ class ReviewRunResponse(BaseModel):
     head_subject: str | None
     totals: dict[str, int]
     failure_reason: str | None
+    degradations: list[NodeDegradationResponse]
     files_with_context: int
     reviewable_files: int
     created_at: datetime
@@ -295,6 +328,7 @@ class ReviewRunResponse(BaseModel):
             head_subject=run.head_subject,
             totals=run.severity_totals,
             failure_reason=run.failure_reason,
+            degradations=[NodeDegradationResponse.from_domain(mark) for mark in run.degradations],
             files_with_context=run.files_with_context,
             reviewable_files=len(run.reviewable_files()),
             created_at=run.created_at,

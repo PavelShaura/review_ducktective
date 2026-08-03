@@ -1,6 +1,9 @@
 from collections import (
     Counter,
 )
+from collections.abc import (
+    Iterable,
+)
 from dataclasses import (
     dataclass,
     field,
@@ -34,6 +37,9 @@ from ducktective.core.exceptions import (
 )
 from ducktective.core.llm.value_objects import (
     LlmUsage,
+)
+from ducktective.core.review.degradation import (
+    NodeDegradation,
 )
 from ducktective.core.review.events import (
     FindingFeedbackSubmitted,
@@ -270,6 +276,7 @@ class ReviewRun(AggregateRoot):
     files_with_context: int = 0
     files: list[ReviewFile] = field(default_factory=list)
     findings: list[Finding] = field(default_factory=list)
+    degradations: list[NodeDegradation] = field(default_factory=list)
 
     @classmethod
     def create(
@@ -360,6 +367,15 @@ class ReviewRun(AggregateRoot):
         """
         self.failure_reason = reason
 
+    def record_node_failures(self, marks: Iterable[NodeDegradation]) -> None:
+        """Запоминает, какой узел на каком файле не отработал.
+
+        Пишется и у неудавшегося прогона, и у прошедшего частично: причина
+        в `failure_reason` пересказывает беду одной фразой на весь прогон,
+        а разбирательство начинается с вопроса, кто именно упал.
+        """
+        self.degradations.extend(marks)
+
     def cancel(self) -> None:
         """Прекращает прогон по просьбе человека.
 
@@ -395,6 +411,7 @@ class ReviewRun(AggregateRoot):
         self.started_at = None
         self.finished_at = None
         self.failure_reason = None
+        self.degradations.clear()
         self.tokens_input = 0
         self.tokens_output = 0
         self.cost_usd = 0.0

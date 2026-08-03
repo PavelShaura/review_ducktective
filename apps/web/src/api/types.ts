@@ -75,6 +75,28 @@ export interface Finding {
   latest_verdict: FeedbackVerdict | null;
 }
 
+export type ReviewStage = "build_context" | "plan_review" | "review" | "aggregate" | "verify";
+
+export type DegradationKind =
+  | "context_overflow"
+  | "output_exhausted"
+  | "invalid_output"
+  | "timeout"
+  | "rate_limited"
+  | "provider_unavailable"
+  | "context_unavailable"
+  | "unknown";
+
+/** Кто, где и почему не отработал. Вид причины приходит полем, а не текстом. */
+export interface NodeDegradation {
+  stage: ReviewStage;
+  file_path: string;
+  kind: DegradationKind;
+  detail: string;
+  reviewer: string | null;
+  model: string | null;
+}
+
 export interface ReviewRun {
   id: string;
   repository_id: string;
@@ -85,6 +107,7 @@ export interface ReviewRun {
   head_subject: string | null;
   totals: Record<string, number>;
   failure_reason: string | null;
+  degradations: NodeDegradation[];
   files_with_context: number;
   reviewable_files: number;
   created_at: string;

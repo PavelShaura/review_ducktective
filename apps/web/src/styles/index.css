@@ -245,27 +245,30 @@
       0 16px 30px -16px rgb(0 0 0 / 0.85);
   }
 
-  /* Название дела — табличка, привинченная к обложке. Заголовок коммита
-     единственное в шапке, что написано человеком, поэтому он и выступает:
-     блик по верхней кромке, тень под нижней, латунь на торце. */
+  /* Название дела — тот же бумажный ярлык, что и путь файла в перечне.
+     Заголовок коммита единственное в шапке, написанное человеком, но
+     выступающая тёмная табличка читалась как отдельный предмет поверх
+     обложки. Бумага и тёмный шрифт ставят его в один ряд с ярлыками
+     файлов: это подпись к делу, а не деталь корпуса. */
   .case-subject {
     font-family: var(--font-display);
     font-size: 19px;
     line-height: 1.4;
-    color: var(--color-paper);
+    color: var(--color-ink);
     background:
-      var(--texture-tweed),
-      linear-gradient(180deg, var(--color-ink-hover), var(--color-ink-sunken));
-    border: 1px solid var(--color-tweed-dim);
-    border-left: 3px solid var(--color-brass);
+      var(--texture-paper),
+      linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--color-paper) 38%, var(--color-tweed) 62%),
+        color-mix(in srgb, var(--color-paper) 26%, var(--color-tweed) 74%)
+      );
     border-radius: 3px;
-    padding: 0.5rem 0.85rem;
+    padding: 0.45rem 0.85rem;
     max-width: 68ch;
     box-shadow:
-      inset 0 1px 0 color-mix(in srgb, var(--color-paper) 18%, transparent),
-      inset 0 -2px 4px rgb(0 0 0 / 0.4),
-      0 3px 7px -2px rgb(0 0 0 / 0.65);
-    text-shadow: 0 1px 0 rgb(0 0 0 / 0.55);
+      inset 4px 0 0 var(--color-brass-dim),
+      inset 0 1px 0 rgb(255 255 255 / 0.3),
+      0 1px 3px rgb(0 0 0 / 0.45);
   }
 
   /* Плашка замечания лежит поверх кода и должна читаться как отдельный предмет.

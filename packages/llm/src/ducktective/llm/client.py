@@ -16,6 +16,9 @@ from litellm.exceptions import (
 from ducktective.core.exceptions import (
     LlmContextOverflowError,
     LlmInvocationError,
+    LlmRateLimitError,
+    LlmTimeoutError,
+    LlmUnavailableError,
 )
 from ducktective.core.llm.ports import (
     LlmResponseCache,
@@ -134,8 +137,9 @@ class LiteLlmClient:
                 await asyncio.sleep(RETRY_BACKOFF_SECONDS * 2 ** (attempt - 1))
                 continue
             except Exception as error:
-                raise LlmInvocationError(
-                    f"Модель {choice.model} вернула ошибку: {error}"
+                raise LlmUnavailableError(
+                    f"Модель {choice.model} вернула ошибку: {error}",
+                    model=choice.model,
                 ) from error
 
             latency_ms = int((time.monotonic() - started_at) * 1000)
@@ -150,19 +154,22 @@ class LiteLlmClient:
         полегче, а недоступный сервер — вообще другого разбирательства.
         """
         if isinstance(last_error, Timeout):
-            return LlmInvocationError(
+            return LlmTimeoutError(
                 f"Модель {model} не ответила за {self._timeout_seconds:.0f} с "
-                f"({self._max_attempts} попыт.)"
+                f"({self._max_attempts} попыт.)",
+                model=model,
             )
 
         if isinstance(last_error, RateLimitError):
-            return LlmInvocationError(
+            return LlmRateLimitError(
                 f"Модель {model} ограничивает частоту запросов "
-                f"({self._max_attempts} попыт.): {last_error}"
+                f"({self._max_attempts} попыт.): {last_error}",
+                model=model,
             )
 
-        return LlmInvocationError(
-            f"Модель {model} недоступна после {self._max_attempts} попыток: {last_error}"
+        return LlmUnavailableError(
+            f"Модель {model} недоступна после {self._max_attempts} попыток: {last_error}",
+            model=model,
         )
 
 
@@ -176,11 +183,15 @@ def _context_overflow_error(model: str, error: Exception) -> LlmContextOverflowE
     prompt_tokens = PROMPT_TOKENS_PATTERN.search(text)
     context_size = CONTEXT_SIZE_PATTERN.search(text)
     if prompt_tokens is None or context_size is None:
-        return LlmContextOverflowError(f"Промпт не поместился в окно контекста модели {model}")
+        return LlmContextOverflowError(
+            f"Промпт не поместился в окно контекста модели {model}",
+            model=model,
+        )
 
     return LlmContextOverflowError(
         f"Промпт не поместился в окно контекста модели {model}: "
-        f"{prompt_tokens.group(1)} токенов при окне {context_size.group(1)}"
+        f"{prompt_tokens.group(1)} токенов при окне {context_size.group(1)}",
+        model=model,
     )
 
 

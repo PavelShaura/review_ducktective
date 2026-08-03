@@ -144,6 +144,8 @@ class RunReview(TransactionalUseCase):
                 if not run.add_finding(finding):
                     duplicates += 1
 
+            run.record_node_failures(result.degradations)
+
             if result.failed_files and not result.reviewed_files:
                 run.mark_failed("\n".join(result.failed_files))
             else:

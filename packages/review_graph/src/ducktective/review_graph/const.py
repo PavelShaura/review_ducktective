@@ -1,8 +1,19 @@
-BUILD_CONTEXT_NODE = "build_context"
-PLAN_REVIEW_NODE = "plan_review"
-REVIEW_NODE = "review"
-AGGREGATE_NODE = "aggregate"
-VERIFY_NODE = "verify"
+"""Имена узлов графа и степень параллелизма.
+
+Имена берутся у домена, а не пишутся заново: отметка о деградации называет
+этап конвейера, и разойтись имени узла в логе с именем этапа в отметке негде.
+"""
+
+from ducktective.core.review.degradation import (
+    ReviewStage,
+)
+
+
+BUILD_CONTEXT_NODE = ReviewStage.BUILD_CONTEXT.value
+PLAN_REVIEW_NODE = ReviewStage.PLAN_REVIEW.value
+REVIEW_NODE = ReviewStage.REVIEW.value
+AGGREGATE_NODE = ReviewStage.AGGREGATE.value
+VERIFY_NODE = ReviewStage.VERIFY.value
 
 DEFAULT_MAX_CONCURRENT_REVIEWS = 1
 """Один файл за раз.
