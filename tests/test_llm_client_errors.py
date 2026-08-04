@@ -17,6 +17,7 @@ from ducktective.llm.client import (
     LiteLlmClient,
     _build_response,
     _context_overflow_error,
+    _mentions_context_overflow,
 )
 from ducktective.llm.code_reviewer import (
     _truncated_error,
@@ -107,3 +108,26 @@ def test_rate_limit_is_named_separately() -> None:
     )
 
     assert "частоту" in str(error)
+
+
+LM_STUDIO_STREAM_MESSAGE = (
+    "litellm.BadRequestError: Lm_studioException - Error code: 400 - "
+    "{'error': 'Engine protocol predict stream returned an error: "
+    '{"code":500,"message":"Context size has been exceeded.","type":"server_error"}\'}'
+)
+
+
+def test_overflow_disguised_as_a_plain_bad_request_is_recognised() -> None:
+    """LM Studio отдаёт переполнение обычным BadRequestError.
+
+    По типу исключения оно неотличимо от «провайдер отказал», а чинится
+    совсем иначе — окном модели. Совет в интерфейсе выбирается по виду
+    причины, поэтому назвать её верно важнее, чем удобно.
+    """
+    assert _mentions_context_overflow(LM_STUDIO_STREAM_MESSAGE)
+    assert _mentions_context_overflow(LM_STUDIO_MESSAGE)
+
+
+def test_ordinary_failure_is_not_taken_for_an_overflow() -> None:
+    assert not _mentions_context_overflow("Connection refused")
+    assert not _mentions_context_overflow("model not found")

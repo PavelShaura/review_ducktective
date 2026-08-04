@@ -75,6 +75,8 @@ class ReviewRunModel(Base):
     totals: Mapped[dict[str, int]] = mapped_column(JSONB, default=dict)
     config: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, server_default=text("'{}'"))
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attempt: Mapped[int] = mapped_column(Integer, default=1, server_default=text("1"))
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
     tokens_input: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
     tokens_output: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
     cost_usd: Mapped[float] = mapped_column(Float, default=0.0, server_default=text("0"))

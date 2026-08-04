@@ -1,4 +1,7 @@
 import os
+from contextlib import (
+    AsyncExitStack,
+)
 from typing import (
     Any,
     ClassVar,
@@ -93,8 +96,14 @@ async def startup(ctx: dict[str, Any]) -> None:
 
 
 async def shutdown(ctx: dict[str, Any]) -> None:
-    await ctx["redis"].aclose()
-    await ctx["engine"].dispose()
+    """Гасит ресурсы все до одного: сбой первого не оставляет остальные висеть.
+
+    Незакрытый пул соединений достаётся сборщику мусора уже после разбора
+    цикла событий, и процесс уходит с жалобами на невозвращённые соединения.
+    """
+    async with AsyncExitStack() as closing:
+        closing.push_async_callback(ctx["engine"].dispose)
+        closing.push_async_callback(ctx["redis"].aclose)
 
 
 async def build_index_task(

@@ -25,6 +25,21 @@ class StateNode(Protocol):
     async def __call__(self, state: ReviewGraphState) -> dict[str, Any]: ...
 
 
+class InterruptibleNode(Protocol):
+    """Узел, читающий состояние целиком и слышащий просьбу прекратить.
+
+    Отдельно от `StateNode`: проверка на отмену нужна только там, где узел
+    работает долго, а лишний параметр у остальных пришлось бы объяснять.
+    """
+
+    async def __call__(
+        self,
+        state: ReviewGraphState,
+        *,
+        runtime: Runtime[ReviewRuntimeContext],
+    ) -> dict[str, Any]: ...
+
+
 class ReviewerNode(Protocol):
     """Узел одной ветви разветвления: свой вход вместо общего состояния."""
 

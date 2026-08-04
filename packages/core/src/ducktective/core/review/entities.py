@@ -270,6 +270,23 @@ class ReviewRun(AggregateRoot):
     started_at: datetime | None = None
     finished_at: datetime | None = None
     failure_reason: str | None = None
+    attempt: int = 1
+    """Номер попытки расследования.
+
+    Растёт при каждом возвращении прогона в очередь. Нужен работающему
+    прогону, чтобы узнать, что он больше не он: статус для этого не годится —
+    «продолжить» переводит прекращённый прогон обратно в очередь, и прежняя
+    попытка, спросив «меня прекратили?», получает «нет» и работает дальше.
+    Два прогона на одном деле занимают воркер и портят общий сохранённый ход.
+    """
+
+    duration_ms: int = 0
+    """Сколько расследование шло всего, по всем попыткам.
+
+    Складывается, а не берётся от последнего старта: продолжение
+    переиспользует прежнюю работу, и её время — часть цены дела.
+    """
+
     tokens_input: int = 0
     tokens_output: int = 0
     cost_usd: float = 0.0
@@ -351,12 +368,12 @@ class ReviewRun(AggregateRoot):
 
     def mark_completed(self) -> None:
         self._change_status(ReviewStatus.COMPLETED)
-        self.finished_at = datetime.now(UTC)
+        self._stop_clock()
 
     def mark_failed(self, reason: str) -> None:
         self._change_status(ReviewStatus.FAILED)
         self.failure_reason = reason
-        self.finished_at = datetime.now(UTC)
+        self._stop_clock()
 
     def record_degradation(self, reason: str) -> None:
         """Отмечает, что прогон дошёл до конца не полностью.
@@ -381,10 +398,21 @@ class ReviewRun(AggregateRoot):
 
         Найденное не сохраняется: находки пишутся одной транзакцией в конце,
         а половина ревью — это не половина результата, потому что дубли
-        отсеиваются по всему набору сразу.
+        отсеиваются по всему набору сразу. Прочитанное при этом не пропадает:
+        ход прогона хранит конвейер, и продолжение начинается с остатка.
         """
         self._change_status(ReviewStatus.CANCELLED)
+        self._stop_clock()
+
+    def _stop_clock(self) -> None:
+        """Закрывает попытку и добавляет её длительность к расследованию.
+
+        Время копится, а не начинается заново с каждой попытки: человек
+        спрашивает, сколько дело идёт, а не сколько идёт последний заход.
+        """
         self.finished_at = datetime.now(UTC)
+        if self.started_at is not None:
+            self.duration_ms += int((self.finished_at - self.started_at).total_seconds() * 1000)
 
     @property
     def is_cancelled(self) -> bool:
@@ -395,12 +423,26 @@ class ReviewRun(AggregateRoot):
         return self.status in RESTARTABLE_STATUSES
 
     def restart(self) -> None:
-        """Возвращает прекращённый или неудавшийся прогон в очередь.
+        """Отправляет прогон расследоваться заново.
 
-        Расследование начинается с начала: сохранять было нечего, а счётчики
-        токенов обнуляются, чтобы цифры прогона описывали одну попытку,
-        а не сумму всех.
+        Прежняя работа выбрасывается вместе с сохранённым ходом, поэтому
+        обнуляется и её цена: время расследования начинается с нуля.
         """
+        self._return_to_queue()
+        self.duration_ms = 0
+
+    def resume(self) -> None:
+        """Возвращает прогон в очередь, чтобы дочитать начатое.
+
+        Отличается от «заново» одним: прежняя работа переиспользуется,
+        и её цена остаётся при деле. Время копится, а счётчики токенов
+        всё же обнуляются — конвейер отчитывается за расследование целиком,
+        включая прошлые попытки, и прибавлять его итог к прежнему значит
+        посчитать одно и то же дважды.
+        """
+        self._return_to_queue()
+
+    def _return_to_queue(self) -> None:
         if not self.is_restartable:
             raise InvariantViolationError(
                 f"Прогон в статусе {self.status} нельзя отправить на расследование заново"
@@ -408,6 +450,7 @@ class ReviewRun(AggregateRoot):
 
         previous_status = self.status
         self.status = ReviewStatus.QUEUED
+        self.attempt += 1
         self.started_at = None
         self.finished_at = None
         self.failure_reason = None

@@ -40,8 +40,9 @@ DEFAULT_MAX_OUTPUT_TOKENS = ModelRequirements().max_output_tokens
 class ReviewCancelledError(ApplicationError):
     """Расследование попросили прекратить.
 
-    Ничего не сохраняется: находки пишутся одной транзакцией в конце,
-    и половина прогона результатом не является.
+    Находок не сохраняется: они пишутся одной транзакцией в конце, и половина
+    прогона результатом не является. Прочитанное при этом не пропадает —
+    ход прогона остаётся у конвейера, и продолжение его дочитывает.
     """
 
     def __init__(self) -> None:
@@ -100,12 +101,32 @@ class RunReview(TransactionalUseCase):
         self._pipeline = pipeline
         self._max_output_tokens = max_output_tokens
 
-    async def _is_cancelled(self, run_id: ReviewRunId) -> bool:
+    async def _should_stop(self, run_id: ReviewRunId, attempt: int) -> bool:
+        """Пора ли прекращать: попросили или прогон уже не наш.
+
+        Одного признака отмены мало. «Продолжить» возвращает прекращённый
+        прогон в очередь, статус перестаёт быть `cancelled`, и прежняя
+        попытка, спросив только про отмену, получает «работай дальше».
+        Тогда на одном деле оказываются два прогона: они занимают воркер,
+        пишут в один сохранённый ход и оба зовут модель.
+        """
         async with self._unit_of_work:
             run = await self._unit_of_work.review_runs.get(run_id)
-            return run.is_cancelled
+            return run.is_cancelled or run.attempt != attempt
 
-    async def execute(self, tenant_id: TenantId, run_id: ReviewRunId) -> ReviewOutcome:
+    async def execute(
+        self,
+        tenant_id: TenantId,
+        run_id: ReviewRunId,
+        *,
+        resume: bool = False,
+    ) -> ReviewOutcome:
+        """Прогоняет дифф; при `resume` дочитывает прерванное расследование.
+
+        Прогон с начала первым делом забывает сохранённый ход: иначе
+        «расследовать заново» продолжило бы прошлую попытку и вернуло бы
+        ровно то, от чего человек хотел избавиться.
+        """
         async with self._unit_of_work:
             run = await self._unit_of_work.review_runs.get(run_id)
             if run.tenant_id != tenant_id:
@@ -115,6 +136,7 @@ class RunReview(TransactionalUseCase):
 
             repository = await self._unit_of_work.code_repositories.get(run.repository_id)
             request = PipelineRequest(
+                run_id=run.id,
                 repository_id=run.repository_id,
                 files=tuple(run.reviewable_files()),
                 requirements=ModelRequirements(
@@ -124,11 +146,16 @@ class RunReview(TransactionalUseCase):
                 ),
             )
             run.mark_running()
+            attempt = run.attempt
             await self._commit_and_publish()
+
+        if not resume:
+            await self._pipeline.forget(run_id)
 
         result = await self._pipeline.run(
             request,
-            cancellation=lambda: self._is_cancelled(run_id),
+            cancellation=lambda: self._should_stop(run_id, attempt),
+            resume=resume,
         )
         if result.is_cancelled:
             raise ReviewCancelledError
@@ -160,6 +187,9 @@ class RunReview(TransactionalUseCase):
                 run.mark_completed()
 
             await self._commit_and_publish()
+
+            if run.status is ReviewStatus.COMPLETED:
+                await self._pipeline.forget(run_id)
 
             return ReviewOutcome(
                 run=run,

@@ -8,9 +8,7 @@ from typing import (
 
 from pydantic import (
     BaseModel,
-    ConfigDict,
     Field,
-    InstanceOf,
 )
 
 from ducktective.core.llm.value_objects import (
@@ -38,9 +36,6 @@ from ducktective.core.review.ports import (
 )
 
 
-_MODEL_CONFIG = ConfigDict(arbitrary_types_allowed=True)
-
-
 @dataclass(frozen=True, kw_only=True)
 class ReviewRuntimeContext:
     """То, что меняется от прогона к прогону, но не является состоянием.
@@ -58,38 +53,35 @@ class FileReviewTask(BaseModel):
 
     Единица распараллеливания — пара «файл × ревьюер», а не файл: четыре
     ревьюера из фазы 4.2 смотрят один и тот же дифф разными глазами.
+
+    Доменные типы объявлены как есть, а не спрятаны за `InstanceOf`: иначе
+    pydantic не знает их схемы и при восстановлении из чекпоинта отдаёт
+    словари вместо объектов — прогон падает ровно в момент продолжения.
     """
 
-    model_config = _MODEL_CONFIG
-
-    file: InstanceOf[ReviewFile]
-    context: InstanceOf[DiffContext] | None = None
+    file: ReviewFile
+    context: DiffContext | None = None
     reviewer_name: str
-    requirements: InstanceOf[ModelRequirements]
+    requirements: ModelRequirements
 
 
 class FileDrafts(BaseModel):
     """Что вернул один ревьюер по одному файлу."""
 
-    model_config = _MODEL_CONFIG
-
-    file: InstanceOf[ReviewFile]
-    context: InstanceOf[DiffContext] | None = None
+    file: ReviewFile
+    context: DiffContext | None = None
     reviewer_name: str
-    drafts: tuple[InstanceOf[FindingDraft], ...] = ()
-    usage: InstanceOf[LlmUsage] = Field(default_factory=LlmUsage)
-    degradation: InstanceOf[NodeDegradation] | None = None
-    is_cancelled: bool = False
+    drafts: tuple[FindingDraft, ...] = ()
+    usage: LlmUsage = Field(default_factory=LlmUsage)
+    degradation: NodeDegradation | None = None
 
 
 class MergedDraft(BaseModel):
     """Черновик, переживший слияние, вместе с тем, что нужно для проверки."""
 
-    model_config = _MODEL_CONFIG
-
-    draft: InstanceOf[FindingDraft]
-    file: InstanceOf[ReviewFile]
-    context: InstanceOf[DiffContext] | None = None
+    draft: FindingDraft
+    file: ReviewFile
+    context: DiffContext | None = None
     reviewer_name: str
 
 
@@ -100,15 +92,11 @@ class ReviewGraphState(BaseModel):
     известна только тому узлу, который её отбраковал.
     """
 
-    model_config = _MODEL_CONFIG
+    request: PipelineRequest
 
-    request: InstanceOf[PipelineRequest]
-
-    contexts: dict[str, InstanceOf[DiffContext]] = Field(default_factory=dict)
+    contexts: dict[str, DiffContext] = Field(default_factory=dict)
     files_with_context: int = 0
-    degradations: Annotated[list[InstanceOf[NodeDegradation]], operator.add] = Field(
-        default_factory=list
-    )
+    degradations: Annotated[list[NodeDegradation], operator.add] = Field(default_factory=list)
     """Отметки узлов, не ветвящихся по файлам.
 
     Ревьюеры кладут свои в `results`: там отметка едет вместе с файлом,
@@ -122,7 +110,7 @@ class ReviewGraphState(BaseModel):
     displaced: tuple[MergedDraft, ...] = ()
     proposed: int = 0
 
-    findings: tuple[InstanceOf[Finding], ...] = ()
+    findings: tuple[Finding, ...] = ()
     discarded_outside_diff: int = 0
     discarded_without_evidence: int = 0
     discarded_as_duplicate: int = 0

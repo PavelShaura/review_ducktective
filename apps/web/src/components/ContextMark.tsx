@@ -4,7 +4,7 @@ interface Props {
   run: ReviewRun;
 }
 
-const SETTLED_STATUSES = new Set(["completed", "failed", "cancelled"]);
+const SETTLED_STATUSES = new Set(["completed", "failed"]);
 
 /**
  * Участвовал ли индекс в этом прогоне.
@@ -16,6 +16,10 @@ const SETTLED_STATUSES = new Set(["completed", "failed", "cancelled"]);
  * Счёт файлов с контекстом записывается вместе с находками, то есть в самом
  * конце. До этого момента ноль означает «ещё не считали», а не «индекса нет»,
  * и говорить о диффе без окружения рано.
+ *
+ * Прекращённый прогон до этого конца не доходит вовсе: у него ноль остаётся
+ * навсегда, и приняв его за ответ, дело заявляло «без индекса» там, где индекс
+ * собран и в прошлый раз дал полный охват.
  *
  * Знаменатель приходит с сервера. Считая его здесь, интерфейс делил на число
  * из другого счёта: удалённые файлы модели не отдаются, но в списке остаются,
@@ -31,6 +35,10 @@ export function ContextMark({ run }: Props) {
         с контекстом · {covered} из {reviewable}
       </span>
     );
+  }
+
+  if (run.status === "cancelled") {
+    return <span className="case-label text-paper-dim">окружение не досчитано</span>;
   }
 
   if (!SETTLED_STATUSES.has(run.status)) {

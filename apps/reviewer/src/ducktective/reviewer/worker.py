@@ -1,4 +1,7 @@
 import os
+from contextlib import (
+    AsyncExitStack,
+)
 from typing import (
     Any,
     ClassVar,
@@ -54,6 +57,9 @@ from ducktective.retrieval.session_scope import (
 from ducktective.review_graph import (
     LangGraphReviewPipeline,
 )
+from ducktective.review_graph.checkpointing import (
+    open_checkpointer,
+)
 from ducktective.storage.database import (
     build_engine,
     build_session_factory,
@@ -95,6 +101,8 @@ async def startup(ctx: dict[str, Any]) -> None:
         token_budget=settings.context_token_budget,
     )
     ctx["max_output_tokens"] = settings.llm_max_output_tokens
+    resources = AsyncExitStack()
+    ctx["resources"] = resources
     ctx["pipeline"] = LangGraphReviewPipeline(
         build_code_reviewers(
             redis_client=redis_client,
@@ -109,6 +117,9 @@ async def startup(ctx: dict[str, Any]) -> None:
             timeout_seconds=settings.llm_timeout_seconds,
         ),
         context_builder=ctx["context_builder"],
+        checkpointer=await resources.enter_async_context(
+            open_checkpointer(settings.require_database_url())
+        ),
     )
 
     logger.info(
@@ -119,11 +130,26 @@ async def startup(ctx: dict[str, Any]) -> None:
 
 
 async def shutdown(ctx: dict[str, Any]) -> None:
-    await ctx["redis"].aclose()
-    await ctx["engine"].dispose()
+    """Гасит ресурсы в порядке, обратном открытию, и все до одного.
+
+    Закрытия зарегистрированы стопкой, а не выстроены в очередь `await`:
+    сбой первого не должен оставить остальные висеть. Незакрытый пул
+    соединений переживает процесс и достаётся сборщику мусора уже после
+    того, как цикл событий разобран, — оттуда и берутся жалобы на
+    невозвращённые в пул соединения при остановке.
+    """
+    async with AsyncExitStack() as closing:
+        closing.push_async_callback(ctx["engine"].dispose)
+        closing.push_async_callback(ctx["redis"].aclose)
+        closing.push_async_callback(ctx["resources"].aclose)
 
 
-async def run_review_task(ctx: dict[str, Any], run_id: str, tenant_id: str) -> dict[str, Any]:
+async def run_review_task(
+    ctx: dict[str, Any],
+    run_id: str,
+    tenant_id: str,
+    resume: bool = False,
+) -> dict[str, Any]:
     """Фоновый прогон ревью.
 
     Ошибки домена и приложения не пробрасываются наружу: прогон уже переведён
@@ -131,6 +157,10 @@ async def run_review_task(ctx: dict[str, Any], run_id: str, tenant_id: str) -> d
     не изменит и только займёт воркер. Всё остальное — ошибка не предусмотренная,
     и прогон переводится в неуспешный здесь: иначе он навсегда останется
     «идущим», а интерфейс будет вечно показывать растущее время.
+
+    `resume` со значением по умолчанию: задачи, поставленные в очередь
+    до появления продолжения, лежат там с двумя аргументами и обязаны
+    отработать как прогон с начала.
     """
     use_case = RunReview(
         SqlAlchemyUnitOfWork(ctx["session_factory"]),
@@ -139,9 +169,13 @@ async def run_review_task(ctx: dict[str, Any], run_id: str, tenant_id: str) -> d
         max_output_tokens=ctx["max_output_tokens"],
     )
 
-    logger.info("review.started", run_id=run_id)
+    logger.info("review.started", run_id=run_id, resume=resume)
     try:
-        outcome = await use_case.execute(TenantId(UUID(tenant_id)), ReviewRunId(UUID(run_id)))
+        outcome = await use_case.execute(
+            TenantId(UUID(tenant_id)),
+            ReviewRunId(UUID(run_id)),
+            resume=resume,
+        )
     except ReviewCancelledError:
         logger.info("review.cancelled", run_id=run_id)
         return {"run_id": run_id, "status": "cancelled"}

@@ -41,6 +41,14 @@ RETRYABLE_ERRORS = (RateLimitError, Timeout, APIError)
 RETRY_BACKOFF_SECONDS = 1.0
 PROMPT_TOKENS_PATTERN = re.compile(r'"n_prompt_tokens"\s*:\s*(\d+)')
 CONTEXT_SIZE_PATTERN = re.compile(r'"n_ctx"\s*:\s*(\d+)')
+CONTEXT_OVERFLOW_MARKERS = (
+    "context size has been exceeded",
+    "exceed_context_size_error",
+    "exceeds the available context size",
+    "context window",
+    "context length",
+    "maximum context",
+)
 
 
 class LiteLlmClient:
@@ -137,6 +145,8 @@ class LiteLlmClient:
                 await asyncio.sleep(RETRY_BACKOFF_SECONDS * 2 ** (attempt - 1))
                 continue
             except Exception as error:
+                if _mentions_context_overflow(str(error)):
+                    raise _context_overflow_error(choice.model, error) from error
                 raise LlmUnavailableError(
                     f"Модель {choice.model} вернула ошибку: {error}",
                     model=choice.model,
@@ -171,6 +181,19 @@ class LiteLlmClient:
             f"Модель {model} недоступна после {self._max_attempts} попыток: {last_error}",
             model=model,
         )
+
+
+def _mentions_context_overflow(text: str) -> bool:
+    """Узнаёт переполнение окна по словам сервера.
+
+    Тип исключения тут не помощник: LM Studio отдаёт переполнение обычным
+    `BadRequestError`, litellm его в `ContextWindowExceededError` не переводит,
+    и переполнение приезжает неотличимым от «провайдер отказал». Разница
+    важна человеку: одно чинится окном модели, другое — разбирательством
+    с сервисом, и совет в интерфейсе выбирается по виду причины.
+    """
+    lowered = text.lower()
+    return any(marker in lowered for marker in CONTEXT_OVERFLOW_MARKERS)
 
 
 def _context_overflow_error(model: str, error: Exception) -> LlmContextOverflowError:

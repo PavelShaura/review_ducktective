@@ -308,6 +308,7 @@ class ReviewRunResponse(BaseModel):
     totals: dict[str, int]
     failure_reason: str | None
     degradations: list[NodeDegradationResponse]
+    duration_ms: int
     files_with_context: int
     reviewable_files: int
     created_at: datetime
@@ -329,6 +330,7 @@ class ReviewRunResponse(BaseModel):
             totals=run.severity_totals,
             failure_reason=run.failure_reason,
             degradations=[NodeDegradationResponse.from_domain(mark) for mark in run.degradations],
+            duration_ms=run.duration_ms,
             files_with_context=run.files_with_context,
             reviewable_files=len(run.reviewable_files()),
             created_at=run.created_at,

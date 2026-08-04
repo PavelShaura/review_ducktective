@@ -11,6 +11,7 @@ from langgraph.runtime import (
 
 from ducktective.core.exceptions import (
     DomainError,
+    ReviewInterruptedError,
 )
 from ducktective.core.review.degradation import (
     NodeDegradation,
@@ -20,6 +21,9 @@ from ducktective.core.review.degradation import (
 )
 from ducktective.core.review.ports import (
     CodeReviewer,
+)
+from ducktective.review_graph.nodes.cancellation import (
+    is_cancelled,
 )
 from ducktective.review_graph.ports import (
     ReviewerNode,
@@ -51,8 +55,8 @@ def review_node(
         *,
         runtime: Runtime[ReviewRuntimeContext],
     ) -> dict[str, Any]:
-        if await _is_cancelled(runtime):
-            return _results(FileDrafts(**_common(state), is_cancelled=True))
+        if await is_cancelled(runtime):
+            raise ReviewInterruptedError("Расследование прекращено")
 
         reviewer = reviewers.get(state.reviewer_name)
         if reviewer is None:
@@ -89,18 +93,6 @@ def review_node(
         )
 
     return review
-
-
-async def _is_cancelled(runtime: Runtime[ReviewRuntimeContext]) -> bool:
-    """Сверяется с просьбой прекратить перед обращением к модели.
-
-    Перед файлом — единственная дешёвая отсечка: чтение одного файла занимает
-    десятки секунд, а прерывать запрос к модели на середине нечем и незачем.
-    """
-    context = runtime.context
-    if context is None or context.cancellation is None:
-        return False
-    return await context.cancellation()
 
 
 def _common(task: FileReviewTask) -> dict[str, Any]:

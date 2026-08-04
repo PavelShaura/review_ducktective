@@ -16,6 +16,7 @@ from ducktective.core.review.entities import (
 )
 from ducktective.core.types import (
     RepositoryId,
+    ReviewRunId,
 )
 
 
@@ -26,6 +27,13 @@ class PipelineRequest:
     Ни базы, ни агрегата: use case читает прогон, отдаёт сюда файлы и забирает
     находки обратно. Иначе граф пришлось бы пускать внутрь транзакции, а он
     работает минутами.
+    """
+
+    run_id: ReviewRunId
+    """Кем прогон назовётся в сохранённом ходе.
+
+    Агрегата конвейер не получает, но узнать прерванный прогон в лицо ему
+    нужно: без имени продолжать нечего.
     """
 
     repository_id: RepositoryId

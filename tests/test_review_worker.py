@@ -8,6 +8,8 @@ from uuid import (
     uuid4,
 )
 
+import pytest
+
 from ducktective.core.code_repository.entities import (
     CodeRepository,
 )
@@ -27,6 +29,7 @@ from ducktective.review_graph import (
 )
 from ducktective.reviewer.worker import (
     run_review_task,
+    shutdown,
 )
 from ducktective.vcs.diff_parser import (
     UnifiedDiffParser,
@@ -124,3 +127,37 @@ async def test_task_reports_domain_error_without_raising(monkeypatch: Any) -> No
 
     assert result["status"] == "failed"
     assert "error" in result
+
+
+class FailingCloser:
+    """Ресурс, чьё закрытие срывается."""
+
+    async def aclose(self) -> None:
+        raise RuntimeError("не закрылось")
+
+
+class RecordingEngine:
+    def __init__(self) -> None:
+        self.disposed = False
+
+    async def dispose(self) -> None:
+        self.disposed = True
+
+
+async def test_shutdown_closes_the_database_even_if_something_else_fails() -> None:
+    """Незакрытый пул переживает процесс и достаётся сборщику мусора.
+
+    Тогда на выходе сыплются жалобы на невозвращённые в пул соединения,
+    а причина — сбой закрытия чего-то другого, случившийся раньше.
+    """
+    engine = RecordingEngine()
+    context: dict[str, Any] = {
+        "resources": FailingCloser(),
+        "redis": FailingCloser(),
+        "engine": engine,
+    }
+
+    with pytest.raises(RuntimeError):
+        await shutdown(context)
+
+    assert engine.disposed is True

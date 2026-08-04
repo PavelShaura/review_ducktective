@@ -2,8 +2,13 @@ from typing import (
     Any,
 )
 
+from langgraph.runtime import (
+    Runtime,
+)
+
 from ducktective.core.exceptions import (
     DomainError,
+    ReviewInterruptedError,
 )
 from ducktective.core.retrieval.context import (
     DiffContext,
@@ -22,30 +27,46 @@ from ducktective.core.review.entities import (
 from ducktective.core.types import (
     RepositoryId,
 )
+from ducktective.review_graph.nodes.cancellation import (
+    is_cancelled,
+)
 from ducktective.review_graph.ports import (
-    StateNode,
+    InterruptibleNode,
 )
 from ducktective.review_graph.state import (
     ReviewGraphState,
+    ReviewRuntimeContext,
 )
 
 
 def build_context_node(
     context_builder: ContextBuilder | None,
-) -> StateNode:
+) -> InterruptibleNode:
     """Собирает окружение изменений для каждого файла диффа.
 
     Отсутствие или поломка индекса не отменяют ревью: оно продолжается по одному
     диффу, а число файлов с контекстом попадает в итог прогона, чтобы разницу
     в качестве не приходилось угадывать.
+
+    Просьбу прекратить узел слышит между файлами. Без этого прекращённый
+    прогон продолжал собирать окружение на весь дифф — минуты работы, за
+    которые человек успевает нажать «продолжить», и два прогона оказываются
+    на одном сохранённом ходе одновременно.
     """
 
-    async def build_context(state: ReviewGraphState) -> dict[str, Any]:
+    async def build_context(
+        state: ReviewGraphState,
+        *,
+        runtime: Runtime[ReviewRuntimeContext],
+    ) -> dict[str, Any]:
         contexts: dict[str, DiffContext] = {}
         degradations: list[NodeDegradation] = []
         files_with_context = 0
 
         for file in state.request.files:
+            if await is_cancelled(runtime):
+                raise ReviewInterruptedError("Расследование прекращено")
+
             context, failure = await _safely_build(
                 context_builder,
                 state.request.repository_id,

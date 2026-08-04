@@ -1,13 +1,21 @@
 from datetime import (
     datetime,
 )
+from uuid import (
+    UUID,
+)
 
 from sqlalchemy import (
     DateTime,
+    Dialect,
     MetaData,
+    Uuid,
 )
 from sqlalchemy.orm import (
     DeclarativeBase,
+)
+from sqlalchemy.types import (
+    TypeDecorator,
 )
 
 
@@ -18,6 +26,29 @@ NAMING_CONVENTION = {
     "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
     "pk": "pk_%(table_name)s",
 }
+
+
+class StdlibUuid(TypeDecorator[UUID]):
+    """Идентификатор из базы приводится к `uuid.UUID` домена.
+
+    asyncpg отдаёт `pgproto.UUID` — наследника `uuid.UUID`, поэтому подмена
+    не видна ни в сравнении, ни в проверке типа, и доменные объекты носят
+    тип драйвера, не подавая виду. Видно её там, где тип называют по имени:
+    сохранённое состояние графа восстанавливается по имени класса, и
+    незнакомый идентификатор возвращается строкой вместо UUID — прогон
+    рассыпается ровно в момент продолжения.
+
+    Приведение стоит здесь, а не в мапперах: граница драйвера одна,
+    а мапперов два десятка.
+    """
+
+    impl = Uuid
+    cache_ok = True
+
+    def process_result_value(self, value: UUID | None, dialect: Dialect) -> UUID | None:
+        if value is None or type(value) is UUID:
+            return value
+        return UUID(bytes=value.bytes)
 
 
 class Base(DeclarativeBase):
@@ -34,4 +65,5 @@ class Base(DeclarativeBase):
     metadata = MetaData(naming_convention=NAMING_CONVENTION)
     type_annotation_map = {  # noqa: RUF012
         datetime: DateTime(timezone=True),
+        UUID: StdlibUuid(),
     }

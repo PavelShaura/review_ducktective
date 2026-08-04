@@ -98,6 +98,9 @@ export const api = {
   restartRun: (runId: string) =>
     request<ReviewRun>(`/reviews/${runId}/restart?tenant_id=${TENANT_ID}`, { method: "POST" }),
 
+  resumeRun: (runId: string) =>
+    request<ReviewRun>(`/reviews/${runId}/resume?tenant_id=${TENANT_ID}`, { method: "POST" }),
+
   getFilePatch: (runId: string, fileId: string) =>
     request<FilePatch>(`/reviews/${runId}/files/${fileId}/patch?tenant_id=${TENANT_ID}`),
 

@@ -1,7 +1,13 @@
 from collections.abc import (
     Mapping,
 )
+from typing import (
+    Any,
+)
 
+from langgraph.checkpoint.base import (
+    BaseCheckpointSaver,
+)
 from langgraph.graph import (
     END,
     START,
@@ -59,6 +65,7 @@ def build_review_graph(
     reviewers: Mapping[str, CodeReviewer],
     *,
     context_builder: ContextBuilder | None = None,
+    checkpointer: BaseCheckpointSaver[Any] | None = None,
 ) -> ReviewGraph:
     """Собирает конвейер из `05-review-pipeline.md`.
 
@@ -87,4 +94,4 @@ def build_review_graph(
     builder.add_edge(AGGREGATE_NODE, VERIFY_NODE)
     builder.add_edge(VERIFY_NODE, END)
 
-    return builder.compile()
+    return builder.compile(checkpointer=checkpointer)

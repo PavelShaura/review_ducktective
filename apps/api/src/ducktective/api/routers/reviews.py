@@ -57,6 +57,10 @@ from ducktective.application.review.restart_run import (
     RestartReviewRun,
     RunNotRestartableError,
 )
+from ducktective.application.review.resume_run import (
+    ResumeReviewRun,
+    RunNotResumableError,
+)
 from ducktective.application.review.submit_feedback import (
     SubmitFindingFeedback,
     SubmitFindingFeedbackCommand,
@@ -197,8 +201,8 @@ async def restart_review(
     """Отправляет прекращённый или неудавшийся прогон на расследование заново.
 
     Файлы диффа уже разобраны и остаются на месте — повторяется только чтение
-    моделью. Продолжения с места нет: находки пишутся все сразу в конце,
-    и половины прогона в базе не существует.
+    моделью, зато всё целиком: сохранённый ход прогона забывается. Дочитать
+    остаток умеет соседний эндпоинт.
     """
     use_case = RestartReviewRun(unit_of_work, event_publisher)
 
@@ -215,6 +219,45 @@ async def restart_review(
         REVIEW_TASK_NAME,
         str(run_id),
         str(tenant_id),
+        _queue_name=REVIEW_QUEUE,
+    )
+    return ReviewRunResponse.from_domain(run)
+
+
+@router.post(
+    "/reviews/{run_id}/resume",
+    response_model=ReviewRunResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def resume_review(
+    run_id: UUID,
+    tenant_id: UUID,
+    unit_of_work: UnitOfWorkDependency,
+    event_publisher: EventPublisherDependency,
+    task_queue: TaskQueueDependency,
+) -> ReviewRunResponse:
+    """Продолжает прерванное расследование с того места, где оно встало.
+
+    Уже прочитанные пары «файл × ревьюер» не читаются второй раз: ход прогона
+    сохранён чекпоинтером. Если сохранять его было нечем, продолжение
+    равносильно прогону с начала — результат тот же, просто дороже.
+    """
+    use_case = ResumeReviewRun(unit_of_work, event_publisher)
+
+    try:
+        run = await use_case.execute(TenantId(tenant_id), ReviewRunId(run_id))
+    except EntityNotFoundError as error:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
+    except PermissionDeniedError as error:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(error)) from error
+    except RunNotResumableError as error:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
+
+    await task_queue.enqueue_job(
+        REVIEW_TASK_NAME,
+        str(run_id),
+        str(tenant_id),
+        True,
         _queue_name=REVIEW_QUEUE,
     )
     return ReviewRunResponse.from_domain(run)

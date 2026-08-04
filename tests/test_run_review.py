@@ -1,3 +1,6 @@
+from datetime import (
+    timedelta,
+)
 from pathlib import (
     Path,
 )
@@ -19,6 +22,10 @@ from ducktective.application.review.cancel_run import (
 from ducktective.application.review.restart_run import (
     RestartReviewRun,
     RunNotRestartableError,
+)
+from ducktective.application.review.resume_run import (
+    ResumeReviewRun,
+    RunNotResumableError,
 )
 from ducktective.application.review.run_review import (
     ReviewCancelledError,
@@ -58,6 +65,13 @@ from ducktective.core.review.entities import (
     ReviewFile,
     ReviewRun,
 )
+from ducktective.core.review.pipeline import (
+    PipelineOutcome,
+    PipelineRequest,
+)
+from ducktective.core.review.ports import (
+    CancellationCheck,
+)
 from ducktective.core.review.value_objects import (
     EvidenceKind,
     FindingCategory,
@@ -70,6 +84,7 @@ from ducktective.core.types import (
     CommitSha,
     QualifiedName,
     RepositoryId,
+    ReviewRunId,
     TenantId,
 )
 from ducktective.review_graph import (
@@ -611,3 +626,167 @@ async def test_completed_run_is_not_restartable() -> None:
 
     with pytest.raises(RunNotRestartableError):
         await RestartReviewRun(unit_of_work, FakeEventPublisher()).execute(tenant_id, run.id)
+
+
+async def test_run_from_scratch_forgets_the_previous_attempt() -> None:
+    """Иначе «расследовать заново» вернуло бы ровно то, от чего уходили."""
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, run = prepare(unit_of_work)
+    pipeline = RecordingPipeline()
+    use_case = RunReview(unit_of_work, FakeEventPublisher(), pipeline)
+
+    await use_case.execute(tenant_id, run.id)
+
+    assert pipeline.forgotten == [run.id, run.id]
+    assert pipeline.resumed == [False]
+
+
+async def test_resumed_run_keeps_what_it_had_read() -> None:
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, run = prepare(unit_of_work)
+    pipeline = RecordingPipeline()
+    use_case = RunReview(unit_of_work, FakeEventPublisher(), pipeline)
+
+    await use_case.execute(tenant_id, run.id, resume=True)
+
+    assert pipeline.resumed == [True]
+    assert pipeline.forgotten == [run.id]
+
+
+async def test_failed_run_remembers_its_progress() -> None:
+    """Упавший прогон продолжают, а не начинают заново, — забывать его рано."""
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, run = prepare(unit_of_work)
+    pipeline = RecordingPipeline(outcome=PipelineOutcome(failed_files=("app/service.py: нет",)))
+    use_case = RunReview(unit_of_work, FakeEventPublisher(), pipeline)
+
+    await use_case.execute(tenant_id, run.id, resume=True)
+
+    assert run.status is ReviewStatus.FAILED
+    assert pipeline.forgotten == []
+
+
+async def test_cancelled_run_can_be_resumed() -> None:
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, run = prepare(unit_of_work)
+    reviewer = CancellingReviewer(run, {SERVICE_FILE: [build_draft()]})
+    with pytest.raises(ReviewCancelledError):
+        await review_with(unit_of_work, tenant_id, run, reviewer)
+
+    await ResumeReviewRun(unit_of_work, FakeEventPublisher()).execute(tenant_id, run.id)
+
+    assert run.status is ReviewStatus.QUEUED
+    assert run.tokens_input == 0
+
+
+async def test_completed_run_is_not_resumable() -> None:
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, run = prepare(unit_of_work)
+    await run_with(unit_of_work, tenant_id, run, FakeCodeReviewer({SERVICE_FILE: [build_draft()]}))
+
+    with pytest.raises(RunNotResumableError):
+        await ResumeReviewRun(unit_of_work, FakeEventPublisher()).execute(tenant_id, run.id)
+
+
+class RecordingPipeline:
+    """Конвейер, запоминающий, что ему велели помнить и что забыть."""
+
+    def __init__(self, *, outcome: PipelineOutcome | None = None) -> None:
+        self.outcome = outcome or PipelineOutcome(reviewed_files=1)
+        self.resumed: list[bool] = []
+        self.forgotten: list[ReviewRunId] = []
+        self.cancellations: list[CancellationCheck] = []
+
+    async def run(
+        self,
+        request: PipelineRequest,
+        *,
+        cancellation: CancellationCheck | None = None,
+        resume: bool = False,
+    ) -> PipelineOutcome:
+        self.resumed.append(resume)
+        if cancellation is not None:
+            self.cancellations.append(cancellation)
+        return self.outcome
+
+    async def forget(self, run_id: ReviewRunId) -> None:
+        self.forgotten.append(run_id)
+
+
+async def test_previous_attempt_stops_when_the_run_is_resumed() -> None:
+    """Продолжение стирает признак отмены — прежняя попытка узнаёт себя иначе."""
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, run = prepare(unit_of_work)
+    pipeline = RecordingPipeline(outcome=PipelineOutcome(failed_files=("app/service.py: нет",)))
+    use_case = RunReview(unit_of_work, FakeEventPublisher(), pipeline)
+
+    await use_case.execute(tenant_id, run.id)
+    stop = pipeline.cancellations[0]
+
+    assert await stop() is False
+
+    run.restart()
+
+    assert run.is_cancelled is False
+    assert await stop() is True
+
+
+async def test_attempt_grows_with_every_return_to_the_queue() -> None:
+    unit_of_work = FakeUnitOfWork()
+    _, run = prepare(unit_of_work)
+
+    assert run.attempt == 1
+
+    run.cancel()
+    run.restart()
+    run.mark_running()
+    run.cancel()
+    run.restart()
+
+    assert run.attempt == 3
+
+
+def spend(run: ReviewRun, seconds: int) -> None:
+    """Отматывает начало попытки назад: иначе она длится меньше миллисекунды."""
+    run.mark_running()
+    assert run.started_at is not None
+    run.started_at -= timedelta(seconds=seconds)
+
+
+async def test_resumed_run_keeps_the_time_it_had_already_spent() -> None:
+    """Человек спрашивает, сколько идёт дело, а не сколько идёт последний заход."""
+    unit_of_work = FakeUnitOfWork()
+    _, run = prepare(unit_of_work)
+
+    spend(run, 30)
+    run.cancel()
+    run.resume()
+
+    assert run.duration_ms >= 30_000
+    assert run.started_at is None
+
+
+async def test_run_started_anew_forgets_the_time_it_had_spent() -> None:
+    """Прежняя работа выброшена вместе с ходом — её цена уходит с ней."""
+    unit_of_work = FakeUnitOfWork()
+    _, run = prepare(unit_of_work)
+
+    spend(run, 30)
+    run.cancel()
+    run.restart()
+
+    assert run.duration_ms == 0
+
+
+async def test_duration_adds_up_across_attempts() -> None:
+    unit_of_work = FakeUnitOfWork()
+    _, run = prepare(unit_of_work)
+
+    spend(run, 30)
+    run.cancel()
+    run.resume()
+    spend(run, 12)
+    run.mark_completed()
+
+    assert run.duration_ms >= 42_000
+    assert run.attempt == 2

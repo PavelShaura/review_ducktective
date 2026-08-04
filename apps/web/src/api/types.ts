@@ -108,6 +108,7 @@ export interface ReviewRun {
   totals: Record<string, number>;
   failure_reason: string | null;
   degradations: NodeDegradation[];
+  duration_ms: number;
   files_with_context: number;
   reviewable_files: number;
   created_at: string;

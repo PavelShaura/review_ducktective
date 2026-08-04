@@ -58,6 +58,8 @@ def to_domain(model: ReviewRunModel) -> ReviewRun:
         started_at=model.started_at,
         finished_at=model.finished_at,
         failure_reason=model.failure_reason,
+        attempt=model.attempt,
+        duration_ms=model.duration_ms,
         tokens_input=model.tokens_input,
         tokens_output=model.tokens_output,
         cost_usd=model.cost_usd,
@@ -82,6 +84,8 @@ def to_model(run: ReviewRun) -> ReviewRunModel:
         totals=run.severity_totals,
         config=_config_from_domain(run),
         failure_reason=run.failure_reason,
+        attempt=run.attempt,
+        duration_ms=run.duration_ms,
         created_by=run.created_by,
         created_at=run.created_at,
         started_at=run.started_at,
@@ -105,6 +109,8 @@ def apply_changes(model: ReviewRunModel, run: ReviewRun) -> None:
     model.totals = run.severity_totals
     model.config = _config_from_domain(run)
     model.failure_reason = run.failure_reason
+    model.attempt = run.attempt
+    model.duration_ms = run.duration_ms
     model.started_at = run.started_at
     model.finished_at = run.finished_at
     model.tokens_input = run.tokens_input

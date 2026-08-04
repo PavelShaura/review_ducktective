@@ -114,7 +114,8 @@ interface Props {
  * транзакцией в конце. Показывать «замечаний нет» до этого момента — врать.
  */
 export function ReviewProgress({ run }: Props) {
-  const elapsed = useElapsedSeconds(run.started_at);
+  const current = useElapsedSeconds(run.started_at);
+  const elapsed = Math.round(run.duration_ms / 1000) + current;
   const expected = run.files.length * AVERAGE_SECONDS_PER_FILE;
 
   return (
@@ -167,32 +168,46 @@ export function ReviewCancelled({ run }: Props) {
       <h2 className="font-display text-2xl font-semibold text-paper">Расследование прекращено</h2>
       <p className="mt-2 text-[16px] text-paper-dim">
         Замечания не сохранились: они пишутся все сразу в конце прогона. Дифф разобран
-        и остался на месте — расследование можно начать сначала.
+        и остался на месте. Продолжение дочитает файлы, до которых прогон не дошёл;
+        заново — прочитает все.
       </p>
       <RestartButton runId={run.id} />
     </section>
   );
 }
 
+/**
+ * Две кнопки рядом: продолжить дороже не бывает, а заново стоит целого прогона.
+ * Продолжение стоит первым, потому что после прекращения хотят обычно его —
+ * при локальной модели разница измеряется часами.
+ */
 function RestartButton({ runId }: { runId: string }) {
   const queryClient = useQueryClient();
-  const restart = useMutation({
-    mutationFn: () => api.restartRun(runId),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["run", runId] }),
-  });
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["run", runId] });
+  const resume = useMutation({ mutationFn: () => api.resumeRun(runId), onSuccess: invalidate });
+  const restart = useMutation({ mutationFn: () => api.restartRun(runId), onSuccess: invalidate });
+  const busy = resume.isPending || restart.isPending;
 
   return (
-    <div className="mt-4">
+    <div className="mt-4 flex flex-wrap items-center gap-3">
+      <button
+        type="button"
+        onClick={() => resume.mutate()}
+        disabled={busy}
+        className="case-label border border-brass/50 px-4 py-1.5 text-brass transition hover:bg-brass/10 disabled:opacity-50"
+      >
+        {resume.isPending ? "продолжаю…" : "продолжить"}
+      </button>
       <button
         type="button"
         onClick={() => restart.mutate()}
-        disabled={restart.isPending}
-        className="case-label border border-brass/50 px-4 py-1.5 text-brass transition hover:bg-brass/10 disabled:opacity-50"
+        disabled={busy}
+        className="case-label border border-paper-dim/40 px-4 py-1.5 text-paper-dim transition hover:border-brass/60 hover:text-brass disabled:opacity-50"
       >
         {restart.isPending ? "поднимаю дело…" : "расследовать заново"}
       </button>
-      {restart.isError ? (
-        <p className="case-label mt-2 text-critical">не вышло — проверьте, что сервис на месте</p>
+      {restart.isError || resume.isError ? (
+        <p className="case-label w-full text-critical">не вышло — проверьте, что сервис на месте</p>
       ) : null}
     </div>
   );
@@ -495,6 +510,10 @@ function Fact({ label, value }: { label: string; value: string }) {
  *
  * Опрос прогона возвращает те же данные, пока он не закончился, и React не
  * перерисовывает компонент — секунды замирали до перезагрузки страницы.
+ *
+ * Это время текущей попытки; прошлые приходят с сервера отдельным полем
+ * и складываются с ним. После продолжения счётчик обязан идти дальше,
+ * а не начинаться заново: человек спрашивает, сколько идёт дело.
  */
 function useElapsedSeconds(startedAt: string | null): number {
   const [now, setNow] = useState(() => Date.now());
