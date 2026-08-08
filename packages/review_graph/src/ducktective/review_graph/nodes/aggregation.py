@@ -2,6 +2,10 @@ from typing import (
     Any,
 )
 
+from langgraph.runtime import (
+    Runtime,
+)
+
 from ducktective.core.review.dedup import (
     build_dedup_key,
 )
@@ -11,13 +15,21 @@ from ducktective.core.review.value_objects import (
 from ducktective.core.review.verification import (
     has_confirmable_evidence,
 )
+from ducktective.review_graph.nodes.reporting import (
+    report_stage,
+)
 from ducktective.review_graph.state import (
     MergedDraft,
     ReviewGraphState,
+    ReviewRuntimeContext,
 )
 
 
-def aggregate(state: ReviewGraphState) -> dict[str, Any]:
+async def aggregate(
+    state: ReviewGraphState,
+    *,
+    runtime: Runtime[ReviewRuntimeContext],
+) -> dict[str, Any]:
     """Сводит черновики всех ревьюеров в один список без дублей.
 
     Из группы с одним ключом дедупликации выживает не первый пришедший,
@@ -60,6 +72,10 @@ def aggregate(state: ReviewGraphState) -> dict[str, Any]:
             else:
                 displaced.append(candidate)
 
+    await report_stage(
+        runtime,
+        f"Свожу черновики: предложено {proposed}, осталось {len(survivors)}",
+    )
     return {
         "merged": tuple(survivors.values()),
         "displaced": tuple(displaced),

@@ -222,7 +222,13 @@ export interface IndexState {
   stats: IndexStats | null;
 }
 
-export type StepKind = "thought" | "tool_call" | "tool_result" | "answer" | "fallback";
+export type StepKind =
+  | "stage"
+  | "thought"
+  | "tool_call"
+  | "tool_result"
+  | "answer"
+  | "fallback";
 
 export interface InvestigationStep {
   cursor: number;

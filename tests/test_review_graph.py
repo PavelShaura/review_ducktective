@@ -4,6 +4,9 @@ from collections.abc import (
 from types import (
     SimpleNamespace,
 )
+from typing import (
+    Any,
+)
 from uuid import (
     uuid4,
 )
@@ -189,6 +192,30 @@ async def test_plan_falls_back_to_one_pass_on_a_large_file() -> None:
 
     assert agentic.reviewed_paths == []
     assert sorted(single_pass.reviewed_paths) == [HELPERS_FILE, SERVICE_FILE]
+
+
+async def test_stages_reach_the_log_before_the_first_model_call() -> None:
+    """Лента молчала первые минуты — столько собирается окружение (D3)."""
+    reviewer = FakeCodeReviewer({SERVICE_FILE: [build_draft()]})
+    steps: list[str] = []
+
+    class CollectingSink:
+        async def record(self, step: Any) -> None:
+            steps.append(f"{step.kind.value}: {step.detail}")
+
+    pipeline = LangGraphReviewPipeline(
+        [reviewer],
+        context_builder=NeighbourContextBuilder(),
+        sinks=SimpleNamespace(for_run=lambda run_id: CollectingSink()),
+    )
+
+    await pipeline.run(build_request())
+
+    stages = [line for line in steps if line.startswith("stage:")]
+    assert any("Собираю окружение" in line for line in stages)
+    assert any("План:" in line for line in stages)
+    assert any("Свожу черновики" in line for line in stages)
+    assert any("Проверяю доказательства" in line for line in stages)
 
 
 async def test_navigator_of_the_run_reaches_the_reviewer() -> None:

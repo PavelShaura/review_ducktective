@@ -330,7 +330,7 @@ class AgenticCodeReviewer:
             file,
             step,
             StepKind.ANSWER,
-            f"Расследование закончено, находок: {len(payload.findings)}",
+            f"Файл прочитан, замечаний: {len(payload.findings)}",
         )
         return FileReviewResult(
             drafts=[to_draft(finding, file.path) for finding in payload.findings],

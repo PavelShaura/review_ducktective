@@ -30,8 +30,11 @@ from ducktective.core.types import (
 from ducktective.review_graph.nodes.cancellation import (
     is_cancelled,
 )
+from ducktective.review_graph.nodes.reporting import (
+    report_stage,
+)
 from ducktective.review_graph.ports import (
-    InterruptibleNode,
+    RuntimeNode,
 )
 from ducktective.review_graph.state import (
     ReviewGraphState,
@@ -41,7 +44,7 @@ from ducktective.review_graph.state import (
 
 def build_context_node(
     context_builder: ContextBuilder | None,
-) -> InterruptibleNode:
+) -> RuntimeNode:
     """Собирает окружение изменений для каждого файла диффа.
 
     Отсутствие или поломка индекса не отменяют ревью: оно продолжается по одному
@@ -62,10 +65,26 @@ def build_context_node(
         contexts: dict[str, DiffContext] = {}
         degradations: list[NodeDegradation] = []
         files_with_context = 0
+        total = len(state.request.files)
 
-        for file in state.request.files:
+        await report_stage(
+            runtime,
+            f"Собираю окружение изменений: файлов {total}"
+            if context_builder is not None
+            else f"Индекса нет — читаю по одному диффу: файлов {total}",
+        )
+
+        for position, file in enumerate(state.request.files, start=1):
             if await is_cancelled(runtime):
                 raise ReviewInterruptedError("Расследование прекращено")
+
+            if context_builder is not None:
+                await report_stage(
+                    runtime,
+                    f"Окружение {position} из {total}: {file.path}",
+                    file_path=file.path,
+                    number=position,
+                )
 
             context, failure = await _safely_build(
                 context_builder,

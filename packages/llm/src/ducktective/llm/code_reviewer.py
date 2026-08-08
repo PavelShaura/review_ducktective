@@ -43,6 +43,8 @@ from ducktective.core.review.entities import (
 )
 from ducktective.core.review.investigation import (
     InvestigationSink,
+    InvestigationStep,
+    StepKind,
 )
 from ducktective.core.review.ports import (
     FileReviewResult,
@@ -161,16 +163,18 @@ class LlmCodeReviewer:
     ) -> FileReviewResult:
         """Читает файл одним обращением к модели.
 
-        Ни инструменты, ни лента хода не используются: этот ревьюер работает
-        по тому, что ему показали, и рассказывать по дороге ему нечего.
-        Параметры есть, потому что они есть у порта, и молчаливо принять их
-        честнее, чем требовать от вызывающего знать, кому что нужно.
+        Инструменты не используются: ревьюер работает по тому, что ему
+        показали. Ленте он всё же отвечает — одной записью в конце. Рассказывать
+        по дороге ему нечего, но молчание целиком означало бы, что при
+        одноразовом режиме лента пуста весь прогон, а по ней человек и судит,
+        идёт работа или встала.
         """
         messages = [
             LlmMessage(role=LlmRole.SYSTEM, content=system_prompt()),
             LlmMessage(role=LlmRole.USER, content=build_user_message(file, patch_text, context)),
         ]
         response, payload = await self._ask(messages, requirements)
+        await _report(sink, file, f"Файл прочитан, замечаний: {len(payload.findings)}")
 
         return FileReviewResult(
             drafts=[to_draft(finding, file.path) for finding in payload.findings],
@@ -326,4 +330,12 @@ def to_draft(payload: FindingPayload, file_path: str) -> FindingDraft:
             )
             for item in payload.evidence
         ],
+    )
+
+
+async def _report(sink: InvestigationSink | None, file: ReviewFile, detail: str) -> None:
+    if sink is None:
+        return
+    await sink.record(
+        InvestigationStep(file_path=file.path, number=1, kind=StepKind.ANSWER, detail=detail)
     )

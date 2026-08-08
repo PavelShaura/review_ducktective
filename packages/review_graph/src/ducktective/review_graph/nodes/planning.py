@@ -2,6 +2,9 @@ from typing import (
     Any,
 )
 
+from langgraph.runtime import (
+    Runtime,
+)
 from langgraph.types import (
     Send,
 )
@@ -10,24 +13,29 @@ from ducktective.core.review.planning import (
     plan_file_review,
 )
 from ducktective.core.review.reviewers import (
+    ReviewMode,
     review_mode_of,
 )
 from ducktective.review_graph.const import (
     AGGREGATE_NODE,
     REVIEW_NODE,
 )
+from ducktective.review_graph.nodes.reporting import (
+    report_stage,
+)
 from ducktective.review_graph.ports import (
-    StateNode,
+    RuntimeNode,
 )
 from ducktective.review_graph.state import (
     FileReviewTask,
     ReviewGraphState,
+    ReviewRuntimeContext,
 )
 
 
 def plan_review_node(
     reviewer_names: tuple[str, ...],
-) -> StateNode:
+) -> RuntimeNode:
     """Решает, как читать каждый файл.
 
     Единственный узел, где принимается решение о стоимости прогона (D-018).
@@ -42,7 +50,11 @@ def plan_review_node(
     known = {mode: name for name in reviewer_names if (mode := review_mode_of(name)) is not None}
     unknown = tuple(name for name in reviewer_names if review_mode_of(name) is None)
 
-    async def plan_review(state: ReviewGraphState) -> dict[str, Any]:
+    async def plan_review(
+        state: ReviewGraphState,
+        *,
+        runtime: Runtime[ReviewRuntimeContext],
+    ) -> dict[str, Any]:
         tasks: list[FileReviewTask] = []
         for file in state.request.files:
             context = state.contexts.get(file.path)
@@ -58,9 +70,27 @@ def plan_review_node(
                 )
                 for name in planned
             )
+        await report_stage(runtime, _describe_plan(tasks))
         return {"tasks": tuple(tasks)}
 
     return plan_review
+
+
+def _describe_plan(tasks: list[FileReviewTask]) -> str:
+    """Что и чем будет прочитано.
+
+    Названы оба числа: у режимов разная цена, и человек по этой строке
+    заранее понимает, чего ждать от прогона.
+    """
+    agentic = sum(1 for task in tasks if review_mode_of(task.reviewer_name) is ReviewMode.AGENTIC)
+    plain = len(tasks) - agentic
+    if not tasks:
+        return "Читать нечего: в диффе нет файлов для ревью"
+    if not plain:
+        return f"План: расследую {agentic} файл(ов) с инструментами"
+    if not agentic:
+        return f"План: читаю {plain} файл(ов) одним проходом"
+    return f"План: {agentic} файл(ов) с инструментами, {plain} одним проходом"
 
 
 def dispatch_reviews(state: ReviewGraphState) -> list[Send] | str:

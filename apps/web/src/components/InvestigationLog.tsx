@@ -10,14 +10,16 @@ interface Props {
 }
 
 const KIND_LABEL: Record<StepKind, string> = {
+  stage: "этап",
   thought: "рассуждает",
   tool_call: "запрос",
   tool_result: "ответ",
-  answer: "итог",
+  answer: "готово",
   fallback: "без инструментов",
 };
 
 const KIND_TEXT: Record<StepKind, string> = {
+  stage: "text-brass",
   thought: "text-paper-dim",
   tool_call: "text-brass",
   tool_result: "text-paper",
@@ -26,21 +28,21 @@ const KIND_TEXT: Record<StepKind, string> = {
 };
 
 /**
- * Ход расследования: что агент спросил у кодовой базы и что получил в ответ.
+ * Ход расследования: чем прогон занят и что агент спросил у кодовой базы.
  *
- * Без этой ленты агентный режим неотличим от одноразового прохода: снаружи
- * видно только, что прогон стал дольше. Спорную находку тоже нечем ни
- * подтвердить, ни отклонить — цепочка вызовов и есть объяснение, откуда
- * взялся вывод.
+ * Панель показывается с первой секунды идущего дела, ещё до первого шага:
+ * пустое место под счётчиком времени не отвечает на единственный вопрос,
+ * который у человека есть, — работа идёт или встала.
  *
- * Идущий прогон читается потоком, законченный — одним запросом. Поток даёт
- * шаги в тот момент, когда они появляются, а у законченного дела появляться
- * уже нечему, и держать ради него сокет незачем.
+ * Файл назван в каждой строке, потому что лента общая на прогон, а шаги
+ * приходят от разных файлов вперемешку: без имени «готово, замечаний 0»
+ * читается как конец всего дела, а не как конец одного файла.
  */
 export function InvestigationLog({ run }: Props) {
   const isLive = isInProgress(run.status);
   const [streamed, setStreamed] = useState<InvestigationStep[]>([]);
   const seen = useRef(new Set<number>());
+  const tail = useRef<HTMLLIElement | null>(null);
 
   const settled = useQuery({
     queryKey: ["investigation", run.id],
@@ -68,9 +70,17 @@ export function InvestigationLog({ run }: Props) {
 
   const steps = isLive ? streamed : (settled.data?.steps ?? []);
 
-  if (steps.length === 0) {
+  useEffect(() => {
+    if (isLive) {
+      tail.current?.scrollIntoView({ block: "nearest" });
+    }
+  }, [isLive, steps.length]);
+
+  if (!isLive && steps.length === 0) {
     return null;
   }
+
+  const current = steps[steps.length - 1];
 
   return (
     <section className="border border-tweed-dim bg-ink-raised">
@@ -79,10 +89,27 @@ export function InvestigationLog({ run }: Props) {
         <span className="case-label text-paper-dim">шагов: {steps.length}</span>
       </header>
 
+      {isLive ? (
+        <p className="border-b border-tweed-dim px-4 py-3 text-paper">
+          {current ? (
+            <>
+              <span className="text-brass">сейчас: </span>
+              {summarize(current)}
+              {current.file_path ? (
+                <span className="text-paper-dim"> · {shortPath(current.file_path)}</span>
+              ) : null}
+            </>
+          ) : (
+            <span className="text-paper-dim">поднимаю материалы дела…</span>
+          )}
+        </p>
+      ) : null}
+
       <ol className="max-h-96 space-y-1 overflow-y-auto px-4 py-3 font-mono text-xs">
         {steps.map((step) => (
           <StepLine key={step.cursor} step={step} />
         ))}
+        <li ref={tail} />
       </ol>
     </section>
   );
@@ -90,7 +117,7 @@ export function InvestigationLog({ run }: Props) {
 
 function StepLine({ step }: { step: InvestigationStep }) {
   const [isOpen, setOpen] = useState(false);
-  const hasBody = step.detail.trim().length > 0;
+  const hasBody = step.detail.trim().length > 0 && step.kind !== "stage";
 
   return (
     <li className="border-b border-tweed-dim/40 pb-1 last:border-0">
@@ -100,18 +127,23 @@ function StepLine({ step }: { step: InvestigationStep }) {
         disabled={!hasBody}
         className="flex w-full items-baseline gap-2 text-left disabled:cursor-default"
       >
-        <span className="w-8 shrink-0 text-paper-dim">{step.number}</span>
-        <span className={`w-28 shrink-0 ${step.is_error ? "text-rejected" : KIND_TEXT[step.kind]}`}>
+        <span className={`w-24 shrink-0 ${step.is_error ? "text-rejected" : KIND_TEXT[step.kind]}`}>
           {KIND_LABEL[step.kind]}
         </span>
-        <span className="grow truncate text-paper-dim">{summarize(step)}</span>
+        <span
+          className="w-40 shrink-0 truncate text-paper-dim"
+          title={step.file_path || undefined}
+        >
+          {shortPath(step.file_path)}
+        </span>
+        <span className="grow truncate text-paper">{summarize(step)}</span>
         {step.duration_ms > 0 ? (
           <span className="shrink-0 text-paper-dim">{step.duration_ms} мс</span>
         ) : null}
       </button>
 
       {isOpen && hasBody ? (
-        <pre className="mt-1 ml-10 whitespace-pre-wrap break-words text-paper-dim">
+        <pre className="mt-1 ml-26 whitespace-pre-wrap break-words text-paper-dim">
           {step.detail}
         </pre>
       ) : null}
@@ -132,7 +164,15 @@ function summarize(step: InvestigationStep): string {
   if (step.kind === "tool_result") {
     return `${step.tool_name ?? ""} · ${firstLine(step.detail)}`;
   }
-  return firstLine(step.detail) || step.file_path;
+  return firstLine(step.detail) || shortPath(step.file_path);
+}
+
+function shortPath(path: string): string {
+  if (!path) {
+    return "—";
+  }
+  const parts = path.split("/");
+  return parts.length <= 2 ? path : `…/${parts.slice(-2).join("/")}`;
 }
 
 function firstLine(text: string): string {

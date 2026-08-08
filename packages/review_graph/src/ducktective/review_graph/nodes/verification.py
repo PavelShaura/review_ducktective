@@ -3,13 +3,21 @@ from typing import (
     Any,
 )
 
+from langgraph.runtime import (
+    Runtime,
+)
+
 from ducktective.core.review.verification import (
     build_verified_finding,
     has_confirmable_evidence,
 )
+from ducktective.review_graph.nodes.reporting import (
+    report_stage,
+)
 from ducktective.review_graph.state import (
     MergedDraft,
     ReviewGraphState,
+    ReviewRuntimeContext,
 )
 
 
@@ -19,7 +27,11 @@ if TYPE_CHECKING:
     )
 
 
-def verify(state: ReviewGraphState) -> dict[str, Any]:
+async def verify(
+    state: ReviewGraphState,
+    *,
+    runtime: Runtime[ReviewRuntimeContext],
+) -> dict[str, Any]:
     """Отсеивает то, что не подтверждается кодом, и называет причину.
 
     Причины считаются раздельно: находка не о том коде, который меняли; цитата
@@ -60,6 +72,11 @@ def verify(state: ReviewGraphState) -> dict[str, Any]:
         else:
             duplicates += 1
 
+    await report_stage(
+        runtime,
+        f"Проверяю доказательства: подтверждено {len(findings)}, "
+        f"отброшено {outside_diff + without_evidence + duplicates}",
+    )
     return {
         "findings": tuple(findings),
         "discarded_outside_diff": outside_diff,

@@ -22,8 +22,15 @@ from ducktective.core.review.degradation import (
 from ducktective.core.review.ports import (
     CodeReviewer,
 )
+from ducktective.core.review.reviewers import (
+    ReviewMode,
+    review_mode_of,
+)
 from ducktective.review_graph.nodes.cancellation import (
     is_cancelled,
+)
+from ducktective.review_graph.nodes.reporting import (
+    report_stage,
 )
 from ducktective.review_graph.ports import (
     ReviewerNode,
@@ -62,6 +69,12 @@ def review_node(
         if reviewer is None:
             raise UnknownReviewerError(state.reviewer_name)
 
+        await report_stage(
+            runtime,
+            f"{_reading(state.reviewer_name)}: {state.file.path}",
+            file_path=state.file.path,
+        )
+
         try:
             outcome = await reviewer.review_file(
                 state.file,
@@ -95,6 +108,17 @@ def review_node(
         )
 
     return review
+
+
+def _reading(reviewer_name: str) -> str:
+    """Как назвать чтение файла в ленте.
+
+    Режим важен человеку: расследование с инструментами идёт минутами
+    и показывает шаги, одноразовый проход молчит до самого ответа.
+    """
+    if review_mode_of(reviewer_name) is ReviewMode.AGENTIC:
+        return "Расследую"
+    return "Читаю одним проходом"
 
 
 def _common(task: FileReviewTask) -> dict[str, Any]:
