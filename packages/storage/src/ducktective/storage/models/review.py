@@ -9,9 +9,13 @@ from uuid import (
 )
 
 from sqlalchemy import (
+    BigInteger,
+    Boolean,
     Enum,
     Float,
     ForeignKey,
+    Identity,
+    Index,
     Integer,
     String,
     Text,
@@ -31,6 +35,9 @@ from sqlalchemy.orm import (
 from ducktective.core.diff.value_objects import (
     ChangeType,
     DiffSide,
+)
+from ducktective.core.review.investigation import (
+    StepKind,
 )
 from ducktective.core.review.value_objects import (
     EvidenceKind,
@@ -237,3 +244,32 @@ class FindingEvidenceModel(Base):
     snippet: Mapped[str] = mapped_column(Text)
 
     finding: Mapped[FindingModel] = relationship(back_populates="evidence")
+
+
+class InvestigationStepModel(Base):
+    """Шаг расследования: что агент подумал, что вызвал, что получил.
+
+    Живёт вне агрегата прогона: шаги пишутся по ходу работы конвейера,
+    короткими транзакциями, а прогон в это время открыт минутами.
+
+    Ключ — счётчик: лента дочитывается запросом «что появилось после такого-то
+    шага», и курсору нужен монотонный порядок.
+    """
+
+    __tablename__ = "investigation_step"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    run_id: Mapped[UUID] = mapped_column(ForeignKey("review_run.id", ondelete="CASCADE"))
+    file_path: Mapped[str] = mapped_column(String(1024))
+    number: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[StepKind] = mapped_column(
+        Enum(StepKind, name="investigation_step_kind", values_callable=enum_values)
+    )
+    tool_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    arguments: Mapped[str | None] = mapped_column(Text, nullable=True)
+    detail: Mapped[str] = mapped_column(Text, server_default="")
+    duration_ms: Mapped[int] = mapped_column(Integer, server_default="0")
+    is_error: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+    __table_args__ = (Index("ix_investigation_step_run_id_id", "run_id", "id"),)

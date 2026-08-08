@@ -32,6 +32,9 @@ from ducktective.core.review.entities import (
     Finding,
     ReviewFile,
 )
+from ducktective.core.review.investigation import (
+    InvestigationSink,
+)
 from ducktective.core.review.pipeline import (
     PipelineRequest,
 )
@@ -52,6 +55,7 @@ class ReviewRuntimeContext:
 
     cancellation: CancellationCheck | None = None
     navigator: CodeNavigator | None = None
+    sink: InvestigationSink | None = None
 
 
 class FileReviewTask(BaseModel):

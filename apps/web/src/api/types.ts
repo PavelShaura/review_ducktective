@@ -221,3 +221,22 @@ export interface IndexState {
   vectors: VectorCoverage;
   stats: IndexStats | null;
 }
+
+export type StepKind = "thought" | "tool_call" | "tool_result" | "answer" | "fallback";
+
+export interface InvestigationStep {
+  cursor: number;
+  file_path: string;
+  number: number;
+  kind: StepKind;
+  tool_name: string | null;
+  arguments: string | null;
+  detail: string;
+  duration_ms: number;
+  is_error: boolean;
+}
+
+export interface Investigation {
+  steps: InvestigationStep[];
+  next_cursor: number;
+}

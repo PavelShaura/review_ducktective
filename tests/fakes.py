@@ -47,6 +47,11 @@ from ducktective.core.review.entities import (
     ReviewFile,
     ReviewRun,
 )
+from ducktective.core.review.investigation import (
+    InvestigationSink,
+    InvestigationStep,
+    RecordedStep,
+)
 from ducktective.core.review.ports import (
     FileReviewResult,
 )
@@ -237,6 +242,7 @@ class FakeCodeReviewer:
         requirements: ModelRequirements,
         context: DiffContext | None = None,
         navigator: CodeNavigator | None = None,
+        sink: InvestigationSink | None = None,
     ) -> FileReviewResult:
         self.seen_navigators.append(navigator)
         if file.path in self.failing_paths:
@@ -383,3 +389,26 @@ class FakeChunkSearch:
     ) -> list[ChunkHit]:
         self.queries.append(query)
         return self.hits[:limit]
+
+
+class FakeInvestigationLog:
+    """Ход расследования в памяти: курсор растёт так же, как в базе."""
+
+    def __init__(self) -> None:
+        self.appended: list[tuple[ReviewRunId, InvestigationStep]] = []
+        self._records: list[RecordedStep] = []
+
+    async def append(self, run_id: ReviewRunId, step: InvestigationStep) -> RecordedStep:
+        self.appended.append((run_id, step))
+        recorded = RecordedStep(cursor=len(self._records) + 1, step=step)
+        self._records.append(recorded)
+        return recorded
+
+    async def list_for_run(
+        self,
+        run_id: ReviewRunId,
+        *,
+        after: int = 0,
+        limit: int = 500,
+    ) -> list[RecordedStep]:
+        return [record for record in self._records if record.cursor > after][:limit]

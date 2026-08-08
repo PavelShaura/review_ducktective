@@ -6,6 +6,7 @@ import type {
   FileContext,
   FilePatch,
   IndexState,
+  Investigation,
   Repository,
   ReviewRun,
   ReviewRunSummary,
@@ -142,6 +143,19 @@ export const api = {
 
   enqueueReview: (runId: string) =>
     request<ReviewRun>(`/reviews/${runId}/run?tenant_id=${TENANT_ID}`, { method: "POST" }),
+
+  investigationStream: (runId: string): WebSocket => {
+    const scheme = window.location.protocol === "https:" ? "wss" : "ws";
+    return new WebSocket(
+      `${scheme}://${window.location.host}/api/reviews/${runId}` +
+        `/investigation/stream?tenant_id=${TENANT_ID}`,
+    );
+  },
+
+  getInvestigation: (runId: string, after = 0) =>
+    request<Investigation>(
+      `/reviews/${runId}/investigation?tenant_id=${TENANT_ID}&after=${after}`,
+    ),
 
   submitFeedback: (runId: string, findingId: string, verdict: FeedbackVerdict) =>
     request<Feedback>(`/reviews/${runId}/findings/${findingId}/feedback`, {

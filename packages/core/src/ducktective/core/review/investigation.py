@@ -8,6 +8,10 @@ from typing import (
     Protocol,
 )
 
+from ducktective.core.types import (
+    ReviewRunId,
+)
+
 
 MAX_STEP_DETAIL_CHARS = 2000
 """Сколько от шага сохраняется для человека.
@@ -53,6 +57,38 @@ class InvestigationStep:
     is_error: bool = False
 
 
+@dataclass(frozen=True, kw_only=True)
+class RecordedStep:
+    """Записанный шаг вместе с местом в ленте.
+
+    Номер шага у ревьюера свой на каждый файл, а лента прогона общая, поэтому
+    порядок в ней задаёт `cursor`: по нему же лента и дочитывается.
+    """
+
+    cursor: int
+    step: InvestigationStep
+
+
+class InvestigationLog(Protocol):
+    """Хранилище хода расследования.
+
+    Записи не входят в агрегат прогона: они появляются по ходу работы
+    конвейера, короткими транзакциями, пока сам прогон открыт минутами.
+    """
+
+    async def append(self, run_id: ReviewRunId, step: InvestigationStep) -> RecordedStep: ...
+
+    async def list_for_run(
+        self,
+        run_id: ReviewRunId,
+        *,
+        after: int = 0,
+        limit: int = 500,
+    ) -> list[RecordedStep]:
+        """Шаги прогона по порядку, начиная со следующего за `after`."""
+        ...
+
+
 class InvestigationSink(Protocol):
     """Куда уходит ход расследования.
 
@@ -63,6 +99,17 @@ class InvestigationSink(Protocol):
     """
 
     async def record(self, step: InvestigationStep) -> None: ...
+
+
+class InvestigationSinks(Protocol):
+    """Слушатель хода — по одному на прогон.
+
+    Прогон известен здесь, а не ревьюеру: ревьюер читает файл, а не ведёт дело,
+    и подставлять идентификатор прогона в каждый его шаг — работа того, кто
+    этот прогон затеял.
+    """
+
+    def for_run(self, run_id: ReviewRunId) -> InvestigationSink: ...
 
 
 class NullInvestigationSink:

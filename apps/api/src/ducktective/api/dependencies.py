@@ -22,6 +22,9 @@ from ducktective.llm.factory import (
 from ducktective.storage.events.redis_publisher import (
     RedisEventPublisher,
 )
+from ducktective.storage.repositories.investigation import (
+    SqlAlchemyInvestigationLog,
+)
 from ducktective.storage.unit_of_work import (
     SqlAlchemyUnitOfWork,
 )
@@ -54,6 +57,10 @@ def get_diff_parser() -> UnifiedDiffParser:
     return UnifiedDiffParser()
 
 
+def get_investigation_log(request: Request) -> SqlAlchemyInvestigationLog:
+    return SqlAlchemyInvestigationLog(request.app.state.session_factory)
+
+
 def get_task_queue(request: Request) -> ArqRedis:
     queue: ArqRedis = request.app.state.task_queue
     return queue
@@ -83,3 +90,7 @@ VcsProviderDependency = Annotated[LocalGitProvider, Depends(get_vcs_provider)]
 DiffParserDependency = Annotated[UnifiedDiffParser, Depends(get_diff_parser)]
 CodeReviewersDependency = Annotated[tuple[CodeReviewer, ...], Depends(get_code_reviewers)]
 TaskQueueDependency = Annotated[ArqRedis, Depends(get_task_queue)]
+InvestigationLogDependency = Annotated[
+    SqlAlchemyInvestigationLog,
+    Depends(get_investigation_log),
+]

@@ -12,6 +12,7 @@ from fastapi import (
 from ducktective.api.dependencies import (
     DiffParserDependency,
     EventPublisherDependency,
+    InvestigationLogDependency,
     TaskQueueDependency,
     UnitOfWorkDependency,
     VcsProviderDependency,
@@ -22,6 +23,7 @@ from ducktective.api.schemas.review import (
     FeedbackResponse,
     FileContextResponse,
     FilePatchResponse,
+    InvestigationResponse,
     ReviewRunResponse,
     ReviewRunSummary,
     StartReviewRequest,
@@ -48,6 +50,9 @@ from ducktective.application.review.read_file import (
     FileContentUnavailableError,
     GetFileContext,
     GetFilePatch,
+)
+from ducktective.application.review.read_investigation import (
+    ReadInvestigation,
 )
 from ducktective.application.review.read_runs import (
     GetReviewRun,
@@ -400,6 +405,33 @@ async def get_file_context(
 
     response.headers["Cache-Control"] = NO_STORE
     return FileContextResponse.from_view(view)
+
+
+@router.get("/reviews/{run_id}/investigation", response_model=InvestigationResponse)
+async def get_investigation(
+    run_id: UUID,
+    tenant_id: UUID,
+    response: Response,
+    unit_of_work: UnitOfWorkDependency,
+    investigation_log: InvestigationLogDependency,
+    after: int = 0,
+) -> InvestigationResponse:
+    """Ход расследования по прогону, начиная со следующего за `after` шага.
+
+    Отдаётся кусками от курсора: лента дописывается, пока прогон идёт,
+    и клиенту нужно то, что появилось с прошлого раза, а не вся трасса заново.
+    """
+    use_case = ReadInvestigation(unit_of_work, investigation_log)
+
+    try:
+        view = await use_case.execute(TenantId(tenant_id), ReviewRunId(run_id), after=after)
+    except EntityNotFoundError as error:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
+    except PermissionDeniedError as error:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(error)) from error
+
+    response.headers["Cache-Control"] = NO_STORE
+    return InvestigationResponse.from_view(view)
 
 
 @router.get("/repositories/{repository_id}/reviews", response_model=list[ReviewRunSummary])

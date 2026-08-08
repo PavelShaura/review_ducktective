@@ -7,6 +7,7 @@ import type { FeedbackVerdict, Finding, ReviewRun, Severity } from "@/api/types"
 import { FileDiff } from "@/components/FileDiff";
 import { FindingCard } from "@/components/FindingCard";
 import { ContextMark } from "@/components/ContextMark";
+import { InvestigationLog } from "@/components/InvestigationLog";
 import { SEVERITY_LABEL, SEVERITY_ORDER, SEVERITY_TEXT } from "@/components/SeverityMark";
 import {
   ReviewCancelled,
@@ -72,6 +73,7 @@ export default function CasePage() {
       <CaseHeader run={run.data} />
 
       {isRunning ? <ReviewProgress run={run.data} /> : null}
+      <InvestigationLog run={run.data} />
       {hasFailed ? <ReviewFailure run={run.data} /> : null}
       {wasCancelled ? <ReviewCancelled run={run.data} /> : null}
 

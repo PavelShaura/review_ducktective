@@ -41,6 +41,9 @@ from ducktective.core.review.drafts import (
 from ducktective.core.review.entities import (
     ReviewFile,
 )
+from ducktective.core.review.investigation import (
+    InvestigationSink,
+)
 from ducktective.core.review.ports import (
     FileReviewResult,
 )
@@ -154,13 +157,14 @@ class LlmCodeReviewer:
         requirements: ModelRequirements,
         context: DiffContext | None = None,
         navigator: CodeNavigator | None = None,
+        sink: InvestigationSink | None = None,
     ) -> FileReviewResult:
         """Читает файл одним обращением к модели.
 
-        Навигатор не используется: этот ревьюер работает по тому, что ему
-        показали. Параметр есть, потому что он есть у порта, и молчаливо
-        принять его честнее, чем требовать от вызывающего знать, кому
-        инструменты нужны, а кому нет.
+        Ни инструменты, ни лента хода не используются: этот ревьюер работает
+        по тому, что ему показали, и рассказывать по дороге ему нечего.
+        Параметры есть, потому что они есть у порта, и молчаливо принять их
+        честнее, чем требовать от вызывающего знать, кому что нужно.
         """
         messages = [
             LlmMessage(role=LlmRole.SYSTEM, content=system_prompt()),

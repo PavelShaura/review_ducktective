@@ -69,6 +69,7 @@ def review_node(
                 requirements=state.requirements,
                 context=state.context,
                 navigator=runtime.context.navigator,
+                sink=runtime.context.sink,
             )
         except DomainError as error:
             return _results(

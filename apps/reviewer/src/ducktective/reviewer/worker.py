@@ -75,6 +75,15 @@ from ducktective.storage.database import (
 from ducktective.storage.events.redis_publisher import (
     RedisEventPublisher,
 )
+from ducktective.storage.events.step_broadcaster import (
+    RedisStepBroadcaster,
+)
+from ducktective.storage.investigation import (
+    RecordingInvestigationSinks,
+)
+from ducktective.storage.repositories.investigation import (
+    SqlAlchemyInvestigationLog,
+)
 from ducktective.storage.unit_of_work import (
     SqlAlchemyUnitOfWork,
 )
@@ -132,6 +141,7 @@ async def startup(ctx: dict[str, Any]) -> None:
         ),
         git=GitNavigators(git=LocalGitProvider()),
     )
+    ctx["investigation_log"] = SqlAlchemyInvestigationLog(ctx["session_factory"])
     ctx["pipeline"] = LangGraphReviewPipeline(
         build_code_reviewers(
             redis_client=redis_client,
@@ -148,6 +158,10 @@ async def startup(ctx: dict[str, Any]) -> None:
         ),
         context_builder=ctx["context_builder"],
         navigators=ctx["navigators"],
+        sinks=RecordingInvestigationSinks(
+            ctx["investigation_log"],
+            broadcaster=RedisStepBroadcaster(redis_client),
+        ),
         checkpointer=await resources.enter_async_context(
             open_checkpointer(settings.require_database_url())
         ),

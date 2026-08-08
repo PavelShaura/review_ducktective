@@ -116,13 +116,17 @@ class AgenticCodeReviewer:
         requirements: ModelRequirements,
         context: DiffContext | None = None,
         navigator: CodeNavigator | None = None,
+        sink: InvestigationSink | None = None,
     ) -> FileReviewResult:
+        listener = sink or self._sink
+
         if navigator is None:
             return await self._fall_back(
                 file,
                 patch_text=patch_text,
                 requirements=requirements,
                 context=context,
+                listener=listener,
                 reason="инструменты навигации недоступны",
             )
 
@@ -133,6 +137,7 @@ class AgenticCodeReviewer:
                 requirements=requirements,
                 context=context,
                 navigator=navigator,
+                listener=listener,
             )
         except LlmContextOverflowError as error:
             return await self._fall_back(
@@ -140,6 +145,7 @@ class AgenticCodeReviewer:
                 patch_text=patch_text,
                 requirements=requirements,
                 context=context,
+                listener=listener,
                 reason=f"диалог не поместился в окно модели: {error}",
             )
         except LlmOutputError as error:
@@ -148,6 +154,7 @@ class AgenticCodeReviewer:
                 patch_text=patch_text,
                 requirements=requirements,
                 context=context,
+                listener=listener,
                 reason=f"итог расследования не разобрался: {error}",
             )
 
@@ -159,6 +166,7 @@ class AgenticCodeReviewer:
         requirements: ModelRequirements,
         context: DiffContext | None,
         navigator: CodeNavigator,
+        listener: InvestigationSink,
     ) -> FileReviewResult:
         toolbox = NavigationToolbox(navigator)
         tool_requirements = _with_tool_calling(requirements)
@@ -190,7 +198,7 @@ class AgenticCodeReviewer:
                         LlmMessage(role=LlmRole.USER, content=TRUNCATED_CALLS_MESSAGE),
                     ]
                 )
-                await self._record(file, step, StepKind.THOUGHT, TRUNCATED_CALLS_MESSAGE)
+                await self._record(listener, file, step, StepKind.THOUGHT, TRUNCATED_CALLS_MESSAGE)
                 continue
 
             if not response.has_tool_calls:
@@ -203,14 +211,15 @@ class AgenticCodeReviewer:
                         response.model or model,
                         step,
                         shown,
+                        listener,
                     )
                 break
 
-            await self._record(file, step, StepKind.THOUGHT, response.content)
+            await self._record(listener, file, step, StepKind.THOUGHT, response.content)
             messages.append(_assistant(response))
             for call in response.tool_calls:
                 step += 1
-                message, fragments = await self._run_tool(toolbox, call, file, step)
+                message, fragments = await self._run_tool(toolbox, call, file, step, listener)
                 messages.append(message)
                 shown.extend(fragments)
 
@@ -225,6 +234,7 @@ class AgenticCodeReviewer:
             model=model,
             step=step,
             shown=shown,
+            listener=listener,
         )
 
     async def _run_tool(
@@ -233,6 +243,7 @@ class AgenticCodeReviewer:
         call: ToolCall,
         file: ReviewFile,
         step: int,
+        listener: InvestigationSink,
     ) -> tuple[LlmMessage, tuple[CodeFragment, ...]]:
         """Исполняет вызов и возвращает показанное вместе с ответом модели.
 
@@ -241,6 +252,7 @@ class AgenticCodeReviewer:
         по тому, что инструмент действительно вернул (D-008).
         """
         await self._record(
+            listener,
             file,
             step,
             StepKind.TOOL_CALL,
@@ -254,6 +266,7 @@ class AgenticCodeReviewer:
         duration_ms = int((time.monotonic() - started_at) * 1000)
 
         await self._record(
+            listener,
             file,
             step,
             StepKind.TOOL_RESULT,
@@ -277,6 +290,7 @@ class AgenticCodeReviewer:
         model: str,
         step: int,
         shown: list[CodeFragment],
+        listener: InvestigationSink,
     ) -> FileReviewResult:
         """Вынуждает структурированный ответ, когда цикл кончился.
 
@@ -298,6 +312,7 @@ class AgenticCodeReviewer:
             response.model or model,
             step + 1,
             shown,
+            listener,
         )
 
     async def _finish(
@@ -308,8 +323,10 @@ class AgenticCodeReviewer:
         model: str,
         step: int,
         shown: list[CodeFragment],
+        listener: InvestigationSink,
     ) -> FileReviewResult:
         await self._record(
+            listener,
             file,
             step,
             StepKind.ANSWER,
@@ -329,6 +346,7 @@ class AgenticCodeReviewer:
         patch_text: str,
         requirements: ModelRequirements,
         context: DiffContext | None,
+        listener: InvestigationSink,
         reason: str,
     ) -> FileReviewResult:
         """Уходит на проход без инструментов, назвав причину.
@@ -337,7 +355,7 @@ class AgenticCodeReviewer:
         не было, и расследование, где агент ничего не нашёл, — разные события,
         и в ленте они обязаны выглядеть по-разному.
         """
-        await self._record(file, 1, StepKind.FALLBACK, reason)
+        await self._record(listener, file, 1, StepKind.FALLBACK, reason)
         return await self._fallback.review_file(
             file,
             patch_text=patch_text,
@@ -352,6 +370,7 @@ class AgenticCodeReviewer:
 
     async def _record(
         self,
+        listener: InvestigationSink,
         file: ReviewFile,
         step: int,
         kind: StepKind,
@@ -365,7 +384,7 @@ class AgenticCodeReviewer:
         if kind is StepKind.THOUGHT and not detail.strip():
             return
 
-        await self._sink.record(
+        await listener.record(
             InvestigationStep(
                 file_path=file.path,
                 number=step,

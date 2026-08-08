@@ -10,6 +10,10 @@ from pydantic import (
     Field,
 )
 
+from ducktective.application.review.read_investigation import (
+    InvestigationStepView,
+    InvestigationView,
+)
 from ducktective.application.review.views import (
     FeedbackDigestView,
     FileContextView,
@@ -31,6 +35,9 @@ from ducktective.core.review.entities import (
     ReviewFile,
     ReviewHunk,
     ReviewRun,
+)
+from ducktective.core.review.investigation import (
+    StepKind,
 )
 from ducktective.core.review.value_objects import (
     FeedbackVerdict,
@@ -370,4 +377,50 @@ class ReviewRunSummary(BaseModel):
             rejected_count=run.rejected_count,
             created_at=run.created_at,
             changed_files=len(run.files),
+        )
+
+
+class InvestigationStepResponse(BaseModel):
+    """Шаг расследования для ленты в интерфейсе."""
+
+    cursor: int
+    file_path: str
+    number: int
+    kind: StepKind
+    tool_name: str | None
+    arguments: str | None
+    detail: str
+    duration_ms: int
+    is_error: bool
+
+    @classmethod
+    def from_view(cls, view: InvestigationStepView) -> "InvestigationStepResponse":
+        return cls(
+            cursor=view.cursor,
+            file_path=view.file_path,
+            number=view.number,
+            kind=view.kind,
+            tool_name=view.tool_name,
+            arguments=view.arguments,
+            detail=view.detail,
+            duration_ms=view.duration_ms,
+            is_error=view.is_error,
+        )
+
+
+class InvestigationResponse(BaseModel):
+    """Кусок ленты вместе с местом, с которого её продолжать.
+
+    Курсор возвращается всегда, в том числе для пустого куска: иначе клиент,
+    догнавший конец ленты, при следующем опросе прочитал бы её сначала.
+    """
+
+    steps: list[InvestigationStepResponse]
+    next_cursor: int
+
+    @classmethod
+    def from_view(cls, view: InvestigationView) -> "InvestigationResponse":
+        return cls(
+            steps=[InvestigationStepResponse.from_view(step) for step in view.steps],
+            next_cursor=view.next_cursor,
         )

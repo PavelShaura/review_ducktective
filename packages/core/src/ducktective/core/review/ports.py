@@ -23,6 +23,9 @@ from ducktective.core.review.entities import (
     ReviewFile,
     ReviewRun,
 )
+from ducktective.core.review.investigation import (
+    InvestigationSink,
+)
 from ducktective.core.review.pipeline import (
     PipelineOutcome,
     PipelineRequest,
@@ -79,13 +82,14 @@ class CodeReviewer(Protocol):
         requirements: ModelRequirements,
         context: DiffContext | None = None,
         navigator: CodeNavigator | None = None,
+        sink: InvestigationSink | None = None,
     ) -> FileReviewResult:
         """Читает файл и возвращает черновики находок.
 
-        Навигатор приходит вызовом, а не конструктором: он привязан
-        к репозиторию и ревизии прогона, а ревьюер собирается один раз
-        на приложение. Реализация, которой инструменты не нужны, его
-        игнорирует.
+        Навигатор и слушатель хода приходят вызовом, а не конструктором: оба
+        привязаны к прогону — к его репозиторию, ревизии и ленте, — а ревьюер
+        собирается один раз на приложение. Реализация, которой они не нужны,
+        их игнорирует.
         """
         ...
 

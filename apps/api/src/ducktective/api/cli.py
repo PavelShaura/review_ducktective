@@ -87,6 +87,7 @@ from ducktective.core.review.entities import (
 )
 from ducktective.core.review.ports import (
     CodeReviewer,
+    ReviewNavigators,
     ReviewPipeline,
 )
 from ducktective.core.review.reviewers import (
@@ -98,6 +99,7 @@ from ducktective.core.review.value_objects import (
     Severity,
 )
 from ducktective.core.types import (
+    CommitSha,
     RepositoryId,
     TenantId,
 )
@@ -106,6 +108,7 @@ from ducktective.evals.cases import (
     load_dataset,
 )
 from ducktective.evals.harness import (
+    EvalNavigators,
     EvaluationHarness,
     EvaluationOutcome,
     redirect_context,
@@ -271,6 +274,17 @@ def main() -> None:
     )
     eval_parser.add_argument("--tenant", help="Тенант владельца репозитория")
     eval_parser.add_argument(
+        "--mode",
+        choices=[mode.value for mode in ReviewMode],
+        default=ReviewMode.AGENTIC.value,
+        help="Каким ревьюером мерить: агентным или одним проходом",
+    )
+    eval_parser.add_argument(
+        "--no-index",
+        action="store_true",
+        help="Мерить без индекса: контекст не собирается, инструменты ходят по git",
+    )
+    eval_parser.add_argument(
         "--repeat",
         type=int,
         default=1,
@@ -386,11 +400,14 @@ async def _evaluate(arguments: argparse.Namespace) -> int:
     """
     settings = Settings()
     dataset = load_dataset(arguments.dataset)
+    mode = ReviewMode(arguments.mode)
+    with_index = bool(arguments.repository) and not arguments.no_index
 
     engine = None
+    session_factory: async_sessionmaker[AsyncSession] | None = None
     context_builder: ContextBuilder | None = None
     indexed_repository_id: RepositoryId | None = None
-    if arguments.repository:
+    if with_index:
         engine = build_engine(settings.require_database_url())
         session_factory = build_session_factory(engine)
         context_builder = _build_context_builder(settings, session_factory)
@@ -403,8 +420,18 @@ async def _evaluate(arguments: argparse.Namespace) -> int:
     try:
         harness = EvaluationHarness(
             _build_pipeline(
-                _build_reviewers(settings, redis_client=None),
+                _build_reviewers(
+                    settings,
+                    redis_client=None,
+                    agentic_enabled=mode is ReviewMode.AGENTIC,
+                ),
                 context_builder=redirect_context(context_builder, indexed_repository_id),
+                session_factory=session_factory if with_index else None,
+                settings=settings if with_index else None,
+                navigators_for_eval=_eval_navigation(
+                    arguments,
+                    indexed_repository_id=indexed_repository_id,
+                ),
             ),
             UnifiedDiffParser(),
         )
@@ -605,12 +632,28 @@ def _build_context_builder(
     )
 
 
+@dataclass(frozen=True, kw_only=True)
+class _EvalNavigation:
+    """Куда смотрят инструменты в прогоне набора.
+
+    У случая набора нет ни своего репозитория, ни рабочего каталога, поэтому
+    адрес подставляется снаружи: проиндексированный репозиторий для замера
+    с индексом и настоящий каталог с ревизией — для замера без него.
+    """
+
+    repository_id: RepositoryId | None = None
+    repository_path: Path | None = None
+    revision: CommitSha | None = None
+    index_ready: bool = False
+
+
 def _build_pipeline(
     reviewers: Sequence[CodeReviewer],
     *,
     context_builder: ContextBuilder | None = None,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
     settings: Settings | None = None,
+    navigators_for_eval: _EvalNavigation | None = None,
 ) -> ReviewPipeline:
     """Собирает конвейер вместе с тем, чем он будет ходить по коду.
 
@@ -618,13 +661,41 @@ def _build_pipeline(
     и именно она делает агентный режим доступным автономному прогону
     (D-021). Индексная добавляется там, где база вообще открыта.
     """
+    navigators: ReviewNavigators = RequestNavigators(
+        indexed=_build_indexed_navigators(settings, session_factory),
+        git=GitNavigators(git=LocalGitProvider()),
+    )
+    if navigators_for_eval is not None:
+        navigators = EvalNavigators(
+            navigators,
+            repository_id=navigators_for_eval.repository_id,
+            repository_path=navigators_for_eval.repository_path,
+            revision=navigators_for_eval.revision,
+            index_ready=navigators_for_eval.index_ready,
+        )
+
     return LangGraphReviewPipeline(
         reviewers,
         context_builder=context_builder,
-        navigators=RequestNavigators(
-            indexed=_build_indexed_navigators(settings, session_factory),
-            git=GitNavigators(git=LocalGitProvider()),
-        ),
+        navigators=navigators,
+    )
+
+
+def _eval_navigation(
+    arguments: argparse.Namespace,
+    *,
+    indexed_repository_id: RepositoryId | None,
+) -> _EvalNavigation | None:
+    """Собирает адрес навигации под выбранный вариант замера."""
+    if not arguments.repository:
+        return None
+
+    if indexed_repository_id is not None:
+        return _EvalNavigation(repository_id=indexed_repository_id, index_ready=True)
+
+    return _EvalNavigation(
+        repository_path=arguments.repository.resolve(),
+        revision=CommitSha("HEAD"),
     )
 
 
@@ -653,8 +724,10 @@ def _build_reviewers(
     settings: Settings,
     *,
     redis_client: Redis | None,
+    agentic_enabled: bool = True,
 ) -> tuple[CodeReviewer, ...]:
     return build_code_reviewers(
+        agentic_enabled=agentic_enabled,
         redis_client=redis_client,
         local_provider=settings.local_llm_provider,
         local_model=settings.local_review_model,

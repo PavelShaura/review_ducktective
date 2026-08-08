@@ -27,6 +27,10 @@ from ducktective.core.retrieval.ports import (
 from ducktective.core.review.degradation import (
     NodeDegradation,
 )
+from ducktective.core.review.investigation import (
+    InvestigationSink,
+    InvestigationSinks,
+)
 from ducktective.core.review.pipeline import (
     PipelineOutcome,
     PipelineRequest,
@@ -65,11 +69,13 @@ class LangGraphReviewPipeline:
         *,
         context_builder: ContextBuilder | None = None,
         navigators: ReviewNavigators | None = None,
+        sinks: InvestigationSinks | None = None,
         checkpointer: BaseCheckpointSaver[Any] | None = None,
         max_concurrent_reviews: int = DEFAULT_MAX_CONCURRENT_REVIEWS,
     ) -> None:
         self._reviewers = {reviewer.name: reviewer for reviewer in reviewers}
         self._navigators = navigators
+        self._sinks = sinks
         self._max_concurrent_reviews = max_concurrent_reviews
         self._checkpointer = checkpointer
         self._graph = build_review_graph(
@@ -105,6 +111,7 @@ class LangGraphReviewPipeline:
                 context=ReviewRuntimeContext(
                     cancellation=cancellation,
                     navigator=self._navigator_for(request),
+                    sink=self._sink_for(request),
                 ),
                 config=self._config(request),
             )
@@ -145,6 +152,16 @@ class LangGraphReviewPipeline:
         if self._navigators is None:
             return None
         return self._navigators.for_request(request)
+
+    def _sink_for(self, request: PipelineRequest) -> InvestigationSink | None:
+        """Куда этот прогон рассказывает о ходе расследования.
+
+        Слушатель рождается на прогон: он подписывает шаги его именем,
+        и без прогона запись некуда отнести.
+        """
+        if self._sinks is None:
+            return None
+        return self._sinks.for_run(request.run_id)
 
     async def forget(self, run_id: ReviewRunId) -> None:
         if self._checkpointer is None:

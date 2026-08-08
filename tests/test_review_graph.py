@@ -41,6 +41,9 @@ from ducktective.core.review.entities import (
     ReviewFile,
     ReviewRun,
 )
+from ducktective.core.review.investigation import (
+    InvestigationSink,
+)
 from ducktective.core.review.pipeline import (
     PipelineRequest,
 )
@@ -559,6 +562,7 @@ class RecordingReviewer(FakeCodeReviewer):
         requirements: ModelRequirements,
         context: DiffContext | None = None,
         navigator: CodeNavigator | None = None,
+        sink: InvestigationSink | None = None,
     ) -> FileReviewResult:
         self.asked.append(
             (file.path, self.name, patch_text, () if context is None else context.pieces)

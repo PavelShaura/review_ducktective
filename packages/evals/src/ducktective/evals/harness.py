@@ -1,5 +1,6 @@
 from dataclasses import (
     dataclass,
+    replace,
 )
 from pathlib import (
     Path,
@@ -26,6 +27,9 @@ from ducktective.core.exceptions import (
 from ducktective.core.retrieval.context import (
     DiffContext,
 )
+from ducktective.core.retrieval.navigation import (
+    CodeNavigator,
+)
 from ducktective.core.retrieval.ports import (
     ContextBuilder,
 )
@@ -33,7 +37,11 @@ from ducktective.core.review.entities import (
     ReviewFile,
     ReviewRun,
 )
+from ducktective.core.review.pipeline import (
+    PipelineRequest,
+)
 from ducktective.core.review.ports import (
+    ReviewNavigators,
     ReviewPipeline,
 )
 from ducktective.core.review.value_objects import (
@@ -116,6 +124,45 @@ def redirect_context(
     if context_builder is None or indexed_repository_id is None:
         return context_builder
     return _IndexedRepositoryContext(context_builder, indexed_repository_id)
+
+
+class EvalNavigators:
+    """Направляет инструменты агента в настоящий репозиторий.
+
+    Случай набора живёт в хранилище на словарях: у него нет ни индекса,
+    ни рабочего каталога, а `/eval` в пути — заглушка. Без подмены агент
+    получал бы пустые ответы на каждый вызов и мерился бы не с тем, с чем
+    его сравнивают.
+
+    Подменяется весь адрес прогона разом — репозиторий, путь и ревизия, —
+    потому что выбор между индексом и git делается по этим же полям.
+    """
+
+    def __init__(
+        self,
+        inner: ReviewNavigators,
+        *,
+        repository_id: RepositoryId | None = None,
+        repository_path: Path | None = None,
+        revision: CommitSha | None = None,
+        index_ready: bool = False,
+    ) -> None:
+        self._inner = inner
+        self._repository_id = repository_id
+        self._repository_path = repository_path
+        self._revision = revision
+        self._index_ready = index_ready
+
+    def for_request(self, request: PipelineRequest) -> CodeNavigator | None:
+        return self._inner.for_request(
+            replace(
+                request,
+                repository_id=self._repository_id or request.repository_id,
+                repository_path=self._repository_path,
+                head_sha=self._revision,
+                index_ready=self._index_ready,
+            )
+        )
 
 
 class EvaluationHarness:
