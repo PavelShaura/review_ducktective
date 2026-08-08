@@ -5,19 +5,15 @@ from ducktective.application.indexing.read_state import (
     GetIndexState,
 )
 from ducktective.application.retrieval.views import (
-    CodeMatchView,
     RepositoryOverview,
-    SymbolNeighbourhoodView,
-    SymbolView,
 )
 from ducktective.core.ports import (
     UnitOfWork,
 )
-from ducktective.core.retrieval.ports import (
-    ChunkHit,
-    ChunkSearch,
-    SymbolContext,
-    SymbolReader,
+from ducktective.core.retrieval.navigation import (
+    CodeNavigator,
+    CodeNavigatorFactory,
+    NavigationAnswer,
 )
 from ducktective.core.types import (
     RepositoryId,
@@ -50,102 +46,54 @@ class SurveyRepositories:
         ]
 
 
-class SearchCode:
-    """Поиск по проиндексированному коду репозитория.
+class NavigateCode:
+    """Навигация по коду репозитория от имени тенанта.
 
-    Гибрид слов и смысла берётся целиком: на именах выигрывает лексика,
-    на описании намерения — вектор, и выбирать за спрашивающего нечем.
+    Use case добавляет к операциям навигатора ровно одно — проверку, что
+    репозиторий принадлежит спрашивающему. Сами операции объявлены доменным
+    портом и имеют две реализации, поэтому здесь их не по одной на класс:
+    разница между «поискать» и «найти вызывающих» лежит в навигаторе,
+    а не в правах доступа (D-021).
     """
 
-    def __init__(self, unit_of_work: UnitOfWork, search: ChunkSearch) -> None:
+    def __init__(self, unit_of_work: UnitOfWork, navigators: CodeNavigatorFactory) -> None:
         self._unit_of_work = unit_of_work
-        self._search = search
+        self._navigators = navigators
 
-    async def execute(
+    async def search_code(
         self,
         tenant_id: TenantId,
         repository_id: RepositoryId,
         query: str,
         *,
         limit: int = 10,
-    ) -> list[CodeMatchView]:
-        await _ensure_owned(self._unit_of_work, tenant_id, repository_id)
+    ) -> NavigationAnswer:
+        navigator = await self._navigator(tenant_id, repository_id)
+        return await navigator.search_code(query, limit=limit)
 
-        hits = await self._search.search_chunks(repository_id, query, limit=limit)
-        return [_match(hit) for hit in hits]
-
-
-class GetSymbolDefinition:
-    """Определение символа по имени.
-
-    Имя может быть неоднозначным — одноимённые методы разных классов, —
-    поэтому возвращается список, а не одна запись: выбор оставлен тому,
-    кто спрашивал, и он видит, из чего выбирает.
-    """
-
-    def __init__(self, unit_of_work: UnitOfWork, symbols: SymbolReader) -> None:
-        self._unit_of_work = unit_of_work
-        self._symbols = symbols
-
-    async def execute(
+    async def get_definition(
         self,
         tenant_id: TenantId,
         repository_id: RepositoryId,
         name: str,
         *,
         limit: int = 5,
-    ) -> list[SymbolView]:
-        await _ensure_owned(self._unit_of_work, tenant_id, repository_id)
+    ) -> NavigationAnswer:
+        navigator = await self._navigator(tenant_id, repository_id)
+        return await navigator.get_definition(name, limit=limit)
 
-        found = await self._symbols.find_by_name(repository_id, name, limit=limit)
-        return [_symbol(context) for context in found]
-
-
-class FindSymbolCallers:
-    """Кто вызывает символ — ответ на вопрос «что сломается, если его тронуть».
-
-    Вызывающие приходят контрактом без тела: чтобы оценить последствия правки,
-    нужно место вызова и сигнатура, а не реализация каждого из них.
-    """
-
-    def __init__(self, unit_of_work: UnitOfWork, symbols: SymbolReader) -> None:
-        self._unit_of_work = unit_of_work
-        self._symbols = symbols
-
-    async def execute(
+    async def find_callers(
         self,
         tenant_id: TenantId,
         repository_id: RepositoryId,
         name: str,
         *,
         limit: int = 20,
-    ) -> list[SymbolView]:
-        await _ensure_owned(self._unit_of_work, tenant_id, repository_id)
+    ) -> NavigationAnswer:
+        navigator = await self._navigator(tenant_id, repository_id)
+        return await navigator.find_callers(name, limit=limit)
 
-        targets = await self._symbols.find_by_name(repository_id, name)
-        if not targets:
-            return []
-
-        callers = await self._symbols.callers(
-            [context.symbol_id for context in targets],
-            limit=limit,
-        )
-        return [_contract(context) for context in callers]
-
-
-class GetFileContext:
-    """Окружение участка файла: его символы и их соседи по графу.
-
-    Участок задаётся строками, а отвечает use case символами: вопрос «что тут
-    происходит» решается определением метода, а не выпиской строк, которую
-    спрашивающий может получить и сам, открыв файл.
-    """
-
-    def __init__(self, unit_of_work: UnitOfWork, symbols: SymbolReader) -> None:
-        self._unit_of_work = unit_of_work
-        self._symbols = symbols
-
-    async def execute(
+    async def get_file_context(
         self,
         tenant_id: TenantId,
         repository_id: RepositoryId,
@@ -153,80 +101,24 @@ class GetFileContext:
         *,
         start_line: int,
         end_line: int,
-        neighbours_limit: int = 10,
-    ) -> SymbolNeighbourhoodView:
-        await _ensure_owned(self._unit_of_work, tenant_id, repository_id)
-
-        covering = await self._symbols.symbols_covering(
-            repository_id,
+        limit: int = 10,
+    ) -> NavigationAnswer:
+        navigator = await self._navigator(tenant_id, repository_id)
+        return await navigator.get_file_context(
             path,
-            start_line,
-            end_line,
-        )
-        if not covering:
-            return SymbolNeighbourhoodView(
-                path=path,
-                start_line=start_line,
-                end_line=end_line,
-            )
-
-        symbol_ids = [context.symbol_id for context in covering]
-        callees = await self._symbols.callees(symbol_ids, limit=neighbours_limit)
-        callers = await self._symbols.callers(symbol_ids, limit=neighbours_limit)
-
-        return SymbolNeighbourhoodView(
-            path=path,
             start_line=start_line,
             end_line=end_line,
-            symbols=tuple(_symbol(context) for context in covering),
-            callees=tuple(_contract(context) for context in callees),
-            callers=tuple(_contract(context) for context in callers),
+            limit=limit,
         )
 
+    async def _navigator(
+        self,
+        tenant_id: TenantId,
+        repository_id: RepositoryId,
+    ) -> CodeNavigator:
+        async with self._unit_of_work:
+            repository = await self._unit_of_work.code_repositories.get(repository_id)
+            if repository.tenant_id != tenant_id:
+                raise PermissionDeniedError("Репозиторий принадлежит другому тенанту")
 
-async def _ensure_owned(
-    unit_of_work: UnitOfWork,
-    tenant_id: TenantId,
-    repository_id: RepositoryId,
-) -> None:
-    async with unit_of_work:
-        repository = await unit_of_work.code_repositories.get(repository_id)
-        if repository.tenant_id != tenant_id:
-            raise PermissionDeniedError("Репозиторий принадлежит другому тенанту")
-
-
-def _match(hit: ChunkHit) -> CodeMatchView:
-    return CodeMatchView(
-        path=hit.path,
-        breadcrumb=hit.breadcrumb,
-        start_line=hit.start_line,
-        end_line=hit.end_line,
-        content=hit.content,
-        score=hit.score,
-    )
-
-
-def _symbol(context: SymbolContext) -> SymbolView:
-    return SymbolView(
-        qualified_name=context.qualified_name,
-        kind=context.kind,
-        path=context.path,
-        start_line=context.start_line,
-        end_line=context.end_line,
-        signature=context.signature,
-        docstring=context.docstring,
-        text=context.text,
-    )
-
-
-def _contract(context: SymbolContext) -> SymbolView:
-    return SymbolView(
-        qualified_name=context.qualified_name,
-        kind=context.kind,
-        path=context.path,
-        start_line=context.start_line,
-        end_line=context.end_line,
-        signature=context.signature,
-        docstring=context.docstring,
-        text="",
-    )
+        return self._navigators.for_repository(repository_id)

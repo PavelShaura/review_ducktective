@@ -24,10 +24,7 @@ from ducktective.application.indexing.views import (
     IndexStateView,
 )
 from ducktective.application.retrieval.read_index import (
-    FindSymbolCallers,
-    GetFileContext,
-    GetSymbolDefinition,
-    SearchCode,
+    NavigateCode,
     SurveyRepositories,
 )
 from ducktective.core.types import (
@@ -37,10 +34,7 @@ from ducktective.mcp_server.rendering import (
     MAX_ANSWER_CHARS,
     clipped,
     describe_index,
-    render_contracts,
-    render_definitions,
-    render_matches,
-    render_neighbourhood,
+    render_answer,
     render_repositories,
 )
 from ducktective.mcp_server.runtime import (
@@ -160,27 +154,33 @@ def build_server(runtime: McpRuntime) -> MCPServer:
 
 
 async def _search(runtime: McpRuntime, target: _Target, query: str, limit: int) -> str:
-    use_case = SearchCode(runtime.unit_of_work(), runtime.search)
-    matches = await use_case.execute(runtime.tenant_id, target.repository_id, query, limit=limit)
-    if not matches:
-        return f"По запросу «{query}» ничего не нашлось"
-    return render_matches(matches)
+    answer = await _navigation(runtime).search_code(
+        runtime.tenant_id,
+        target.repository_id,
+        query,
+        limit=limit,
+    )
+    return render_answer(answer, empty_message=f"По запросу «{query}» ничего не нашлось")
 
 
 async def _definition(runtime: McpRuntime, target: _Target, name: str, limit: int) -> str:
-    use_case = GetSymbolDefinition(runtime.unit_of_work(), runtime.symbols)
-    symbols = await use_case.execute(runtime.tenant_id, target.repository_id, name, limit=limit)
-    if not symbols:
-        return f"Символ «{name}» в индексе не найден"
-    return render_definitions(symbols)
+    answer = await _navigation(runtime).get_definition(
+        runtime.tenant_id,
+        target.repository_id,
+        name,
+        limit=limit,
+    )
+    return render_answer(answer, empty_message=f"Символ «{name}» не найден")
 
 
 async def _callers(runtime: McpRuntime, target: _Target, name: str, limit: int) -> str:
-    use_case = FindSymbolCallers(runtime.unit_of_work(), runtime.symbols)
-    callers = await use_case.execute(runtime.tenant_id, target.repository_id, name, limit=limit)
-    if not callers:
-        return f"Вызовов «{name}» в индексе нет"
-    return render_contracts(callers)
+    answer = await _navigation(runtime).find_callers(
+        runtime.tenant_id,
+        target.repository_id,
+        name,
+        limit=limit,
+    )
+    return render_answer(answer, empty_message=f"Вызовов «{name}» не найдено")
 
 
 async def _file_context(
@@ -191,18 +191,22 @@ async def _file_context(
     end_line: int,
     neighbours_limit: int,
 ) -> str:
-    use_case = GetFileContext(runtime.unit_of_work(), runtime.symbols)
-    view = await use_case.execute(
+    answer = await _navigation(runtime).get_file_context(
         runtime.tenant_id,
         target.repository_id,
         path,
         start_line=start_line,
         end_line=end_line,
-        neighbours_limit=neighbours_limit,
+        limit=neighbours_limit,
     )
-    if view.is_empty:
-        return f"В {path}:{start_line}-{end_line} проиндексированных символов нет"
-    return render_neighbourhood(view)
+    return render_answer(
+        answer,
+        empty_message=f"В {path}:{start_line}-{end_line} показывать нечего",
+    )
+
+
+def _navigation(runtime: McpRuntime) -> NavigateCode:
+    return NavigateCode(runtime.unit_of_work(), runtime.navigators)
 
 
 async def _guarded(runtime: McpRuntime, reference: str, action: _Action) -> str:

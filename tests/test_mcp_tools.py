@@ -39,6 +39,9 @@ from ducktective.mcp_server.runtime import (
 from ducktective.mcp_server.server import (
     build_server,
 )
+from ducktective.retrieval.navigation import (
+    IndexedNavigators,
+)
 from tests.fakes import (
     FakeChunkSearch,
     FakeSymbolReader,
@@ -62,8 +65,10 @@ def runtime_over(
     return McpRuntime(
         tenant_id=TENANT_ID,
         unit_of_work=lambda: unit_of_work,
-        symbols=symbols or FakeSymbolReader(),
-        search=search or FakeChunkSearch(),
+        navigators=IndexedNavigators(
+            symbols=symbols or FakeSymbolReader(),
+            search=search or FakeChunkSearch(),
+        ),
     )
 
 

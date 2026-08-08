@@ -18,15 +18,17 @@ from ducktective.config.settings import (
 from ducktective.core.ports import (
     UnitOfWork,
 )
-from ducktective.core.retrieval.ports import (
-    ChunkSearch,
-    SymbolReader,
+from ducktective.core.retrieval.navigation import (
+    CodeNavigatorFactory,
 )
 from ducktective.core.types import (
     TenantId,
 )
 from ducktective.llm.embedder import (
     LiteLlmEmbedder,
+)
+from ducktective.retrieval.navigation import (
+    IndexedNavigators,
 )
 from ducktective.retrieval.session_scope import (
     SessionScopedHybridSearch,
@@ -56,8 +58,7 @@ class McpRuntime:
 
     tenant_id: TenantId
     unit_of_work: Callable[[], UnitOfWork]
-    symbols: SymbolReader
-    search: ChunkSearch
+    navigators: CodeNavigatorFactory
 
 
 @asynccontextmanager
@@ -79,8 +80,10 @@ async def build_runtime(settings: Settings, tenant_id: TenantId) -> AsyncIterato
         yield McpRuntime(
             tenant_id=tenant_id,
             unit_of_work=lambda: SqlAlchemyUnitOfWork(session_factory),
-            symbols=SessionScopedSymbolReader(session_factory),
-            search=SessionScopedHybridSearch(session_factory, embedder),
+            navigators=IndexedNavigators(
+                symbols=SessionScopedSymbolReader(session_factory),
+                search=SessionScopedHybridSearch(session_factory, embedder),
+            ),
         )
     finally:
         await engine.dispose()

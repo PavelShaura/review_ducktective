@@ -1,4 +1,7 @@
 import asyncio
+from dataclasses import (
+    dataclass,
+)
 from pathlib import (
     Path,
 )
@@ -14,6 +17,10 @@ from ducktective.core.types import (
 
 
 GIT_EXECUTABLE = "git"
+GREP_NO_MATCHES = 1
+"""git grep отличает «не нашлось» от сбоя кодом возврата, а не текстом."""
+
+MATCHES_PER_FILE = 5
 RELATIVE_REVISION_MARKS = ("~", "^")
 TREE_FORMAT = "%(objectmode) %(objectname) %(path)"
 REGULAR_FILE_MODES = frozenset({"100644", "100755"})
@@ -24,6 +31,15 @@ DIFF_ARGUMENTS = (
     "--find-renames",
     "--unified=3",
 )
+
+
+@dataclass(frozen=True, kw_only=True)
+class GrepHit:
+    """Строка ревизии, совпавшая с образцом."""
+
+    path: str
+    line_number: int
+    text: str
 
 
 class LocalGitProvider:
@@ -136,6 +152,38 @@ class LocalGitProvider:
         except VcsOperationError:
             return None
 
+    async def grep(
+        self,
+        repository_path: Path,
+        *,
+        revision: str,
+        pattern: str,
+        regexp: bool = False,
+        limit: int = 100,
+    ) -> list[GrepHit]:
+        """Ищет строки в ревизии, а не в рабочей копии.
+
+        Ревизия названа явно по той же причине, по которой её называет индекс:
+        ответ должен описывать зафиксированное состояние, иначе повторный
+        прогон читает другой код и объяснить расхождение нечем (D-021).
+        """
+        arguments = [
+            "grep",
+            "--no-color",
+            "-I",
+            "-n",
+            "-E" if regexp else "-F",
+            f"-m{MATCHES_PER_FILE}",
+        ]
+        arguments.extend(["-e", pattern, revision])
+
+        output = await self._run(
+            repository_path,
+            *arguments,
+            tolerated_returncodes=(GREP_NO_MATCHES,),
+        )
+        return _parse_grep(output, revision=revision, limit=limit)
+
     async def list_tree(self, repository_path: Path, revision: str) -> dict[str, ContentHash]:
         """Файлы ревизии с хешами их содержимого.
 
@@ -160,7 +208,12 @@ class LocalGitProvider:
                 tree[path] = ContentHash(object_hash)
         return tree
 
-    async def _run(self, repository_path: Path, *arguments: str) -> str:
+    async def _run(
+        self,
+        repository_path: Path,
+        *arguments: str,
+        tolerated_returncodes: tuple[int, ...] = (),
+    ) -> str:
         if not repository_path.exists():
             raise RepositoryPathError(f"Каталог репозитория не найден: {repository_path}")
 
@@ -183,8 +236,34 @@ class LocalGitProvider:
                 f"Команда git превысила таймаут {self._timeout_seconds} с: {' '.join(arguments)}"
             ) from error
 
-        if process.returncode != 0:
+        if process.returncode != 0 and process.returncode not in tolerated_returncodes:
             message = stderr.decode("utf-8", errors="replace").strip()
             raise VcsOperationError(f"git {' '.join(arguments)} завершился с ошибкой: {message}")
 
         return stdout.decode("utf-8", errors="replace")
+
+
+def _parse_grep(output: str, *, revision: str, limit: int) -> list[GrepHit]:
+    """Разбирает выдачу вида `ревизия:путь:строка:текст`.
+
+    Путь и текст режутся по первым двум двоеточиям после ревизии, а не по
+    всем: двоеточия встречаются и в пути, и — постоянно — в самой строке кода.
+    """
+    prefix = f"{revision}:"
+    hits: list[GrepHit] = []
+
+    for line in output.splitlines():
+        if not line.startswith(prefix):
+            continue
+
+        remainder = line[len(prefix) :]
+        path, _, tail = remainder.partition(":")
+        number, _, text = tail.partition(":")
+        if not path or not number.isdigit():
+            continue
+
+        hits.append(GrepHit(path=path, line_number=int(number), text=text))
+        if len(hits) >= limit:
+            break
+
+    return hits

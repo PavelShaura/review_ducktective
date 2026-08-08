@@ -2,51 +2,58 @@ from ducktective.application.indexing.views import (
     IndexStateView,
 )
 from ducktective.application.retrieval.views import (
-    CodeMatchView,
     RepositoryOverview,
-    SymbolNeighbourhoodView,
-    SymbolView,
+)
+from ducktective.core.retrieval.navigation import (
+    CodeFragment,
+    FragmentRole,
+    NavigationAnswer,
 )
 
 
-MAX_FRAGMENT_CHARS = 4000
-"""Предел одного фрагмента в ответе.
+MAX_ANSWER_CHARS = 24000
+"""Предел всего ответа: пять урезанных фрагментов — это тоже много.
 
-Индекс не обязан состоять из ровных кусков: файл без определений даёт чанк
-на весь себя, и такой фрагмент, попав в выдачу, приносит с собой файл целиком.
-Инструмент отвечает вызывающей модели, у которой окно контекста конечно,
-поэтому предел стоит здесь, а не только там, где чанки нарезаются.
+Предел одного фрагмента стоит в навигаторе: это его обещание. Здесь стоит
+предел на выдачу целиком — инструмент не имеет права вернуть сто тысяч
+символов ни при каком содержимом источника.
 """
 
-MAX_ANSWER_CHARS = 24000
-"""Предел всего ответа: пять урезанных фрагментов — это тоже много."""
+
+ROLE_TITLES = {
+    FragmentRole.CALLEE: "Вызывает",
+    FragmentRole.CALLER: "Вызывается из",
+}
 
 
-def render_matches(matches: list[CodeMatchView]) -> str:
-    blocks = [
-        f"## {match.location}\n{match.breadcrumb}\n\n```\n{clipped(match.content.rstrip())}\n```"
-        for match in matches
-    ]
-    return "\n\n".join(blocks)
+def render_answer(answer: NavigationAnswer, *, empty_message: str) -> str:
+    """Собирает ответ инструмента: оговорка сверху, фрагменты следом.
 
+    Оговорка идёт первой строкой, а не сноской в конце: она меняет то, как
+    читать выдачу, и прочитанная после фрагментов уже ничего не меняет.
 
-def render_definitions(symbols: list[SymbolView]) -> str:
-    return "\n\n".join(_definition(symbol) for symbol in symbols)
+    Соседи по графу собираются под своими заголовками: «что вызывает» и «кто
+    вызывает» отвечают на разные вопросы, и без заголовка их различает только
+    тот, кто и так знает код.
+    """
+    sections = []
+    if answer.note:
+        sections.append(answer.note)
 
+    if answer.is_empty:
+        sections.append(empty_message)
+        return "\n\n".join(sections)
 
-def render_contracts(symbols: list[SymbolView]) -> str:
-    return "\n".join(_contract(symbol) for symbol in symbols)
+    for role in FragmentRole:
+        fragments = answer.of_role(role)
+        if not fragments:
+            continue
 
+        title = ROLE_TITLES.get(role)
+        if title:
+            sections.append(f"# {title}")
+        sections.extend(_fragment(fragment) for fragment in fragments)
 
-def render_neighbourhood(view: SymbolNeighbourhoodView) -> str:
-    sections = [
-        f"# {view.path}:{view.start_line}-{view.end_line}",
-        render_definitions(list(view.symbols)),
-    ]
-    if view.callees:
-        sections.append(f"## Вызывает\n{render_contracts(list(view.callees))}")
-    if view.callers:
-        sections.append(f"## Вызывается из\n{render_contracts(list(view.callers))}")
     return "\n\n".join(sections)
 
 
@@ -76,7 +83,7 @@ def describe_index(state: IndexStateView) -> str:
     return f"индекс на ревизии {revision}, собран {state.finished_at:%Y-%m-%d %H:%M}"
 
 
-def clipped(text: str, limit: int = MAX_FRAGMENT_CHARS) -> str:
+def clipped(text: str, limit: int = MAX_ANSWER_CHARS) -> str:
     if len(text) <= limit:
         return text
 
@@ -84,12 +91,6 @@ def clipped(text: str, limit: int = MAX_FRAGMENT_CHARS) -> str:
     return f"{text[:limit].rstrip()}\n… обрезано, ещё {remainder} символов"
 
 
-def _definition(symbol: SymbolView) -> str:
-    header = f"## {symbol.qualified_name} · {symbol.kind.value} · {symbol.location}"
-    body = symbol.text.rstrip() or (symbol.signature or "")
-    return f"{header}\n\n```\n{clipped(body)}\n```"
-
-
-def _contract(symbol: SymbolView) -> str:
-    signature = symbol.signature or symbol.qualified_name
-    return f"- {symbol.qualified_name} — `{signature}` — {symbol.location}"
+def _fragment(fragment: CodeFragment) -> str:
+    title = f"{fragment.title} · " if fragment.title else ""
+    return f"## {title}{fragment.location}\n\n```\n{fragment.text}\n```"

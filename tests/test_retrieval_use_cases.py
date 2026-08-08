@@ -11,10 +11,7 @@ from ducktective.application.exceptions import (
     PermissionDeniedError,
 )
 from ducktective.application.retrieval.read_index import (
-    FindSymbolCallers,
-    GetFileContext,
-    GetSymbolDefinition,
-    SearchCode,
+    NavigateCode,
     SurveyRepositories,
 )
 from ducktective.core.code_repository.entities import (
@@ -26,6 +23,9 @@ from ducktective.core.code_repository.value_objects import (
 from ducktective.core.indexing.value_objects import (
     SymbolKind,
 )
+from ducktective.core.retrieval.navigation import (
+    NavigationSource,
+)
 from ducktective.core.retrieval.ports import (
     ChunkHit,
     SymbolContext,
@@ -35,6 +35,9 @@ from ducktective.core.types import (
     CodeSymbolId,
     QualifiedName,
     TenantId,
+)
+from ducktective.retrieval.navigation import (
+    IndexedNavigators,
 )
 from tests.fakes import (
     FakeChunkSearch,
@@ -91,15 +94,35 @@ def registered(unit_of_work: FakeUnitOfWork, *, tenant_id: TenantId = TENANT_ID)
     return repository
 
 
+def navigation(
+    unit_of_work: FakeUnitOfWork,
+    *,
+    reader: FakeSymbolReader | None = None,
+    search: FakeChunkSearch | None = None,
+) -> NavigateCode:
+    return NavigateCode(
+        unit_of_work,
+        IndexedNavigators(
+            symbols=reader or FakeSymbolReader(),
+            search=search or FakeChunkSearch(),
+        ),
+    )
+
+
 async def test_search_returns_matches_with_location() -> None:
     unit_of_work = FakeUnitOfWork()
     repository = registered(unit_of_work)
     search = FakeChunkSearch([chunk()])
 
-    matches = await SearchCode(unit_of_work, search).execute(TENANT_ID, repository.id, "отчёт")
+    answer = await navigation(unit_of_work, search=search).search_code(
+        TENANT_ID,
+        repository.id,
+        "отчёт",
+    )
 
     assert search.queries == ["отчёт"]
-    assert [match.location for match in matches] == ["app/report.py:1-5"]
+    assert [fragment.location for fragment in answer.fragments] == ["app/report.py:1-5"]
+    assert answer.source is NavigationSource.INDEX
 
 
 async def test_search_of_foreign_repository_is_denied() -> None:
@@ -108,7 +131,11 @@ async def test_search_of_foreign_repository_is_denied() -> None:
     search = FakeChunkSearch([chunk()])
 
     with pytest.raises(PermissionDeniedError):
-        await SearchCode(unit_of_work, search).execute(TENANT_ID, repository.id, "отчёт")
+        await navigation(unit_of_work, search=search).search_code(
+            TENANT_ID,
+            repository.id,
+            "отчёт",
+        )
 
     assert search.queries == []
 
@@ -126,17 +153,18 @@ async def test_definition_returns_every_namesake() -> None:
         }
     )
 
-    found = await GetSymbolDefinition(unit_of_work, reader).execute(
+    answer = await navigation(unit_of_work, reader=reader).get_definition(
         TENANT_ID,
         repository.id,
         "build",
     )
 
-    assert [item.qualified_name for item in found] == [
-        "app.report.Builder.build",
-        "app.billing.Invoice.build",
+    assert [fragment.path for fragment in answer.fragments] == [
+        "app/report.py",
+        "app/billing.py",
     ]
-    assert all(item.text for item in found)
+    assert all(fragment.text for fragment in answer.fragments)
+    assert answer.note is not None
 
 
 async def test_callers_are_looked_up_by_resolved_symbols() -> None:
@@ -148,14 +176,14 @@ async def test_callers_are_looked_up_by_resolved_symbols() -> None:
         callers=[symbol("app.api.handler", kind=SymbolKind.FUNCTION, path="app/api.py")],
     )
 
-    callers = await FindSymbolCallers(unit_of_work, reader).execute(
+    answer = await navigation(unit_of_work, reader=reader).find_callers(
         TENANT_ID,
         repository.id,
         "app.report.Builder.build",
     )
 
     assert reader.asked_caller_ids == [[target.symbol_id]]
-    assert [caller.qualified_name for caller in callers] == ["app.api.handler"]
+    assert [fragment.title for fragment in answer.fragments] == ["app.api.handler · function"]
 
 
 async def test_callers_of_unknown_symbol_do_not_reach_the_graph() -> None:
@@ -163,13 +191,13 @@ async def test_callers_of_unknown_symbol_do_not_reach_the_graph() -> None:
     repository = registered(unit_of_work)
     reader = FakeSymbolReader()
 
-    callers = await FindSymbolCallers(unit_of_work, reader).execute(
+    answer = await navigation(unit_of_work, reader=reader).find_callers(
         TENANT_ID,
         repository.id,
         "нет.такого",
     )
 
-    assert callers == []
+    assert answer.is_empty
     assert reader.asked_caller_ids == []
 
 
@@ -182,12 +210,13 @@ async def test_callers_come_without_body() -> None:
         callers=[symbol("app.api.handler", text="def handler():\n    ...")],
     )
 
-    callers = await FindSymbolCallers(unit_of_work, reader).execute(
-        TENANT_ID, repository.id, "build"
+    answer = await navigation(unit_of_work, reader=reader).find_callers(
+        TENANT_ID,
+        repository.id,
+        "build",
     )
 
-    assert [caller.text for caller in callers] == [""]
-    assert [caller.signature for caller in callers] == ["def handler(self)"]
+    assert [fragment.text for fragment in answer.fragments] == ["def handler(self)"]
 
 
 async def test_file_context_collects_symbols_and_both_directions() -> None:
@@ -199,7 +228,7 @@ async def test_file_context_collects_symbols_and_both_directions() -> None:
         callers=[symbol("app.api.handler", kind=SymbolKind.FUNCTION, path="app/api.py")],
     )
 
-    view = await GetFileContext(unit_of_work, reader).execute(
+    answer = await navigation(unit_of_work, reader=reader).get_file_context(
         TENANT_ID,
         repository.id,
         "app/report.py",
@@ -208,9 +237,11 @@ async def test_file_context_collects_symbols_and_both_directions() -> None:
     )
 
     assert reader.asked_lines == [(10, 20)]
-    assert [item.qualified_name for item in view.symbols] == ["app.report.Builder.build"]
-    assert [item.qualified_name for item in view.callees] == ["app.report.compute"]
-    assert [item.qualified_name for item in view.callers] == ["app.api.handler"]
+    assert [fragment.title for fragment in answer.fragments] == [
+        "app.report.Builder.build · method",
+        "app.report.compute · function",
+        "app.api.handler · function",
+    ]
 
 
 async def test_file_context_without_symbols_does_not_walk_the_graph() -> None:
@@ -218,7 +249,7 @@ async def test_file_context_without_symbols_does_not_walk_the_graph() -> None:
     repository = registered(unit_of_work)
     reader = FakeSymbolReader(callees=[symbol("app.report.compute")])
 
-    view = await GetFileContext(unit_of_work, reader).execute(
+    answer = await navigation(unit_of_work, reader=reader).get_file_context(
         TENANT_ID,
         repository.id,
         "app/unknown.py",
@@ -226,8 +257,8 @@ async def test_file_context_without_symbols_does_not_walk_the_graph() -> None:
         end_line=5,
     )
 
-    assert view.is_empty
-    assert view.callees == ()
+    assert answer.is_empty
+    assert answer.note is not None
 
 
 async def test_survey_lists_repositories_with_index_state() -> None:
