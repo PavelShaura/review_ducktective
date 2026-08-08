@@ -2,6 +2,9 @@ from dataclasses import (
     dataclass,
     field,
 )
+from pathlib import (
+    Path,
+)
 
 from ducktective.core.llm.value_objects import (
     LlmUsage,
@@ -15,6 +18,7 @@ from ducktective.core.review.entities import (
     ReviewFile,
 )
 from ducktective.core.types import (
+    CommitSha,
     RepositoryId,
     ReviewRunId,
 )
@@ -39,6 +43,24 @@ class PipelineRequest:
     repository_id: RepositoryId
     files: tuple[ReviewFile, ...]
     requirements: ModelRequirements
+
+    head_sha: CommitSha | None = None
+    """Ревизия, которую читают инструменты навигации.
+
+    Без неё режим без индекса невозможен: git отвечает про названную ревизию,
+    а не про рабочую копию (D-021).
+    """
+
+    repository_path: Path | None = None
+    """Где лежит репозиторий. Нужен тому же режиму без индекса."""
+
+    index_ready: bool = False
+    """Собран ли индекс на момент прогона.
+
+    Решает use case, а не конвейер: состояние индекса лежит в базе, а конвейер
+    к ней не ходит. От флага зависит, чем отвечают инструменты — графом
+    и векторами или поиском по словам.
+    """
 
 
 @dataclass(frozen=True, kw_only=True)

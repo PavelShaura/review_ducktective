@@ -7,10 +7,10 @@ from langgraph.types import (
 )
 
 from ducktective.core.review.planning import (
-    select_reviewers,
+    plan_file_review,
 )
 from ducktective.core.review.reviewers import (
-    reviewer_kind_of,
+    review_mode_of,
 )
 from ducktective.review_graph.const import (
     AGGREGATE_NODE,
@@ -28,28 +28,27 @@ from ducktective.review_graph.state import (
 def plan_review_node(
     reviewer_names: tuple[str, ...],
 ) -> StateNode:
-    """Решает, кто и какой файл смотрит.
+    """Решает, как читать каждый файл.
 
-    Единственный узел, где принимается решение о стоимости прогона (D-018):
-    четыре прохода на каждый файл при локальной модели превращают прогон
-    на десять файлов в двухчасовой, а ревьюеры по построению независимы —
-    ограничивать их число больше негде.
+    Единственный узел, где принимается решение о стоимости прогона (D-018).
+    Ревьюер теперь один (D-022), поэтому узел выбирает не кого позвать,
+    а каким способом читать: агентно, с дозапросом окружения, либо одним
+    проходом по тому, что собрано заранее.
 
-    Сам отбор — доменное правило, узел лишь переводит вид ревьюера в имя
-    собранного. Ревьюер, за именем которого не стоит известной домену
-    специализации, получает все файлы: политика о нём ничего не знает
-    и потому его не сокращает.
+    Сам выбор — доменное правило, узел лишь переводит режим в имя собранного
+    ревьюера. Ревьюер, за именем которого домен режима не знает, получает
+    все файлы: политика о нём ничего не знает и потому его не сокращает.
     """
-    specialised = {
-        kind: name for name in reviewer_names if (kind := reviewer_kind_of(name)) is not None
-    }
-    unspecialised = tuple(name for name in reviewer_names if reviewer_kind_of(name) is None)
+    known = {mode: name for name in reviewer_names if (mode := review_mode_of(name)) is not None}
+    unknown = tuple(name for name in reviewer_names if review_mode_of(name) is None)
 
     async def plan_review(state: ReviewGraphState) -> dict[str, Any]:
         tasks: list[FileReviewTask] = []
         for file in state.request.files:
             context = state.contexts.get(file.path)
-            selected = select_reviewers(file, context=context, available=specialised.keys())
+            mode = plan_file_review(file, available=known.keys())
+            planned = [known[mode]] if mode is not None else []
+            planned.extend(unknown)
             tasks.extend(
                 FileReviewTask(
                     file=file,
@@ -57,7 +56,7 @@ def plan_review_node(
                     reviewer_name=name,
                     requirements=state.request.requirements,
                 )
-                for name in (*(specialised[kind] for kind in selected), *unspecialised)
+                for name in planned
             )
         return {"tasks": tuple(tasks)}
 

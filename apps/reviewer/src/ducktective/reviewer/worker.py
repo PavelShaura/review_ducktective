@@ -51,14 +51,22 @@ from ducktective.observability.logging import (
     configure_logging,
     get_logger,
 )
+from ducktective.retrieval.navigation import (
+    IndexedNavigators,
+)
 from ducktective.retrieval.session_scope import (
     SessionScopedContextBuilder,
+    SessionScopedHybridSearch,
+    SessionScopedSymbolReader,
 )
 from ducktective.review_graph import (
     LangGraphReviewPipeline,
 )
 from ducktective.review_graph.checkpointing import (
     open_checkpointer,
+)
+from ducktective.review_graph.navigators import (
+    RequestNavigators,
 )
 from ducktective.storage.database import (
     build_engine,
@@ -69,6 +77,12 @@ from ducktective.storage.events.redis_publisher import (
 )
 from ducktective.storage.unit_of_work import (
     SqlAlchemyUnitOfWork,
+)
+from ducktective.vcs.git_provider import (
+    LocalGitProvider,
+)
+from ducktective.vcs.navigation import (
+    GitNavigators,
 )
 
 
@@ -103,6 +117,21 @@ async def startup(ctx: dict[str, Any]) -> None:
     ctx["max_output_tokens"] = settings.llm_max_output_tokens
     resources = AsyncExitStack()
     ctx["resources"] = resources
+    ctx["navigators"] = RequestNavigators(
+        indexed=IndexedNavigators(
+            symbols=SessionScopedSymbolReader(ctx["session_factory"]),
+            search=SessionScopedHybridSearch(
+                ctx["session_factory"],
+                LiteLlmEmbedder(
+                    model=settings.local_embedding_model,
+                    dimensions=settings.embedding_dimensions,
+                    base_url=settings.local_embedding_base_url or None,
+                    api_key=settings.local_llm_api_key,
+                ),
+            ),
+        ),
+        git=GitNavigators(git=LocalGitProvider()),
+    )
     ctx["pipeline"] = LangGraphReviewPipeline(
         build_code_reviewers(
             redis_client=redis_client,
@@ -118,6 +147,7 @@ async def startup(ctx: dict[str, Any]) -> None:
             local_supports_tools=settings.local_review_model_supports_tools,
         ),
         context_builder=ctx["context_builder"],
+        navigators=ctx["navigators"],
         checkpointer=await resources.enter_async_context(
             open_checkpointer(settings.require_database_url())
         ),

@@ -1,13 +1,16 @@
-from collections.abc import (
-    Iterable,
-)
-
 from redis.asyncio import (
     Redis,
 )
 
-from ducktective.core.review.reviewers import (
-    ReviewerKind,
+from ducktective.core.review.investigation import (
+    InvestigationSink,
+)
+from ducktective.core.review.ports import (
+    CodeReviewer,
+)
+from ducktective.llm.agentic_reviewer import (
+    DEFAULT_MAX_STEPS,
+    AgenticCodeReviewer,
 )
 from ducktective.llm.cache import (
     RedisResponseCache,
@@ -73,16 +76,23 @@ def build_code_reviewers(
     cache_ttl_seconds: int,
     timeout_seconds: float,
     local_supports_tools: bool = True,
-    kinds: Iterable[ReviewerKind] = ReviewerKind,
-) -> tuple[LlmCodeReviewer, ...]:
-    """Собирает набор ревьюеров целиком.
+    agentic_enabled: bool = True,
+    max_agent_steps: int = DEFAULT_MAX_STEPS,
+    sink: InvestigationSink | None = None,
+) -> tuple[CodeReviewer, ...]:
+    """Собирает ревьюеров прогона.
+
+    Их двое и оба читают файл одним и тем же взглядом (D-022): агентный
+    дозапрашивает окружение инструментами, одноразовый работает по тому, что
+    собрано заранее. Второй нужен всегда — он же запасной путь для файла,
+    который вместе с диалогом не помещается в окно.
 
     Фабрика принимает примитивы, а не объект настроек: пакет моделей не должен
     зависеть от конфигурации приложений, но собирать зависимости в каждом
     приложении заново — источник расхождений.
 
-    Клиент один на всех: он не хранит состояния прогона, а общий кэш ответов
-    экономит повтор там, где два ревьюера получили одинаковую подсказку.
+    Клиент один на обоих: он не хранит состояния прогона, а общий кэш ответов
+    экономит повтор там, где подсказка совпала.
 
     Без Redis ревьюеры работают без кэша: в автономном режиме внешних сервисов
     нет, а повторные прогоны там редки.
@@ -103,4 +113,17 @@ def build_code_reviewers(
         else None
     )
     client = LiteLlmClient(router, cache=cache, timeout_seconds=timeout_seconds)
-    return tuple(LlmCodeReviewer(client, kind=kind) for kind in kinds)
+    single_pass = LlmCodeReviewer(client)
+
+    if not agentic_enabled or not router.supports_tool_calling(cloud_allowed=cloud_enabled):
+        return (single_pass,)
+
+    return (
+        AgenticCodeReviewer(
+            client,
+            fallback=single_pass,
+            max_steps=max_agent_steps,
+            sink=sink,
+        ),
+        single_pass,
+    )

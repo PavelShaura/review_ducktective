@@ -18,6 +18,10 @@ from ducktective.core.llm.value_objects import (
 from ducktective.core.retrieval.context import (
     DiffContext,
 )
+from ducktective.core.retrieval.navigation import (
+    CodeFragment,
+    CodeNavigator,
+)
 from ducktective.core.review.degradation import (
     NodeDegradation,
 )
@@ -42,10 +46,12 @@ class ReviewRuntimeContext:
 
     Проверка на отмену — вызов в базу, и в состоянии графа ей не место:
     состояние обязано остаться сериализуемым, иначе checkpointer из шага 4.3
-    не сможет его сохранить.
+    не сможет его сохранить. Навигатор здесь по той же причине: он держит
+    сессию базы или путь к репозиторию, и сохранять его в чекпоинт нечем.
     """
 
     cancellation: CancellationCheck | None = None
+    navigator: CodeNavigator | None = None
 
 
 class FileReviewTask(BaseModel):
@@ -72,6 +78,7 @@ class FileDrafts(BaseModel):
     context: DiffContext | None = None
     reviewer_name: str
     drafts: tuple[FindingDraft, ...] = ()
+    shown: tuple[CodeFragment, ...] = ()
     usage: LlmUsage = Field(default_factory=LlmUsage)
     degradation: NodeDegradation | None = None
 
@@ -82,6 +89,7 @@ class MergedDraft(BaseModel):
     draft: FindingDraft
     file: ReviewFile
     context: DiffContext | None = None
+    shown: tuple[CodeFragment, ...] = ()
     reviewer_name: str
 
 

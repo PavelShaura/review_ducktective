@@ -68,6 +68,7 @@ def review_node(
                 patch_text=state.file.to_unified_patch(),
                 requirements=state.requirements,
                 context=state.context,
+                navigator=runtime.context.navigator,
             )
         except DomainError as error:
             return _results(

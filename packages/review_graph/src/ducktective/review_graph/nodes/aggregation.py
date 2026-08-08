@@ -38,6 +38,7 @@ def aggregate(state: ReviewGraphState) -> dict[str, Any]:
                 draft=draft,
                 file=result.file,
                 context=result.context,
+                shown=result.shown,
                 reviewer_name=result.reviewer_name,
             )
             key = build_dedup_key(
@@ -75,6 +76,6 @@ def _survival_rank(item: MergedDraft) -> tuple[bool, bool, int]:
     """
     return (
         item.file.covers_line(item.draft.line_start),
-        has_confirmable_evidence(item.draft, item.file, item.context),
+        has_confirmable_evidence(item.draft, item.file, item.context, shown=item.shown),
         SEVERITY_RANK[item.draft.severity],
     )

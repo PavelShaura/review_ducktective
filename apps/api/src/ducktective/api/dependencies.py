@@ -13,8 +13,8 @@ from fastapi import (
 from ducktective.config.settings import (
     Settings,
 )
-from ducktective.llm.code_reviewer import (
-    LlmCodeReviewer,
+from ducktective.core.review.ports import (
+    CodeReviewer,
 )
 from ducktective.llm.factory import (
     build_code_reviewers,
@@ -59,7 +59,7 @@ def get_task_queue(request: Request) -> ArqRedis:
     return queue
 
 
-def get_code_reviewers(request: Request) -> tuple[LlmCodeReviewer, ...]:
+def get_code_reviewers(request: Request) -> tuple[CodeReviewer, ...]:
     settings = get_settings(request)
     return build_code_reviewers(
         redis_client=request.app.state.redis,
@@ -81,5 +81,5 @@ UnitOfWorkDependency = Annotated[SqlAlchemyUnitOfWork, Depends(get_unit_of_work)
 EventPublisherDependency = Annotated[RedisEventPublisher, Depends(get_event_publisher)]
 VcsProviderDependency = Annotated[LocalGitProvider, Depends(get_vcs_provider)]
 DiffParserDependency = Annotated[UnifiedDiffParser, Depends(get_diff_parser)]
-CodeReviewersDependency = Annotated[tuple[LlmCodeReviewer, ...], Depends(get_code_reviewers)]
+CodeReviewersDependency = Annotated[tuple[CodeReviewer, ...], Depends(get_code_reviewers)]
 TaskQueueDependency = Annotated[ArqRedis, Depends(get_task_queue)]

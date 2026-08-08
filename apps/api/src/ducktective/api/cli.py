@@ -86,10 +86,11 @@ from ducktective.core.review.entities import (
     ReviewRun,
 )
 from ducktective.core.review.ports import (
+    CodeReviewer,
     ReviewPipeline,
 )
 from ducktective.core.review.reviewers import (
-    ReviewerKind,
+    ReviewMode,
     reviewer_name,
 )
 from ducktective.core.review.value_objects import (
@@ -120,7 +121,6 @@ from ducktective.indexing.python_parser import (
 )
 from ducktective.llm.code_reviewer import (
     PROMPT_SET_NAME,
-    LlmCodeReviewer,
     system_prompt,
 )
 from ducktective.llm.embedder import (
@@ -129,11 +129,19 @@ from ducktective.llm.embedder import (
 from ducktective.llm.factory import (
     build_code_reviewers,
 )
+from ducktective.retrieval.navigation import (
+    IndexedNavigators,
+)
 from ducktective.retrieval.session_scope import (
     SessionScopedContextBuilder,
+    SessionScopedHybridSearch,
+    SessionScopedSymbolReader,
 )
 from ducktective.review_graph import (
     LangGraphReviewPipeline,
+)
+from ducktective.review_graph.navigators import (
+    RequestNavigators,
 )
 from ducktective.storage.database import (
     build_engine,
@@ -159,6 +167,9 @@ from ducktective.vcs.diff_parser import (
 )
 from ducktective.vcs.git_provider import (
     LocalGitProvider,
+)
+from ducktective.vcs.navigation import (
+    GitNavigators,
 )
 
 
@@ -438,13 +449,17 @@ async def _find_indexed_repository(
 
 
 def _prompt_set_text() -> str:
-    """Промпты всех ревьюеров одной записью.
+    """Подсказки обоих режимов одной записью.
 
     Прогон качества сравнивается с другим прогоном, и сравнивать его можно
-    только зная, чем именно ревьюили. Ревьюеров теперь несколько, поэтому
-    версией промпта считается набор целиком, а не текст одного из них.
+    только зная, чем именно ревьюили. Ревьюер один (D-022), но подсказок
+    у него две: агентная добавляет к общей части правила расследования,
+    и прогон, где файлы читались по-разному, обязан опознаваться версией.
     """
-    return "\n\n".join(f"# {reviewer_name(kind)}\n\n{system_prompt(kind)}" for kind in ReviewerKind)
+    return "\n\n".join(
+        f"# {reviewer_name(mode)}\n\n{system_prompt(with_tools=mode is ReviewMode.AGENTIC)}"
+        for mode in ReviewMode
+    )
 
 
 async def _save_evaluation(
@@ -558,6 +573,8 @@ async def _build_context(settings: Settings, *, no_store: bool) -> AsyncIterator
             pipeline=_build_pipeline(
                 _build_reviewers(settings, redis_client=redis_client),
                 context_builder=_build_context_builder(settings, session_factory),
+                session_factory=session_factory,
+                settings=settings,
             ),
         )
     finally:
@@ -589,18 +606,54 @@ def _build_context_builder(
 
 
 def _build_pipeline(
-    reviewers: Sequence[LlmCodeReviewer],
+    reviewers: Sequence[CodeReviewer],
     *,
     context_builder: ContextBuilder | None = None,
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
+    settings: Settings | None = None,
 ) -> ReviewPipeline:
-    return LangGraphReviewPipeline(reviewers, context_builder=context_builder)
+    """Собирает конвейер вместе с тем, чем он будет ходить по коду.
+
+    Навигация по git есть всегда — она не требует ни базы, ни индекса,
+    и именно она делает агентный режим доступным автономному прогону
+    (D-021). Индексная добавляется там, где база вообще открыта.
+    """
+    return LangGraphReviewPipeline(
+        reviewers,
+        context_builder=context_builder,
+        navigators=RequestNavigators(
+            indexed=_build_indexed_navigators(settings, session_factory),
+            git=GitNavigators(git=LocalGitProvider()),
+        ),
+    )
+
+
+def _build_indexed_navigators(
+    settings: Settings | None,
+    session_factory: async_sessionmaker[AsyncSession] | None,
+) -> IndexedNavigators | None:
+    if settings is None or session_factory is None:
+        return None
+
+    return IndexedNavigators(
+        symbols=SessionScopedSymbolReader(session_factory),
+        search=SessionScopedHybridSearch(
+            session_factory,
+            LiteLlmEmbedder(
+                model=settings.local_embedding_model,
+                dimensions=settings.embedding_dimensions,
+                base_url=settings.local_embedding_base_url or None,
+                api_key=settings.local_llm_api_key,
+            ),
+        ),
+    )
 
 
 def _build_reviewers(
     settings: Settings,
     *,
     redis_client: Redis | None,
-) -> tuple[LlmCodeReviewer, ...]:
+) -> tuple[CodeReviewer, ...]:
     return build_code_reviewers(
         redis_client=redis_client,
         local_provider=settings.local_llm_provider,

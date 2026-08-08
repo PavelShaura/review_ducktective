@@ -44,6 +44,7 @@ def verify(state: ReviewGraphState) -> dict[str, Any]:
             item.file,
             producer_name=item.reviewer_name,
             context=item.context,
+            shown=item.shown,
         )
         if finding is None:
             without_evidence += 1
@@ -54,7 +55,7 @@ def verify(state: ReviewGraphState) -> dict[str, Any]:
     for item in state.displaced:
         if not _covers_changed_lines(item):
             outside_diff += 1
-        elif not has_confirmable_evidence(item.draft, item.file, item.context):
+        elif not has_confirmable_evidence(item.draft, item.file, item.context, shown=item.shown):
             without_evidence += 1
         else:
             duplicates += 1

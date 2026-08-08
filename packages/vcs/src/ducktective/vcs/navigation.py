@@ -207,6 +207,19 @@ class GitCodeNavigator:
         return tuple(fragments)
 
 
+class GitNavigators:
+    """Навигаторы по ревизиям — по одному на прогон.
+
+    Провайдер git один на приложение, а ревизия у каждого прогона своя.
+    """
+
+    def __init__(self, *, git: LocalGitProvider) -> None:
+        self._git = git
+
+    def for_revision(self, repository_path: Path, revision: str) -> GitCodeNavigator:
+        return GitCodeNavigator(repository_path, revision, git=self._git)
+
+
 def _window(
     path: str,
     lines: list[str],

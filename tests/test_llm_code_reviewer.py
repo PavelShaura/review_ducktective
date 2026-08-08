@@ -31,9 +31,6 @@ from ducktective.core.review.entities import (
     ReviewFile,
     ReviewHunk,
 )
-from ducktective.core.review.reviewers import (
-    ReviewerKind,
-)
 from ducktective.core.review.value_objects import (
     FindingCategory,
     Severity,
@@ -162,10 +159,11 @@ async def test_prompt_contains_file_metadata_and_patch() -> None:
     assert "@@ -10,2 +10,3 @@" in user_message
 
 
-async def test_reviewer_speaks_with_the_prompt_of_its_specialisation() -> None:
+async def test_reviewer_is_one_and_reads_the_change_whole() -> None:
+    """Ревьюер один (D-022): фокусы четверых слились в один перечень вопросов."""
     file = build_file()
     client = FakeLlmClient('{"findings": []}')
-    reviewer = LlmCodeReviewer(client, kind=ReviewerKind.SECURITY)
+    reviewer = LlmCodeReviewer(client)
 
     await reviewer.review_file(
         file,
@@ -173,33 +171,37 @@ async def test_reviewer_speaks_with_the_prompt_of_its_specialisation() -> None:
         requirements=ModelRequirements(),
     )
 
-    assert reviewer.name == "reviewer:security"
-    assert "security engineer" in client.calls[0][0].content
+    prompt = client.calls[0][0].content
+    assert reviewer.name == "reviewer:single-pass"
+    assert "Does it do the right thing?" in prompt
+    assert "What can an attacker do with it?" in prompt
+    assert "What does it cost to run?" in prompt
 
 
-@pytest.mark.parametrize("kind", list(ReviewerKind))
-def test_every_prompt_carries_the_common_part(kind: ReviewerKind) -> None:
-    """Рубрика severity и формат ответа одинаковы у всех четверых."""
-    prompt = system_prompt(kind)
+@pytest.mark.parametrize("with_tools", [False, True])
+def test_both_modes_carry_the_common_part(with_tools: bool) -> None:
+    """Рубрика severity и формат ответа одинаковы в обоих режимах."""
+    prompt = system_prompt(with_tools=with_tools)
 
     assert prompt.startswith("You are")
     assert "Severity rubric" in prompt
     assert "Return JSON only" in prompt
 
 
-@pytest.mark.parametrize("kind", list(ReviewerKind))
-def test_prompts_say_nothing_about_linters(kind: ReviewerKind) -> None:
+@pytest.mark.parametrize("with_tools", [False, True])
+def test_prompts_say_nothing_about_linters(with_tools: bool) -> None:
     """Территория линтера в ревью не обсуждается — ни запретом, ни разрешением."""
-    prompt = system_prompt(kind).lower()
+    prompt = system_prompt(with_tools=with_tools).lower()
 
     assert "linter" not in prompt
     assert "type checker" not in prompt
 
 
-def test_focus_differs_between_reviewers() -> None:
-    prompts = {system_prompt(kind) for kind in ReviewerKind}
+def test_only_the_agentic_prompt_explains_the_tools() -> None:
+    with_tools = system_prompt(with_tools=True)
 
-    assert len(prompts) == len(ReviewerKind)
+    assert "Investigating" in with_tools
+    assert "Investigating" not in system_prompt(with_tools=False)
 
 
 class FlakyLlmClient:

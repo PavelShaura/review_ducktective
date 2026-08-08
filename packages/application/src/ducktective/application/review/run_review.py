@@ -135,6 +135,7 @@ class RunReview(TransactionalUseCase):
                 raise RunNotReviewableError(run.status)
 
             repository = await self._unit_of_work.code_repositories.get(run.repository_id)
+            snapshot = await self._unit_of_work.index_snapshots.find_latest_ready(run.repository_id)
             request = PipelineRequest(
                 run_id=run.id,
                 repository_id=run.repository_id,
@@ -144,6 +145,9 @@ class RunReview(TransactionalUseCase):
                     cloud_allowed=repository.cloud_processing_allowed,
                     max_output_tokens=self._max_output_tokens,
                 ),
+                head_sha=run.head_sha,
+                repository_path=repository.local_path,
+                index_ready=snapshot is not None,
             )
             run.mark_running()
             attempt = run.attempt

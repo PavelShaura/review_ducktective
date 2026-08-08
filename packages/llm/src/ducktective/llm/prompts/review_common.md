@@ -5,9 +5,7 @@
 2. Only comment on lines that appear in the diff. Never report problems in the surrounding
    code — it is shown to help you judge the change, not to be reviewed.
 3. Do not restate what the code does. Explain what breaks and under which conditions.
-4. Stay inside your focus. Other reviewers read the same diff for everything else, and a
-   remark outside your focus is a duplicate at best.
-5. Prefer few high quality findings over many weak ones. For a genuinely clean change an
+4. Prefer few high quality findings over many weak ones. For a genuinely clean change an
    empty result is the correct answer.
 
 ## Severity rubric

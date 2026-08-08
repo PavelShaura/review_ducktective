@@ -31,6 +31,9 @@ from ducktective.core.retrieval.context import (
     ContextOrigin,
     DiffContext,
 )
+from ducktective.core.retrieval.navigation import (
+    CodeNavigator,
+)
 from ducktective.core.review.drafts import (
     EvidenceDraft,
     FindingDraft,
@@ -42,7 +45,7 @@ from ducktective.core.review.ports import (
     FileReviewResult,
 )
 from ducktective.core.review.reviewers import (
-    ReviewerKind,
+    ReviewMode,
     reviewer_name,
 )
 from ducktective.core.review.value_objects import (
@@ -66,7 +69,9 @@ ORIGIN_TITLES = {
 
 PROMPTS_DIRECTORY = Path(__file__).parent / "prompts"
 COMMON_PROMPT_FILE = "review_common.md"
-PROMPT_SET_NAME = "reviewers/specialised-v1"
+REVIEWER_PROMPT_FILE = "reviewer.md"
+AGENT_PROMPT_FILE = "reviewer_agent.md"
+PROMPT_SET_NAME = "reviewer-v1"
 JSON_BLOCK_PATTERN = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
 
 
@@ -76,34 +81,39 @@ def load_prompt(file_name: str) -> str:
 
 
 @cache
-def system_prompt(kind: ReviewerKind) -> str:
-    """Промпт специализации поверх общей части.
+def system_prompt(*, with_tools: bool = False) -> str:
+    """Подсказка ревьюера: что искать, как расследовать, как ответить.
 
-    Общая часть — правила доказательств, граница с линтером, рубрика severity
-    и формат вывода — одна на всех: четыре копии одного текста разъезжаются
-    на первой же правке, и разница в результатах перестаёт быть объяснимой.
+    Части три и склеиваются они в одном месте. Перечень того, что искать, —
+    один на оба режима: ревьюер один (D-022), и разными их делает способ
+    добывать сведения, а не то, что они ищут. Правила доказательств, рубрика
+    severity и формат ответа тоже общие — копия этого текста разъехалась бы
+    на первой правке, и разница в результатах перестала бы быть объяснимой.
     """
-    return f"{load_prompt(f'reviewers/{kind.value}.md')}\n\n{load_prompt(COMMON_PROMPT_FILE)}"
+    parts = [load_prompt(REVIEWER_PROMPT_FILE)]
+    if with_tools:
+        parts.append(load_prompt(AGENT_PROMPT_FILE))
+    parts.append(load_prompt(COMMON_PROMPT_FILE))
+    return "\n\n".join(parts)
 
 
 class LlmCodeReviewer:
     """Ревьюер одного файла: один вызов модели на файл.
 
-    Специализация задаётся видом — от него зависят имя ревьюера и промпт
-    фокуса. Кого позвать на конкретный файл, решает не ревьюер, а план прогона.
+    Работает по тому, что показали заранее: патч и собранное окружение.
+    Запасной путь для файла, который вместе с диалогом инструментов не влезет
+    в окно модели, — и единственный, когда инструментов нет вовсе.
     """
 
     def __init__(
         self,
         llm_client: LlmClient,
         *,
-        kind: ReviewerKind = ReviewerKind.CORRECTNESS,
         attempts: int = DEFAULT_ATTEMPTS,
     ) -> None:
         self._llm_client = llm_client
-        self._kind = kind
         self._attempts = attempts
-        self.name = reviewer_name(kind)
+        self.name = reviewer_name(ReviewMode.SINGLE_PASS)
 
     async def _ask(
         self,
@@ -126,7 +136,7 @@ class LlmCodeReviewer:
                 json_schema=schema,
             )
             try:
-                return response, _parse_payload(response.content, model=response.model)
+                return response, parse_payload(response.content, model=response.model)
             except LlmOutputError as error:
                 last_error = (
                     _truncated_error(response.model, requirements)
@@ -143,15 +153,23 @@ class LlmCodeReviewer:
         patch_text: str,
         requirements: ModelRequirements,
         context: DiffContext | None = None,
+        navigator: CodeNavigator | None = None,
     ) -> FileReviewResult:
+        """Читает файл одним обращением к модели.
+
+        Навигатор не используется: этот ревьюер работает по тому, что ему
+        показали. Параметр есть, потому что он есть у порта, и молчаливо
+        принять его честнее, чем требовать от вызывающего знать, кому
+        инструменты нужны, а кому нет.
+        """
         messages = [
-            LlmMessage(role=LlmRole.SYSTEM, content=system_prompt(self._kind)),
-            LlmMessage(role=LlmRole.USER, content=_build_user_message(file, patch_text, context)),
+            LlmMessage(role=LlmRole.SYSTEM, content=system_prompt()),
+            LlmMessage(role=LlmRole.USER, content=build_user_message(file, patch_text, context)),
         ]
         response, payload = await self._ask(messages, requirements)
 
         return FileReviewResult(
-            drafts=[_to_draft(finding, file.path) for finding in payload.findings],
+            drafts=[to_draft(finding, file.path) for finding in payload.findings],
             usage=response.usage,
             model=response.model,
             is_cache_hit=response.is_cache_hit,
@@ -186,7 +204,7 @@ def _correction(error: LlmOutputError | None) -> LlmMessage:
     )
 
 
-def _build_user_message(
+def build_user_message(
     file: ReviewFile,
     patch_text: str,
     context: DiffContext | None,
@@ -240,7 +258,7 @@ def _render_context(context: DiffContext) -> str:
     return "\n".join(sections)
 
 
-def _parse_payload(content: str, *, model: str) -> ReviewPayload:
+def parse_payload(content: str, *, model: str) -> ReviewPayload:
     raw_json = _extract_json(content, model=model)
     try:
         return ReviewPayload.model_validate_json(raw_json)
@@ -281,7 +299,7 @@ def _extract_json(content: str, *, model: str) -> str:
     return candidate
 
 
-def _to_draft(payload: FindingPayload, file_path: str) -> FindingDraft:
+def to_draft(payload: FindingPayload, file_path: str) -> FindingDraft:
     return FindingDraft(
         file_path=file_path,
         line_start=payload.line_start,

@@ -1,6 +1,9 @@
 from collections.abc import (
     Callable,
 )
+from types import (
+    SimpleNamespace,
+)
 from uuid import (
     uuid4,
 )
@@ -22,6 +25,9 @@ from ducktective.core.retrieval.context import (
     ContextOrigin,
     ContextPiece,
     DiffContext,
+)
+from ducktective.core.retrieval.navigation import (
+    CodeNavigator,
 )
 from ducktective.core.review.degradation import (
     DegradationKind,
@@ -154,17 +160,47 @@ async def test_every_reviewer_sees_every_file() -> None:
     assert outcome.proposed == 2
 
 
-async def test_specialised_reviewer_is_not_called_without_its_signals() -> None:
-    """План — ограничитель стоимости: лишний проход стоит минуты (D-018)."""
-    security = named(FakeCodeReviewer(), "reviewer:security")
-    correctness = named(FakeCodeReviewer({SERVICE_FILE: [build_draft()]}), "reviewer:correctness")
-    pipeline = LangGraphReviewPipeline([security, correctness])
+async def test_plan_sends_ordinary_files_to_the_agent() -> None:
+    """Узел плана выбирает режим, а не набор ревьюеров (D-018, D-022)."""
+    agentic = named(FakeCodeReviewer({SERVICE_FILE: [build_draft()]}), "reviewer:agentic")
+    single_pass = named(FakeCodeReviewer(), "reviewer:single-pass")
+    pipeline = LangGraphReviewPipeline([agentic, single_pass])
 
     outcome = await pipeline.run(build_request())
 
-    assert security.reviewed_paths == []
-    assert sorted(correctness.reviewed_paths) == [HELPERS_FILE, SERVICE_FILE]
+    assert sorted(agentic.reviewed_paths) == [HELPERS_FILE, SERVICE_FILE]
+    assert single_pass.reviewed_paths == []
     assert len(outcome.findings) == 1
+
+
+async def test_plan_falls_back_to_one_pass_on_a_large_file() -> None:
+    """Патч, съедающий окно, не оставляет места на диалог с инструментами."""
+    agentic = named(FakeCodeReviewer(), "reviewer:agentic")
+    single_pass = named(FakeCodeReviewer(), "reviewer:single-pass")
+    pipeline = LangGraphReviewPipeline([agentic, single_pass])
+    request = build_request()
+    for file in request.files:
+        file.hunks[0].patch_text += "+    value = compute()\n" * 800
+
+    await pipeline.run(request)
+
+    assert agentic.reviewed_paths == []
+    assert sorted(single_pass.reviewed_paths) == [HELPERS_FILE, SERVICE_FILE]
+
+
+async def test_navigator_of_the_run_reaches_the_reviewer() -> None:
+    """Навигатор привязан к прогону, а ревьюер собран один на приложение."""
+    reviewer = FakeCodeReviewer({SERVICE_FILE: [build_draft()]})
+    navigator = object()
+    pipeline = LangGraphReviewPipeline(
+        [reviewer],
+        navigators=SimpleNamespace(for_request=lambda request: navigator),
+    )
+
+    await pipeline.run(build_request())
+
+    assert reviewer.seen_navigators
+    assert all(seen is navigator for seen in reviewer.seen_navigators)
 
 
 async def test_duplicate_keeps_the_draft_that_survives_verification() -> None:
@@ -522,6 +558,7 @@ class RecordingReviewer(FakeCodeReviewer):
         patch_text: str,
         requirements: ModelRequirements,
         context: DiffContext | None = None,
+        navigator: CodeNavigator | None = None,
     ) -> FileReviewResult:
         self.asked.append(
             (file.path, self.name, patch_text, () if context is None else context.pieces)

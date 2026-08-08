@@ -12,6 +12,10 @@ from ducktective.core.llm.value_objects import (
 from ducktective.core.retrieval.context import (
     DiffContext,
 )
+from ducktective.core.retrieval.navigation import (
+    CodeFragment,
+    CodeNavigator,
+)
 from ducktective.core.review.drafts import (
     FindingDraft,
 )
@@ -52,6 +56,14 @@ class FileReviewResult:
     usage: LlmUsage
     model: str
     is_cache_hit: bool = False
+    shown: tuple[CodeFragment, ...] = ()
+    """Код, который ревьюер посмотрел инструментами.
+
+    Едет обратно ради проверки доказательств: цитата из ответа инструмента —
+    такое же показанное окружение, как собранный заранее контекст, и без
+    этого поля агентная находка отбраковывается именно за то, ради чего
+    агент и заводился (D-008).
+    """
 
 
 class CodeReviewer(Protocol):
@@ -66,7 +78,28 @@ class CodeReviewer(Protocol):
         patch_text: str,
         requirements: ModelRequirements,
         context: DiffContext | None = None,
-    ) -> FileReviewResult: ...
+        navigator: CodeNavigator | None = None,
+    ) -> FileReviewResult:
+        """Читает файл и возвращает черновики находок.
+
+        Навигатор приходит вызовом, а не конструктором: он привязан
+        к репозиторию и ревизии прогона, а ревьюер собирается один раз
+        на приложение. Реализация, которой инструменты не нужны, его
+        игнорирует.
+        """
+        ...
+
+
+class ReviewNavigators(Protocol):
+    """Чем прогон ходит по коду.
+
+    Ответ зависит от того, собран ли индекс: граф и векторы там, где собран,
+    поиск по ревизии там, где нет (D-021). `None` означает, что инструментов
+    нет вовсе — ни индекса, ни рабочего каталога, — и агентный режим тогда
+    не начинается.
+    """
+
+    def for_request(self, request: PipelineRequest) -> CodeNavigator | None: ...
 
 
 class CancellationCheck(Protocol):

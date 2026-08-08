@@ -1,3 +1,6 @@
+from collections.abc import (
+    Sequence,
+)
 from dataclasses import (
     dataclass,
 )
@@ -7,6 +10,9 @@ from uuid import (
 
 from ducktective.core.retrieval.context import (
     DiffContext,
+)
+from ducktective.core.retrieval.navigation import (
+    CodeFragment,
 )
 from ducktective.core.review.dedup import (
     build_dedup_key,
@@ -50,6 +56,7 @@ def build_verified_finding(
     producer_name: str,
     producer: FindingProducer = FindingProducer.LLM,
     context: DiffContext | None = None,
+    shown: Sequence[CodeFragment] = (),
 ) -> Finding | None:
     """Превращает черновик в находку, отбраковывая недостоверные.
 
@@ -57,7 +64,7 @@ def build_verified_finding(
     выдуманного контекста (D-008). Принадлежность строки диффу проверяется
     отдельно и раньше, чтобы различать причины отбраковки.
     """
-    evidence = collect_evidence(draft, file.to_unified_patch(), context)
+    evidence = collect_evidence(draft, file.to_unified_patch(), context, shown=shown)
     if not evidence:
         return None
 
@@ -91,19 +98,25 @@ def collect_evidence(
     draft: FindingDraft,
     patch_text: str,
     context: DiffContext | None = None,
+    *,
+    shown: Sequence[CodeFragment] = (),
 ) -> list[Evidence]:
     """Оставляет только те цитаты, которые действительно существуют.
 
-    Искать их приходится и в патче, и в показанном окружении: получив контекст,
-    модель ссылается на вызывающий код, и такая ссылка — самое ценное, что она
-    может сказать. Проверка от этого не слабеет, потому что окружение — это
-    ровно то, что мы ей показали, а не то, что она придумала.
+    Искать их приходится в трёх местах: в патче, в собранном заранее окружении
+    и в том, что вернули инструменты агенту. Получив доступ к коду за пределами
+    диффа, модель ссылается на вызывающий код, и такая ссылка — самое ценное,
+    что она может сказать.
+
+    Проверка от этого не слабеет: все три источника — то, что мы ей сами
+    показали, а не то, что она придумала. Зато без третьего источника агентная
+    находка отбраковывается именно за то, ради чего агент и заводился.
     """
     candidates = [item.snippet for item in draft.evidence]
     if draft.code_fragment:
         candidates.append(draft.code_fragment)
 
-    sources = _evidence_sources(draft, patch_text, context)
+    sources = _evidence_sources(draft, patch_text, context, shown)
 
     confirmed: list[Evidence] = []
     seen: set[str] = set()
@@ -133,6 +146,8 @@ def has_confirmable_evidence(
     draft: FindingDraft,
     file: ReviewFile,
     context: DiffContext | None = None,
+    *,
+    shown: Sequence[CodeFragment] = (),
 ) -> bool:
     """Есть ли у черновика хоть одна подтверждаемая цитата.
 
@@ -140,13 +155,14 @@ def has_confirmable_evidence(
     выживать должен тот, что переживёт проверку, иначе слияние роняет
     находку вместо дубля.
     """
-    return bool(collect_evidence(draft, file.to_unified_patch(), context))
+    return bool(collect_evidence(draft, file.to_unified_patch(), context, shown=shown))
 
 
 def _evidence_sources(
     draft: FindingDraft,
     patch_text: str,
     context: DiffContext | None,
+    shown: Sequence[CodeFragment] = (),
 ) -> list[_EvidenceSource]:
     """Тексты, в которых цитата считается подтверждённой.
 
@@ -171,6 +187,16 @@ def _evidence_sources(
             line_end=piece.end_line,
         )
         for piece in (context.pieces if context else ())
+    )
+    sources.extend(
+        _EvidenceSource(
+            normalized_text=_normalize(fragment.text),
+            kind=EvidenceKind.RETRIEVED_CHUNK,
+            file_path=fragment.path,
+            line_start=fragment.start_line,
+            line_end=fragment.end_line,
+        )
+        for fragment in shown
     )
     return sources
 

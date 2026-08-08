@@ -4,6 +4,9 @@ from dataclasses import (
 from enum import (
     StrEnum,
 )
+from pathlib import (
+    Path,
+)
 from typing import (
     Protocol,
 )
@@ -130,6 +133,16 @@ class CodeNavigatorFactory(Protocol):
     """
 
     def for_repository(self, repository_id: RepositoryId) -> CodeNavigator: ...
+
+
+class GitNavigatorFactory(Protocol):
+    """Навигатор по ревизии в рабочем каталоге репозитория.
+
+    Объявлен отдельно от индексного, потому что опознаёт репозиторий иначе:
+    у git нет идентификатора из нашей базы, у него есть путь и ревизия.
+    """
+
+    def for_revision(self, repository_path: Path, revision: str) -> CodeNavigator: ...
 
 
 def clip_code(text: str, limit: int = MAX_FRAGMENT_CHARS) -> str:

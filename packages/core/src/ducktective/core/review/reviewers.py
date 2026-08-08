@@ -6,32 +6,32 @@ from enum import (
 REVIEWER_NAME_PREFIX = "reviewer:"
 
 
-class ReviewerKind(StrEnum):
-    """Специализация ревьюера — разные глаза на один и тот же дифф.
+class ReviewMode(StrEnum):
+    """Чем читается файл.
 
-    Порядок членов задаёт порядок ревьюеров в плане: сначала тот, кто читает
-    смысл изменения, затем те, кого зовут по признакам.
+    Ревьюер один (D-022), но работать он может по-разному: агентно —
+    запрашивая у инструментов то, что ему нужно, — либо одним проходом
+    по заранее собранному окружению. Второе не наследие, а запасной путь:
+    на файле, который вместе с диалогом не помещается в окно, цикл
+    не начинается вовсе.
     """
 
-    CORRECTNESS = "correctness"
-    SECURITY = "security"
-    PERFORMANCE = "performance"
-    CONVENTIONS = "conventions"
+    AGENTIC = "agentic"
+    SINGLE_PASS = "single-pass"
 
 
-def reviewer_name(kind: ReviewerKind) -> str:
-    return f"{REVIEWER_NAME_PREFIX}{kind.value}"
+def reviewer_name(mode: ReviewMode) -> str:
+    return f"{REVIEWER_NAME_PREFIX}{mode.value}"
 
 
-def reviewer_kind_of(name: str) -> ReviewerKind | None:
-    """Специализация по имени ревьюера, если домен её знает.
+def review_mode_of(name: str) -> ReviewMode | None:
+    """Режим по имени ревьюера, если домен его знает.
 
-    Незнакомое имя — не ошибка: так выглядят ревьюер-заглушка в тестах
-    и одиночный проход в сравнительных прогонах. Политика отбора судит
-    по признакам специализации, а незнакомому имени признаков не сопоставлено,
-    поэтому ограничивать его она не берётся.
+    Незнакомое имя — не ошибка: так выглядит ревьюер-заглушка в тестах
+    и одиночный проход в сравнительных прогонах. Планировщик такому имени
+    режима не сопоставляет и потому его не ограничивает.
     """
     try:
-        return ReviewerKind(name.removeprefix(REVIEWER_NAME_PREFIX))
+        return ReviewMode(name.removeprefix(REVIEWER_NAME_PREFIX))
     except ValueError:
         return None

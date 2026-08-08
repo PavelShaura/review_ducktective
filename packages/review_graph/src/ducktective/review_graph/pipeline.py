@@ -18,6 +18,9 @@ from ducktective.core.exceptions import (
 from ducktective.core.llm.value_objects import (
     LlmUsage,
 )
+from ducktective.core.retrieval.navigation import (
+    CodeNavigator,
+)
 from ducktective.core.retrieval.ports import (
     ContextBuilder,
 )
@@ -31,6 +34,7 @@ from ducktective.core.review.pipeline import (
 from ducktective.core.review.ports import (
     CancellationCheck,
     CodeReviewer,
+    ReviewNavigators,
 )
 from ducktective.core.types import (
     ReviewRunId,
@@ -60,10 +64,12 @@ class LangGraphReviewPipeline:
         reviewers: Iterable[CodeReviewer],
         *,
         context_builder: ContextBuilder | None = None,
+        navigators: ReviewNavigators | None = None,
         checkpointer: BaseCheckpointSaver[Any] | None = None,
         max_concurrent_reviews: int = DEFAULT_MAX_CONCURRENT_REVIEWS,
     ) -> None:
         self._reviewers = {reviewer.name: reviewer for reviewer in reviewers}
+        self._navigators = navigators
         self._max_concurrent_reviews = max_concurrent_reviews
         self._checkpointer = checkpointer
         self._graph = build_review_graph(
@@ -96,7 +102,10 @@ class LangGraphReviewPipeline:
         try:
             raw = await self._graph.ainvoke(
                 entry,
-                context=ReviewRuntimeContext(cancellation=cancellation),
+                context=ReviewRuntimeContext(
+                    cancellation=cancellation,
+                    navigator=self._navigator_for(request),
+                ),
                 config=self._config(request),
             )
         except ReviewInterruptedError:
@@ -125,6 +134,17 @@ class LangGraphReviewPipeline:
             files_with_context=state.files_with_context,
             reviewed_files=len(read_paths),
         )
+
+    def _navigator_for(self, request: PipelineRequest) -> CodeNavigator | None:
+        """Чем этот прогон будет ходить по коду.
+
+        Навигатор рождается на прогон, а не на приложение: он привязан
+        к репозиторию и ревизии. Его отсутствие — не сбой: агентный ревьюер
+        честно уйдёт на проход без инструментов.
+        """
+        if self._navigators is None:
+            return None
+        return self._navigators.for_request(request)
 
     async def forget(self, run_id: ReviewRunId) -> None:
         if self._checkpointer is None:
