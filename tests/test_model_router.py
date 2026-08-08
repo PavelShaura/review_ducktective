@@ -58,3 +58,31 @@ def test_cheap_work_stays_local() -> None:
     choice = router.select(ModelRequirements(needs_deep_reasoning=False, cloud_allowed=True))
 
     assert choice is LOCAL
+
+
+TOOLLESS_LOCAL = ModelChoice(model="ollama/old", provider="ollama", supports_tools=False)
+
+
+def test_tool_calling_leaves_a_model_that_cannot_call_tools() -> None:
+    router = ModelRouter(local_choice=TOOLLESS_LOCAL, cloud_choice=CLOUD, cloud_enabled=True)
+
+    choice = router.select(ModelRequirements(needs_tool_calling=True, cloud_allowed=True))
+
+    assert choice is CLOUD
+
+
+def test_tool_calling_stays_local_when_the_local_model_can_call_tools() -> None:
+    router = build_router()
+
+    choice = router.select(ModelRequirements(needs_tool_calling=True, cloud_allowed=True))
+
+    assert choice is LOCAL
+
+
+def test_agentic_mode_knows_in_advance_that_it_has_nowhere_to_run() -> None:
+    """Ответ нужен до прогона, а не на первом вызове посреди файла."""
+    router = ModelRouter(local_choice=TOOLLESS_LOCAL, cloud_choice=CLOUD, cloud_enabled=True)
+
+    assert router.supports_tool_calling(cloud_allowed=True)
+    assert not router.supports_tool_calling(cloud_allowed=False)
+    assert build_router().supports_tool_calling(cloud_allowed=False)

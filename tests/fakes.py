@@ -1,3 +1,6 @@
+from collections.abc import (
+    Sequence,
+)
 from pathlib import (
     Path,
 )
@@ -25,6 +28,7 @@ from ducktective.core.llm.value_objects import (
     LlmResponse,
     LlmUsage,
     ModelRequirements,
+    ToolSpec,
 )
 from ducktective.core.retrieval.context import (
     DiffContext,
@@ -184,6 +188,7 @@ class FakeLlmClient:
         self.content = content
         self.usage = usage or LlmUsage(input_tokens=100, output_tokens=50)
         self.calls: list[list[LlmMessage]] = []
+        self.offered_tools: list[tuple[str, ...]] = []
 
     async def complete(
         self,
@@ -191,8 +196,10 @@ class FakeLlmClient:
         *,
         requirements: ModelRequirements,
         json_schema: dict[str, Any] | None = None,
+        tools: Sequence[ToolSpec] | None = None,
     ) -> LlmResponse:
         self.calls.append(messages)
+        self.offered_tools.append(tuple(tool.name for tool in tools or ()))
         return LlmResponse(
             content=self.content,
             model="fake-model",

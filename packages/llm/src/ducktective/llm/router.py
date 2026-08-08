@@ -13,6 +13,13 @@ class ModelChoice:
     provider: str
     api_base: str | None = None
     api_key: str | None = None
+    supports_tools: bool = True
+    """Модель умеет вызывать инструменты.
+
+    Признак задаётся настройкой, а не выясняется у сервера: локальные сборки
+    отвечают на неподдерживаемое поле по-разному — от молчаливого игнорирования
+    до ошибки, — и узнать правду можно только неудачным прогоном.
+    """
 
 
 class ModelRouter:
@@ -38,11 +45,27 @@ class ModelRouter:
     def cloud_available(self) -> bool:
         return self._cloud_enabled and self._cloud_choice is not None
 
+    def supports_tool_calling(self, *, cloud_allowed: bool) -> bool:
+        """Есть ли под эту политику модель, умеющая инструменты.
+
+        Спрашивается до прогона: агентный ревьюер, которому не на чем работать,
+        обязан честно откатиться к одноразовому проходу, а не выяснять это
+        на первом же вызове посреди файла.
+        """
+        if self._local_choice.supports_tools:
+            return True
+        if not cloud_allowed or not self.cloud_available or self._cloud_choice is None:
+            return False
+        return self._cloud_choice.supports_tools
+
     def select(self, requirements: ModelRequirements) -> ModelChoice:
         if not requirements.cloud_allowed or not self.cloud_available:
             return self._local_choice
+
+        assert self._cloud_choice is not None
+        if requirements.needs_tool_calling and not self._local_choice.supports_tools:
+            return self._cloud_choice
         if not requirements.needs_deep_reasoning:
             return self._local_choice
 
-        assert self._cloud_choice is not None
         return self._cloud_choice

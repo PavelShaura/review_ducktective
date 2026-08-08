@@ -51,6 +51,14 @@ class Settings(BaseSettings):
     context_token_budget: int = 2000
     local_reranker_model: str = "bge-reranker-v2-m3"
     local_review_model: str = "qwen2.5-coder:14b"
+    local_review_model_supports_tools: bool = True
+    """Локальная модель умеет вызывать инструменты.
+
+    От этого зависит, доступен ли агентный режим ревью: без вызовов инструментов
+    он вырождается в одноразовый проход. Признак задаётся здесь, а не выясняется
+    у сервера: локальные сборки на неподдерживаемое поле отвечают по-разному.
+    """
+
     cloud_review_model: str = "anthropic/claude-sonnet-5"
     llm_timeout_seconds: float = 180.0
     llm_cache_ttl_seconds: int = 7 * 24 * 3600

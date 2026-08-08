@@ -33,6 +33,7 @@ def build_model_router(
     cloud_model: str,
     cloud_api_key: str,
     cloud_enabled: bool,
+    local_supports_tools: bool = True,
 ) -> ModelRouter:
     """Собирает роутер.
 
@@ -45,6 +46,7 @@ def build_model_router(
         provider=local_provider,
         api_base=local_base_url,
         api_key=local_api_key or None,
+        supports_tools=local_supports_tools,
     )
     cloud_choice = (
         ModelChoice(model=cloud_model, provider="anthropic", api_key=cloud_api_key)
@@ -70,6 +72,7 @@ def build_code_reviewers(
     cloud_enabled: bool,
     cache_ttl_seconds: int,
     timeout_seconds: float,
+    local_supports_tools: bool = True,
     kinds: Iterable[ReviewerKind] = ReviewerKind,
 ) -> tuple[LlmCodeReviewer, ...]:
     """Собирает набор ревьюеров целиком.
@@ -92,6 +95,7 @@ def build_code_reviewers(
         cloud_model=cloud_model,
         cloud_api_key=cloud_api_key,
         cloud_enabled=cloud_enabled,
+        local_supports_tools=local_supports_tools,
     )
     cache = (
         RedisResponseCache(redis_client, ttl_seconds=cache_ttl_seconds)

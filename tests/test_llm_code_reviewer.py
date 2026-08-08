@@ -1,4 +1,7 @@
 import json
+from collections.abc import (
+    Sequence,
+)
 from typing import (
     Any,
 )
@@ -19,6 +22,7 @@ from ducktective.core.llm.value_objects import (
     LlmResponse,
     LlmUsage,
     ModelRequirements,
+    ToolSpec,
 )
 from ducktective.core.review.drafts import (
     FindingDraft,
@@ -211,6 +215,7 @@ class FlakyLlmClient:
         *,
         requirements: ModelRequirements,
         json_schema: dict[str, Any] | None = None,
+        tools: Sequence[ToolSpec] | None = None,
     ) -> LlmResponse:
         self.calls.append(messages)
         content = (

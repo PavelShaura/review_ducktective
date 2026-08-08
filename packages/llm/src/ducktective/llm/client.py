@@ -1,6 +1,9 @@
 import asyncio
 import re
 import time
+from collections.abc import (
+    Sequence,
+)
 from typing import (
     Any,
 )
@@ -26,8 +29,11 @@ from ducktective.core.llm.ports import (
 from ducktective.core.llm.value_objects import (
     LlmMessage,
     LlmResponse,
+    LlmRole,
     LlmUsage,
     ModelRequirements,
+    ToolCall,
+    ToolSpec,
 )
 from ducktective.llm.cache import (
     build_cache_key,
@@ -79,6 +85,7 @@ class LiteLlmClient:
         *,
         requirements: ModelRequirements,
         json_schema: dict[str, Any] | None = None,
+        tools: Sequence[ToolSpec] | None = None,
     ) -> LlmResponse:
         """Ответ модели, по возможности из кэша.
 
@@ -92,6 +99,7 @@ class LiteLlmClient:
             messages=messages,
             requirements=requirements,
             prompt_version=self._prompt_version,
+            tools=tools,
         )
 
         if self._cache is not None:
@@ -99,7 +107,7 @@ class LiteLlmClient:
             if cached is not None:
                 return cached
 
-        response = await self._invoke(choice, messages, requirements, json_schema)
+        response = await self._invoke(choice, messages, requirements, json_schema, tools)
 
         if self._cache is not None and not response.is_truncated:
             await self._cache.put(cache_key, response)
@@ -111,12 +119,11 @@ class LiteLlmClient:
         messages: list[LlmMessage],
         requirements: ModelRequirements,
         json_schema: dict[str, Any] | None,
+        tools: Sequence[ToolSpec] | None = None,
     ) -> LlmResponse:
         payload: dict[str, Any] = {
             "model": choice.model,
-            "messages": [
-                {"role": message.role.value, "content": message.content} for message in messages
-            ],
+            "messages": [_to_wire(message) for message in messages],
             "temperature": requirements.temperature,
             "max_tokens": requirements.max_output_tokens,
             "timeout": self._timeout_seconds,
@@ -125,6 +132,8 @@ class LiteLlmClient:
             payload["api_base"] = choice.api_base
         if choice.api_key:
             payload["api_key"] = choice.api_key
+        if tools:
+            payload["tools"] = [_tool_to_wire(tool) for tool in tools]
         if json_schema is not None:
             payload["response_format"] = {
                 "type": "json_schema",
@@ -183,6 +192,66 @@ class LiteLlmClient:
         )
 
 
+def _to_wire(message: LlmMessage) -> dict[str, Any]:
+    """Переводит сообщение в формат протокола.
+
+    Ответ ассистента с вызовами приходится возвращать модели тем же составом,
+    каким она его прислала: провайдер сверяет пары «вызов — результат» и
+    отвергает диалог, где результат отвечает на вызов, которого в переписке
+    нет.
+    """
+    wire: dict[str, Any] = {"role": message.role.value, "content": message.content}
+
+    if message.tool_calls:
+        wire["tool_calls"] = [
+            {
+                "id": call.id,
+                "type": "function",
+                "function": {"name": call.name, "arguments": call.arguments},
+            }
+            for call in message.tool_calls
+        ]
+
+    if message.role is LlmRole.TOOL and message.tool_call_id is not None:
+        wire["tool_call_id"] = message.tool_call_id
+
+    return wire
+
+
+def _tool_to_wire(tool: ToolSpec) -> dict[str, Any]:
+    return {
+        "type": "function",
+        "function": {
+            "name": tool.name,
+            "description": tool.description,
+            "parameters": tool.parameters,
+        },
+    }
+
+
+def _read_tool_calls(message: Any) -> tuple[ToolCall, ...]:
+    """Достаёт вызовы из ответа.
+
+    Аргументы не разбираются: их валидность — забота того, кто исполняет
+    вызов, и неразобранный JSON должен вернуться модели ошибкой, а не
+    уронить обращение к ней.
+    """
+    raw_calls = getattr(message, "tool_calls", None) or ()
+    calls = []
+    for index, raw in enumerate(raw_calls):
+        function = getattr(raw, "function", None)
+        if function is None:
+            continue
+        calls.append(
+            ToolCall(
+                id=getattr(raw, "id", None) or f"call_{index}",
+                name=getattr(function, "name", "") or "",
+                arguments=getattr(function, "arguments", None) or "{}",
+            )
+        )
+    return tuple(calls)
+
+
 def _mentions_context_overflow(text: str) -> bool:
     """Узнаёт переполнение окна по словам сервера.
 
@@ -234,6 +303,7 @@ def _build_response(completion: Any, choice: Any, latency_ms: int) -> LlmRespons
         ),
         latency_ms=latency_ms,
         is_truncated=getattr(choice_data, "finish_reason", None) == "length",
+        tool_calls=_read_tool_calls(choice_data.message),
     )
 
 

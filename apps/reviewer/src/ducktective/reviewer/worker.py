@@ -115,6 +115,7 @@ async def startup(ctx: dict[str, Any]) -> None:
             cloud_enabled=settings.cloud_providers_allowed,
             cache_ttl_seconds=settings.llm_cache_ttl_seconds,
             timeout_seconds=settings.llm_timeout_seconds,
+            local_supports_tools=settings.local_review_model_supports_tools,
         ),
         context_builder=ctx["context_builder"],
         checkpointer=await resources.enter_async_context(
