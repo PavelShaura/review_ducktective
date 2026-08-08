@@ -9,7 +9,9 @@ from langgraph.runtime import (
 
 from ducktective.core.review.verification import (
     build_verified_finding,
+    collect_evidence,
     has_confirmable_evidence,
+    has_proof_of_external_claim,
 )
 from ducktective.review_graph.nodes.reporting import (
     report_stage,
@@ -44,11 +46,26 @@ async def verify(
     findings: list[Finding] = []
     outside_diff = 0
     without_evidence = 0
+    unproven_claim = 0
     duplicates = 0
 
     for item in state.merged:
         if not _covers_changed_lines(item):
             outside_diff += 1
+            continue
+
+        evidence = collect_evidence(
+            item.draft,
+            item.file.to_unified_patch(),
+            item.context,
+            shown=item.shown,
+        )
+        if not evidence:
+            without_evidence += 1
+            continue
+
+        if not has_proof_of_external_claim(item.draft, evidence, shown=item.shown):
+            unproven_claim += 1
             continue
 
         finding = build_verified_finding(
@@ -74,15 +91,46 @@ async def verify(
 
     await report_stage(
         runtime,
-        f"Проверяю доказательства: подтверждено {len(findings)}, "
-        f"отброшено {outside_diff + without_evidence + duplicates}",
+        _describe_verification(
+            confirmed=len(findings),
+            outside_diff=outside_diff,
+            without_evidence=without_evidence,
+            unproven_claim=unproven_claim,
+            duplicates=duplicates,
+        ),
     )
     return {
         "findings": tuple(findings),
         "discarded_outside_diff": outside_diff,
         "discarded_without_evidence": without_evidence,
+        "discarded_unproven_claim": unproven_claim,
         "discarded_as_duplicate": duplicates,
     }
+
+
+def _describe_verification(
+    *,
+    confirmed: int,
+    outside_diff: int,
+    without_evidence: int,
+    unproven_claim: int,
+    duplicates: int,
+) -> str:
+    """Итог проверки с разбивкой по причинам.
+
+    Общее «отброшено 24» не говорит, что чинить: цитата мимо кода лечится
+    промптом, находка вне диффа — привязкой строк, дубли не лечатся вовсе.
+    """
+    reasons = [
+        (outside_diff, "вне диффа"),
+        (without_evidence, "без цитаты"),
+        (unproven_claim, "без проверки чужого кода"),
+        (duplicates, "дубли"),
+    ]
+    named = ", ".join(f"{name} {count}" for count, name in reasons if count)
+    if not named:
+        return f"Проверяю доказательства: подтверждено {confirmed}, отброшенных нет"
+    return f"Проверяю доказательства: подтверждено {confirmed}, отброшено — {named}"
 
 
 def _covers_changed_lines(item: MergedDraft) -> bool:

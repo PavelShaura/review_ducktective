@@ -37,6 +37,27 @@ from ducktective.core.types import (
 
 WHITESPACE = " \t\r\n"
 
+EXTERNAL_CLAIM_MARKERS = (
+    "вызыва",
+    "все места",
+    "остальные места",
+    "другие места",
+    "caller",
+    "во всём проекте",
+    "по всему проекту",
+    "нигде больше",
+    "принято в проекте",
+    "в остальном коде",
+    "соседн",
+)
+"""Слова, которыми находка говорит о коде за пределами диффа.
+
+Перечень грубый и намеренно короткий: он ловит утверждение, которое нельзя
+сделать по одному патчу, — «сломает вызывающих», «все места нужно обновить»,
+«в проекте так не принято». Проверять такое утверждение нечем, кроме того,
+что ревьюеру показали.
+"""
+
 
 @dataclass(frozen=True, kw_only=True)
 class _EvidenceSource:
@@ -66,6 +87,9 @@ def build_verified_finding(
     """
     evidence = collect_evidence(draft, file.to_unified_patch(), context, shown=shown)
     if not evidence:
+        return None
+
+    if not has_proof_of_external_claim(draft, evidence, shown=shown):
         return None
 
     return Finding(
@@ -142,6 +166,45 @@ def collect_evidence(
     return confirmed
 
 
+def mentions_external_code(title: str, body: str) -> bool:
+    """Говорит ли текст о коде за пределами показанного патча.
+
+    Принимает текст, а не черновик: то же самое спрашивает агентный цикл
+    у ещё не разобранного ответа модели, где черновика пока нет.
+    """
+    return any(marker in f"{title} {body}".lower() for marker in EXTERNAL_CLAIM_MARKERS)
+
+
+def claims_external_code(draft: FindingDraft) -> bool:
+    return mentions_external_code(draft.title, draft.body_markdown)
+
+
+def has_proof_of_external_claim(
+    draft: FindingDraft,
+    evidence: list[Evidence],
+    *,
+    shown: Sequence[CodeFragment] = (),
+) -> bool:
+    """Смотрел ли ревьюер тот чужой код, о котором говорит.
+
+    «Сломает всех вызывающих» — вывод, которого из патча не сделать: в патче
+    вызывающих нет. Сказать это, не посмотрев их, значит выдать догадку
+    за факт, а инструменты навигации заводились ровно для того, чтобы
+    не гадать (D-021).
+
+    Засчитывается и цитата из окружения, и сам факт, что окружение было
+    показано. Требовать именно цитату оказалось слишком строго: посмотрев
+    вызывающих, модель всё равно цитирует изменённую строку — как и просят
+    остальные правила, — и на живом прогоне 2026-08-08 так потерялись
+    четыре проверенные находки из тридцати.
+    """
+    if not claims_external_code(draft):
+        return True
+    if any(item.kind is EvidenceKind.RETRIEVED_CHUNK for item in evidence):
+        return True
+    return bool(shown)
+
+
 def has_confirmable_evidence(
     draft: FindingDraft,
     file: ReviewFile,
@@ -155,7 +218,8 @@ def has_confirmable_evidence(
     выживать должен тот, что переживёт проверку, иначе слияние роняет
     находку вместо дубля.
     """
-    return bool(collect_evidence(draft, file.to_unified_patch(), context, shown=shown))
+    evidence = collect_evidence(draft, file.to_unified_patch(), context, shown=shown)
+    return bool(evidence) and has_proof_of_external_claim(draft, evidence, shown=shown)
 
 
 def _evidence_sources(

@@ -124,6 +124,8 @@ def render_outcome_notes(console: Console, outcome: ReviewOutcome) -> None:
         parts.append(f"вне диффа {outcome.discarded_outside_diff}")
     if outcome.discarded_without_evidence:
         parts.append(f"без цитаты {outcome.discarded_without_evidence}")
+    if outcome.discarded_unproven_claim:
+        parts.append(f"без проверки чужого кода {outcome.discarded_unproven_claim}")
     if outcome.discarded_as_duplicate:
         parts.append(f"повторов {outcome.discarded_as_duplicate}")
     if outcome.failed_files:

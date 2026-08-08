@@ -644,7 +644,7 @@ class _EvalNavigation:
     repository_id: RepositoryId | None = None
     repository_path: Path | None = None
     revision: CommitSha | None = None
-    index_ready: bool = False
+    index_revision: CommitSha | None = None
 
 
 def _build_pipeline(
@@ -671,7 +671,7 @@ def _build_pipeline(
             repository_id=navigators_for_eval.repository_id,
             repository_path=navigators_for_eval.repository_path,
             revision=navigators_for_eval.revision,
-            index_ready=navigators_for_eval.index_ready,
+            index_revision=navigators_for_eval.index_revision,
         )
 
     return LangGraphReviewPipeline(
@@ -691,7 +691,11 @@ def _eval_navigation(
         return None
 
     if indexed_repository_id is not None:
-        return _EvalNavigation(repository_id=indexed_repository_id, index_ready=True)
+        return _EvalNavigation(
+            repository_id=indexed_repository_id,
+            revision=CommitSha("HEAD"),
+            index_revision=CommitSha("HEAD"),
+        )
 
     return _EvalNavigation(
         repository_path=arguments.repository.resolve(),

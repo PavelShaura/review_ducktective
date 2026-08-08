@@ -69,6 +69,44 @@ class FileReviewResult:
     """
 
 
+class CancellationCheck(Protocol):
+    """Спрашивает, не попросили ли прекратить расследование.
+
+    Конвейер отвечает за то, когда спросить, а use case — за то, где хранится
+    ответ. Прервать сам запрос к модели нечем, поэтому проверка имеет смысл
+    только между файлами.
+    """
+
+    async def __call__(self) -> bool: ...
+
+
+@dataclass(frozen=True, kw_only=True)
+class ReviewSupport:
+    """То, что ревьюер получает от прогона на время чтения одного файла.
+
+    Собрано в один объект, потому что все три вещи приходят из одного места
+    и живут ровно столько, сколько прогон: инструменты его репозитория и
+    ревизии, лента его расследования и его же просьба прекратить. Ревьюер
+    при этом собирается один раз на приложение и ни о чём из этого заранее
+    не знает.
+    """
+
+    navigator: CodeNavigator | None = None
+    sink: InvestigationSink | None = None
+    cancellation: CancellationCheck | None = None
+
+    async def stop_requested(self) -> bool:
+        """Просили ли прекратить.
+
+        Спрашивается изнутри чтения файла, а не только между файлами: агентный
+        цикл обращается к модели до шести раз, и на локальной модели это
+        десяток минут, в течение которых нажатое «прекратить» ничего не делало.
+        """
+        if self.cancellation is None:
+            return False
+        return await self.cancellation()
+
+
 class CodeReviewer(Protocol):
     """Ревьюер одного файла. Реализация решает, чем именно он думает."""
 
@@ -81,15 +119,13 @@ class CodeReviewer(Protocol):
         patch_text: str,
         requirements: ModelRequirements,
         context: DiffContext | None = None,
-        navigator: CodeNavigator | None = None,
-        sink: InvestigationSink | None = None,
+        support: ReviewSupport | None = None,
     ) -> FileReviewResult:
         """Читает файл и возвращает черновики находок.
 
-        Навигатор и слушатель хода приходят вызовом, а не конструктором: оба
-        привязаны к прогону — к его репозиторию, ревизии и ленте, — а ревьюер
-        собирается один раз на приложение. Реализация, которой они не нужны,
-        их игнорирует.
+        Поддержка прогона приходит вызовом, а не конструктором: она привязана
+        к прогону, а ревьюер собран на приложение. Реализация, которой она
+        не нужна, её игнорирует.
         """
         ...
 
@@ -104,17 +140,6 @@ class ReviewNavigators(Protocol):
     """
 
     def for_request(self, request: PipelineRequest) -> CodeNavigator | None: ...
-
-
-class CancellationCheck(Protocol):
-    """Спрашивает, не попросили ли прекратить расследование.
-
-    Конвейер отвечает за то, когда спросить, а use case — за то, где хранится
-    ответ. Прервать сам запрос к модели нечем, поэтому проверка имеет смысл
-    только между файлами.
-    """
-
-    async def __call__(self) -> bool: ...
 
 
 class ReviewPipeline(Protocol):

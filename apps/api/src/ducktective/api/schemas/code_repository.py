@@ -13,6 +13,9 @@ from pydantic import (
     Field,
 )
 
+from ducktective.application.code_repository.resolve_revision import (
+    ResolvedRevisionView,
+)
 from ducktective.core.code_repository.entities import (
     CodeRepository,
 )
@@ -55,4 +58,20 @@ class RepositoryResponse(BaseModel):
             local_path=repository.local_path,
             egress_policy=repository.egress_policy,
             created_at=repository.created_at,
+        )
+
+
+class ResolvedRevisionResponse(BaseModel):
+    """Ссылка на ревизию вместе с коммитом, в который она разрешилась."""
+
+    revision: str
+    commit_sha: str
+    subject: str | None
+
+    @classmethod
+    def from_view(cls, view: ResolvedRevisionView) -> "ResolvedRevisionResponse":
+        return cls(
+            revision=view.revision,
+            commit_sha=str(view.commit_sha),
+            subject=view.subject,
         )

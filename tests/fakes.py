@@ -33,7 +33,8 @@ from ducktective.core.llm.value_objects import (
 from ducktective.core.retrieval.context import (
     DiffContext,
 )
-from ducktective.core.retrieval.navigation import (
+from ducktective.core.retrieval.navigation import (  # noqa: TC001
+    CodeFragment,
     CodeNavigator,
 )
 from ducktective.core.retrieval.ports import (
@@ -48,12 +49,12 @@ from ducktective.core.review.entities import (
     ReviewRun,
 )
 from ducktective.core.review.investigation import (
-    InvestigationSink,
     InvestigationStep,
     RecordedStep,
 )
 from ducktective.core.review.ports import (
     FileReviewResult,
+    ReviewSupport,
 )
 from ducktective.core.types import (
     CodeSymbolId,
@@ -233,6 +234,7 @@ class FakeCodeReviewer:
         self.seen_contexts: list[DiffContext | None] = []
         self.seen_requirements: list[ModelRequirements] = []
         self.seen_navigators: list[CodeNavigator | None] = []
+        self.shown: tuple[CodeFragment, ...] = ()
 
     async def review_file(
         self,
@@ -241,10 +243,9 @@ class FakeCodeReviewer:
         patch_text: str,
         requirements: ModelRequirements,
         context: DiffContext | None = None,
-        navigator: CodeNavigator | None = None,
-        sink: InvestigationSink | None = None,
+        support: ReviewSupport | None = None,
     ) -> FileReviewResult:
-        self.seen_navigators.append(navigator)
+        self.seen_navigators.append(support.navigator if support else None)
         if file.path in self.failing_paths:
             raise LlmUnavailableError(
                 f"Модель недоступна для {file.path}",
@@ -258,6 +259,7 @@ class FakeCodeReviewer:
             drafts=self.drafts_by_path.get(file.path, []),
             usage=LlmUsage(input_tokens=100, output_tokens=25),
             model="fake-model",
+            shown=self.shown,
         )
 
 

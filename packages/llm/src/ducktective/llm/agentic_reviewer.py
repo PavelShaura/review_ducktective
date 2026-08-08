@@ -3,6 +3,7 @@ import time
 from ducktective.core.exceptions import (
     LlmContextOverflowError,
     LlmOutputError,
+    ReviewInterruptedError,
 )
 from ducktective.core.llm.ports import (
     LlmClient,
@@ -35,13 +36,18 @@ from ducktective.core.review.investigation import (
 from ducktective.core.review.ports import (
     CodeReviewer,
     FileReviewResult,
+    ReviewSupport,
 )
 from ducktective.core.review.reviewers import (
     ReviewMode,
     reviewer_name,
 )
+from ducktective.core.review.verification import (
+    mentions_external_code,
+)
 from ducktective.llm.code_reviewer import (
     build_user_message,
+    describe_findings,
     parse_payload,
     system_prompt,
     to_draft,
@@ -72,6 +78,20 @@ TRUNCATED_CALLS_MESSAGE = (
 FINAL_INSTRUCTION = (
     "Stop investigating and answer now. Return the JSON object with your findings and nothing else."
 )
+
+UNPROVEN_CLAIM_MESSAGE = (
+    "Your answer claims something about code outside the diff — callers, contracts or "
+    "project conventions — but you have not looked at that code. Call the tool that checks "
+    "it and answer again. If you cannot check it, drop the claim or lower its severity."
+)
+
+UNPROVEN_CLAIM_NOTE = "Ответ говорит о чужом коде — прошу сперва посмотреть его инструментом"
+"""Как переспрос выглядит в ленте.
+
+Модели уходит английский текст, человеку показывается русская строка и вид
+«этап»: это реплика конвейера, а не мысль модели, и выдавать её за мысль
+значит приписывать модели наши слова.
+"""
 
 
 class AgenticCodeReviewer:
@@ -115,10 +135,11 @@ class AgenticCodeReviewer:
         patch_text: str,
         requirements: ModelRequirements,
         context: DiffContext | None = None,
-        navigator: CodeNavigator | None = None,
-        sink: InvestigationSink | None = None,
+        support: ReviewSupport | None = None,
     ) -> FileReviewResult:
-        listener = sink or self._sink
+        run = support or ReviewSupport()
+        listener = run.sink or self._sink
+        navigator = run.navigator
 
         if navigator is None:
             return await self._fall_back(
@@ -138,6 +159,7 @@ class AgenticCodeReviewer:
                 context=context,
                 navigator=navigator,
                 listener=listener,
+                support=run,
             )
         except LlmContextOverflowError as error:
             return await self._fall_back(
@@ -167,6 +189,7 @@ class AgenticCodeReviewer:
         context: DiffContext | None,
         navigator: CodeNavigator,
         listener: InvestigationSink,
+        support: ReviewSupport,
     ) -> FileReviewResult:
         toolbox = NavigationToolbox(navigator)
         tool_requirements = _with_tool_calling(requirements)
@@ -179,8 +202,19 @@ class AgenticCodeReviewer:
         shown: list[CodeFragment] = []
         step = 0
         model = ""
+        nudged = False
 
-        for _ in range(self._max_steps):
+        for attempt in range(1, self._max_steps + 1):
+            if await support.stop_requested():
+                raise ReviewInterruptedError("Расследование прекращено")
+
+            await self._record(
+                listener,
+                file,
+                step,
+                StepKind.STAGE,
+                f"Спрашиваю модель, обращение {attempt} из {self._max_steps}",
+            )
             response = await self._llm_client.complete(
                 messages,
                 requirements=tool_requirements,
@@ -198,22 +232,40 @@ class AgenticCodeReviewer:
                         LlmMessage(role=LlmRole.USER, content=TRUNCATED_CALLS_MESSAGE),
                     ]
                 )
-                await self._record(listener, file, step, StepKind.THOUGHT, TRUNCATED_CALLS_MESSAGE)
+                await self._record(
+                    listener,
+                    file,
+                    step,
+                    StepKind.STAGE,
+                    "Ответ модели оборвался на лимите — прошу повторить вызов",
+                )
                 continue
 
             if not response.has_tool_calls:
                 answered = _answer_of(response)
-                if answered is not None:
-                    return await self._finish(
-                        file,
-                        answered,
-                        usage,
-                        response.model or model,
-                        step,
-                        shown,
-                        listener,
+                if answered is None:
+                    break
+
+                if not shown and not nudged and _claims_unchecked_code(answered):
+                    nudged = True
+                    messages.extend(
+                        [
+                            _assistant(response),
+                            LlmMessage(role=LlmRole.USER, content=UNPROVEN_CLAIM_MESSAGE),
+                        ]
                     )
-                break
+                    await self._record(listener, file, step, StepKind.STAGE, UNPROVEN_CLAIM_NOTE)
+                    continue
+
+                return await self._finish(
+                    file,
+                    answered,
+                    usage,
+                    response.model or model,
+                    step,
+                    shown,
+                    listener,
+                )
 
             await self._record(listener, file, step, StepKind.THOUGHT, response.content)
             messages.append(_assistant(response))
@@ -298,6 +350,13 @@ class AgenticCodeReviewer:
         на столе, модель вправе попросить ещё вызов, и цикл, у которого шаги
         кончились, получил бы вместо находок очередную просьбу.
         """
+        await self._record(
+            listener,
+            file,
+            step,
+            StepKind.STAGE,
+            "Спрашиваю модель в последний раз: прошу назвать находки",
+        )
         response = await self._llm_client.complete(
             [*messages, LlmMessage(role=LlmRole.USER, content=FINAL_INSTRUCTION)],
             requirements=requirements,
@@ -330,7 +389,7 @@ class AgenticCodeReviewer:
             file,
             step,
             StepKind.ANSWER,
-            f"Файл прочитан, замечаний: {len(payload.findings)}",
+            describe_findings(payload),
         )
         return FileReviewResult(
             drafts=[to_draft(finding, file.path) for finding in payload.findings],
@@ -411,6 +470,16 @@ def _with_tool_calling(requirements: ModelRequirements) -> ModelRequirements:
         max_output_tokens=requirements.max_output_tokens,
         temperature=requirements.temperature,
     )
+
+
+def _claims_unchecked_code(payload: ReviewPayload) -> bool:
+    """Говорит ли ответ о коде, которого ревьюер так и не посмотрел.
+
+    Переспрашивается один раз и только пока ни один инструмент не звали:
+    цена — одно обращение к модели, а без него находка «сломает всех
+    вызывающих» уйдёт в отбраковку целиком, и работа над ней потрачена зря.
+    """
+    return any(mentions_external_code(finding.title, finding.body) for finding in payload.findings)
 
 
 def _answer_of(response: LlmResponse) -> ReviewPayload | None:

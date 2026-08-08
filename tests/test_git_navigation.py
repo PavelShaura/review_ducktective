@@ -79,7 +79,7 @@ async def test_answer_admits_that_the_search_is_lexical(repository: Path) -> Non
 
     assert answer.is_empty
     assert answer.note is not None
-    assert "Индекс не собран" in answer.note
+    assert "Индекса нет" in answer.note
 
 
 async def test_definition_shows_the_body_after_the_signature(repository: Path) -> None:
@@ -104,6 +104,21 @@ async def test_callers_exclude_the_definition_itself(repository: Path) -> None:
     assert answer.fragments
     assert all("def build_total" not in fragment.text for fragment in answer.fragments)
     assert {fragment.path for fragment in answer.fragments} == {"app/report.py", "app/api.py"}
+
+
+async def test_stale_index_is_named_as_the_reason(repository: Path) -> None:
+    """«Индекса нет» и «индекс на другом коммите» — разные новости для модели."""
+    navigator = GitCodeNavigator(
+        repository,
+        "HEAD",
+        git=LocalGitProvider(),
+        reason="индекс собран на другой ревизии (f7f877d5)",
+    )
+
+    answer = await navigator.find_callers("build_total")
+
+    assert answer.note is not None
+    assert "другой ревизии" in answer.note
 
 
 async def test_callers_warn_about_namesakes(repository: Path) -> None:

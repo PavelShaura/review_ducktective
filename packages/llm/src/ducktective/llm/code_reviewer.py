@@ -31,9 +31,6 @@ from ducktective.core.retrieval.context import (
     ContextOrigin,
     DiffContext,
 )
-from ducktective.core.retrieval.navigation import (
-    CodeNavigator,
-)
 from ducktective.core.review.drafts import (
     EvidenceDraft,
     FindingDraft,
@@ -42,12 +39,12 @@ from ducktective.core.review.entities import (
     ReviewFile,
 )
 from ducktective.core.review.investigation import (
-    InvestigationSink,
     InvestigationStep,
     StepKind,
 )
 from ducktective.core.review.ports import (
     FileReviewResult,
+    ReviewSupport,
 )
 from ducktective.core.review.reviewers import (
     ReviewMode,
@@ -158,8 +155,7 @@ class LlmCodeReviewer:
         patch_text: str,
         requirements: ModelRequirements,
         context: DiffContext | None = None,
-        navigator: CodeNavigator | None = None,
-        sink: InvestigationSink | None = None,
+        support: ReviewSupport | None = None,
     ) -> FileReviewResult:
         """Читает файл одним обращением к модели.
 
@@ -174,7 +170,7 @@ class LlmCodeReviewer:
             LlmMessage(role=LlmRole.USER, content=build_user_message(file, patch_text, context)),
         ]
         response, payload = await self._ask(messages, requirements)
-        await _report(sink, file, f"Файл прочитан, замечаний: {len(payload.findings)}")
+        await _report(support, file, describe_findings(payload))
 
         return FileReviewResult(
             drafts=[to_draft(finding, file.path) for finding in payload.findings],
@@ -210,6 +206,24 @@ def _correction(error: LlmOutputError | None) -> LlmMessage:
             "no prose, no markdown fences, no explanation."
         ),
     )
+
+
+def describe_findings(payload: ReviewPayload) -> str:
+    """Что ревьюер сказал по файлу — строкой на каждое замечание.
+
+    Номера строк здесь не украшение: половина замечаний отбраковывается
+    как не относящиеся к изменению, и увидеть, куда именно ревьюер целился,
+    можно только рядом с самим замечанием.
+    """
+    if not payload.findings:
+        return "Файл прочитан, замечаний нет"
+
+    lines = [f"Файл прочитан, замечаний: {len(payload.findings)}"]
+    lines.extend(
+        f"· строка {finding.line_start} [{finding.severity}] {finding.title}"
+        for finding in payload.findings
+    )
+    return "\n".join(lines)
 
 
 def build_user_message(
@@ -333,9 +347,9 @@ def to_draft(payload: FindingPayload, file_path: str) -> FindingDraft:
     )
 
 
-async def _report(sink: InvestigationSink | None, file: ReviewFile, detail: str) -> None:
-    if sink is None:
+async def _report(support: ReviewSupport | None, file: ReviewFile, detail: str) -> None:
+    if support is None or support.sink is None:
         return
-    await sink.record(
+    await support.sink.record(
         InvestigationStep(file_path=file.path, number=1, kind=StepKind.ANSWER, detail=detail)
     )

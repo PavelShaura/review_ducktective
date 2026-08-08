@@ -68,6 +68,7 @@ class ReviewOutcome:
     proposed: int = 0
     discarded_outside_diff: int = 0
     discarded_without_evidence: int = 0
+    discarded_unproven_claim: int = 0
     discarded_as_duplicate: int = 0
     failed_files: tuple[str, ...] = ()
     files_with_context: int = 0
@@ -77,6 +78,7 @@ class ReviewOutcome:
         return (
             self.discarded_outside_diff
             + self.discarded_without_evidence
+            + self.discarded_unproven_claim
             + self.discarded_as_duplicate
         )
 
@@ -147,7 +149,7 @@ class RunReview(TransactionalUseCase):
                 ),
                 head_sha=run.head_sha,
                 repository_path=repository.local_path,
-                index_ready=snapshot is not None,
+                index_revision=snapshot.commit_sha if snapshot is not None else None,
             )
             run.mark_running()
             attempt = run.attempt
@@ -200,6 +202,7 @@ class RunReview(TransactionalUseCase):
                 proposed=result.proposed,
                 discarded_outside_diff=result.discarded_outside_diff,
                 discarded_without_evidence=result.discarded_without_evidence,
+                discarded_unproven_claim=result.discarded_unproven_claim,
                 discarded_as_duplicate=duplicates,
                 failed_files=result.failed_files,
                 files_with_context=result.files_with_context,

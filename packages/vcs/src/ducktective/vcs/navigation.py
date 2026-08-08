@@ -24,15 +24,15 @@ DEFINITION_LINES = 40
 FILE_CONTEXT_MARGIN = 20
 
 DEFINITION_KEYWORDS = ("def", "class", "func", "function", "struct", "interface", "type")
+NO_INDEX_REASON = "индекса нет"
+
 DEFINITION_NOTE = (
-    "Индекс не собран: определение найдено поиском по словам, "
-    "и границы показанного участка приблизительны"
+    "определение найдено поиском по словам, и границы показанного участка приблизительны"
 )
-SEARCH_NOTE = "Индекс не собран: поиск лексический, по совпадению строки в ревизии"
+SEARCH_NOTE = "поиск лексический, по совпадению строки в ревизии"
 CALLERS_NOTE = (
-    "Индекс не собран: вызывающие найдены поиском по имени. "
-    "Однофамильцы из других классов сюда тоже попадают, а вызовы через "
-    "переменную — нет"
+    "вызывающие найдены поиском по имени. Однофамильцы из других классов сюда тоже "
+    "попадают, а вызовы через переменную — нет"
 )
 
 
@@ -57,15 +57,21 @@ class GitCodeNavigator:
         revision: str,
         *,
         git: LocalGitProvider,
+        reason: str = NO_INDEX_REASON,
     ) -> None:
         self._repository_path = repository_path
         self._revision = revision
         self._git = git
+        self._reason = reason
+
+    def _note(self, detail: str) -> str:
+        """Оговорка вместе с причиной, по которой отвечает не индекс."""
+        return f"{self._reason.capitalize()}: {detail}"
 
     async def search_code(self, query: str, *, limit: int = 10) -> NavigationAnswer:
         hits = await self._grep(query, limit=limit)
         if not hits:
-            return NavigationAnswer(source=self.source, note=SEARCH_NOTE)
+            return NavigationAnswer(source=self.source, note=self._note(SEARCH_NOTE))
 
         return NavigationAnswer(
             source=self.source,
@@ -75,7 +81,7 @@ class GitCodeNavigator:
                 after=SEARCH_CONTEXT_LINES,
                 role=FragmentRole.MATCH,
             ),
-            note=SEARCH_NOTE,
+            note=self._note(SEARCH_NOTE),
         )
 
     async def get_definition(self, name: str, *, limit: int = 5) -> NavigationAnswer:
@@ -86,7 +92,7 @@ class GitCodeNavigator:
         if not hits:
             hits = await self._grep(short_name, limit=limit)
         if not hits:
-            return NavigationAnswer(source=self.source, note=DEFINITION_NOTE)
+            return NavigationAnswer(source=self.source, note=self._note(DEFINITION_NOTE))
 
         return NavigationAnswer(
             source=self.source,
@@ -96,7 +102,7 @@ class GitCodeNavigator:
                 after=DEFINITION_LINES,
                 role=FragmentRole.DEFINITION,
             ),
-            note=DEFINITION_NOTE,
+            note=self._note(DEFINITION_NOTE),
         )
 
     async def find_callers(self, name: str, *, limit: int = 20) -> NavigationAnswer:
@@ -105,7 +111,7 @@ class GitCodeNavigator:
         hits = await self._grep(f"{short_name}(", limit=limit)
         callers = [hit for hit in hits if not _is_definition(hit.text, short_name)]
         if not callers:
-            return NavigationAnswer(source=self.source, note=CALLERS_NOTE)
+            return NavigationAnswer(source=self.source, note=self._note(CALLERS_NOTE))
 
         return NavigationAnswer(
             source=self.source,
@@ -115,7 +121,7 @@ class GitCodeNavigator:
                 after=1,
                 role=FragmentRole.CALLER,
             ),
-            note=CALLERS_NOTE,
+            note=self._note(CALLERS_NOTE),
         )
 
     async def get_file_context(
@@ -216,8 +222,14 @@ class GitNavigators:
     def __init__(self, *, git: LocalGitProvider) -> None:
         self._git = git
 
-    def for_revision(self, repository_path: Path, revision: str) -> GitCodeNavigator:
-        return GitCodeNavigator(repository_path, revision, git=self._git)
+    def for_revision(
+        self,
+        repository_path: Path,
+        revision: str,
+        *,
+        reason: str = NO_INDEX_REASON,
+    ) -> GitCodeNavigator:
+        return GitCodeNavigator(repository_path, revision, git=self._git, reason=reason)
 
 
 def _window(

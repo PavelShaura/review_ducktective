@@ -241,6 +241,7 @@ async def run_review_task(
         proposed=outcome.proposed,
         discarded_outside_diff=outcome.discarded_outside_diff,
         discarded_without_evidence=outcome.discarded_without_evidence,
+        discarded_unproven_claim=outcome.discarded_unproven_claim,
         discarded_as_duplicate=outcome.discarded_as_duplicate,
         failed_files=len(outcome.failed_files),
         tokens_input=run.tokens_input,

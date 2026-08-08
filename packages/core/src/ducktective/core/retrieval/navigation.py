@@ -142,7 +142,20 @@ class GitNavigatorFactory(Protocol):
     у git нет идентификатора из нашей базы, у него есть путь и ревизия.
     """
 
-    def for_revision(self, repository_path: Path, revision: str) -> CodeNavigator: ...
+    def for_revision(
+        self,
+        repository_path: Path,
+        revision: str,
+        *,
+        reason: str = "",
+    ) -> CodeNavigator:
+        """Навигатор по ревизии; `reason` объясняет, почему не индекс.
+
+        Причина едет в ответы инструментов: «индекса нет» и «индекс собран
+        на другом коммите» — разные новости, и для модели вторая означает,
+        что структурные связи существуют, просто отсюда не видны.
+        """
+        ...
 
 
 def clip_code(text: str, limit: int = MAX_FRAGMENT_CHARS) -> str:

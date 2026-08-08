@@ -145,13 +145,13 @@ class EvalNavigators:
         repository_id: RepositoryId | None = None,
         repository_path: Path | None = None,
         revision: CommitSha | None = None,
-        index_ready: bool = False,
+        index_revision: CommitSha | None = None,
     ) -> None:
         self._inner = inner
         self._repository_id = repository_id
         self._repository_path = repository_path
         self._revision = revision
-        self._index_ready = index_ready
+        self._index_revision = index_revision
 
     def for_request(self, request: PipelineRequest) -> CodeNavigator | None:
         return self._inner.for_request(
@@ -160,7 +160,7 @@ class EvalNavigators:
                 repository_id=self._repository_id or request.repository_id,
                 repository_path=self._repository_path,
                 head_sha=self._revision,
-                index_ready=self._index_ready,
+                index_revision=self._index_revision,
             )
         )
 

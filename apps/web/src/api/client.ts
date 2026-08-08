@@ -8,6 +8,7 @@ import type {
   IndexState,
   Investigation,
   Repository,
+  ResolvedRevision,
   ReviewRun,
   ReviewRunSummary,
 } from "@/api/types";
@@ -113,6 +114,12 @@ export const api = {
 
   getIndexState: (repositoryId: string) =>
     request<IndexState>(`/repositories/${repositoryId}/index?tenant_id=${TENANT_ID}`),
+
+  resolveRevision: (repositoryId: string, revision: string) =>
+    request<ResolvedRevision>(
+      `/repositories/${repositoryId}/revision?tenant_id=${TENANT_ID}` +
+        `&revision=${encodeURIComponent(revision)}`,
+    ),
 
   startIndexing: (repositoryId: string, revision = "HEAD") =>
     request<{ queued: boolean; revision: string }>(`/repositories/${repositoryId}/index`, {

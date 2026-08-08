@@ -24,6 +24,10 @@ from ducktective.core.review.degradation import (
 from ducktective.core.review.entities import (
     ReviewFile,
 )
+from ducktective.core.review.reviewers import (
+    ReviewMode,
+    review_mode_of,
+)
 from ducktective.core.types import (
     RepositoryId,
 )
@@ -65,26 +69,25 @@ def build_context_node(
         contexts: dict[str, DiffContext] = {}
         degradations: list[NodeDegradation] = []
         files_with_context = 0
-        total = len(state.request.files)
+        awaiting = _files_awaiting_context(state)
+        total = len(awaiting)
 
-        await report_stage(
-            runtime,
-            f"Собираю окружение изменений: файлов {total}"
-            if context_builder is not None
-            else f"Индекса нет — читаю по одному диффу: файлов {total}",
-        )
+        if context_builder is None or not awaiting:
+            await report_stage(runtime, _describe_skip(state, context_builder is None))
+            return {"contexts": contexts, "files_with_context": 0, "degradations": degradations}
 
-        for position, file in enumerate(state.request.files, start=1):
+        await report_stage(runtime, f"Собираю окружение изменений: файлов {total}")
+
+        for position, file in enumerate(awaiting, start=1):
             if await is_cancelled(runtime):
                 raise ReviewInterruptedError("Расследование прекращено")
 
-            if context_builder is not None:
-                await report_stage(
-                    runtime,
-                    f"Окружение {position} из {total}: {file.path}",
-                    file_path=file.path,
-                    number=position,
-                )
+            await report_stage(
+                runtime,
+                f"Окружение {position} из {total}: {file.path}",
+                file_path=file.path,
+                number=position,
+            )
 
             context, failure = await _safely_build(
                 context_builder,
@@ -107,6 +110,26 @@ def build_context_node(
         }
 
     return build_context
+
+
+def _files_awaiting_context(state: ReviewGraphState) -> list[ReviewFile]:
+    """Файлы, которым окружение действительно нужно.
+
+    Агент добывает его сам и по своему выбору; собранное заранее он видит как
+    достаточное и перестаёт спрашивать. Одноразовый проход, наоборот, кроме
+    показанного не увидит ничего.
+    """
+    return [
+        task.file
+        for task in state.tasks
+        if review_mode_of(task.reviewer_name) is not ReviewMode.AGENTIC
+    ]
+
+
+def _describe_skip(state: ReviewGraphState, without_builder: bool) -> str:
+    if without_builder:
+        return f"Индекса нет — читаю по одному диффу: файлов {len(state.request.files)}"
+    return "Окружение заранее не нужно: файлы расследуются с инструментами"
 
 
 async def _safely_build(

@@ -130,6 +130,7 @@ class LangGraphReviewPipeline:
             proposed=state.proposed,
             discarded_outside_diff=state.discarded_outside_diff,
             discarded_without_evidence=state.discarded_without_evidence,
+            discarded_unproven_claim=state.discarded_unproven_claim,
             discarded_as_duplicate=state.discarded_as_duplicate,
             degradations=(*state.degradations, *review_failures),
             failed_files=_failure_reasons(review_failures),
@@ -138,7 +139,7 @@ class LangGraphReviewPipeline:
                     {mark.file_path for mark in review_failures if mark.file_path not in read_paths}
                 )
             ),
-            files_with_context=state.files_with_context,
+            files_with_context=_files_with_context(state),
             reviewed_files=len(read_paths),
         )
 
@@ -192,6 +193,18 @@ class LangGraphReviewPipeline:
             "max_concurrency": self._max_concurrent_reviews,
             "configurable": {"thread_id": str(request.run_id)},
         }
+
+
+def _files_with_context(state: ReviewGraphState) -> int:
+    """Сколько файлов ревьюер читал не по одному диффу.
+
+    Считаются оба способа: собранное заранее окружение и то, что ревьюер
+    добыл инструментами. Иначе агентный прогон, весь прошедший по индексу,
+    отчитывался «без индекса · только дифф» — метка мерила способ, которым
+    окружение получено, а сказать должна была, было ли оно вообще.
+    """
+    shown_paths = {item.file.path for item in state.results if item.shown}
+    return max(state.files_with_context, len(shown_paths))
 
 
 def _failure_reasons(marks: tuple[NodeDegradation, ...]) -> tuple[str, ...]:

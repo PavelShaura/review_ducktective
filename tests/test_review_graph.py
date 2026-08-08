@@ -1,6 +1,12 @@
 from collections.abc import (
     Callable,
 )
+from dataclasses import (
+    replace,
+)
+from pathlib import (
+    Path,
+)
 from types import (
     SimpleNamespace,
 )
@@ -30,7 +36,8 @@ from ducktective.core.retrieval.context import (
     DiffContext,
 )
 from ducktective.core.retrieval.navigation import (
-    CodeNavigator,
+    CodeFragment,
+    FragmentRole,
 )
 from ducktective.core.review.degradation import (
     DegradationKind,
@@ -44,15 +51,13 @@ from ducktective.core.review.entities import (
     ReviewFile,
     ReviewRun,
 )
-from ducktective.core.review.investigation import (
-    InvestigationSink,
-)
 from ducktective.core.review.pipeline import (
     PipelineRequest,
 )
 from ducktective.core.review.ports import (
     CancellationCheck,
     FileReviewResult,
+    ReviewSupport,
 )
 from ducktective.core.review.value_objects import (
     FindingCategory,
@@ -70,6 +75,9 @@ from ducktective.review_graph import (
 )
 from ducktective.review_graph.checkpointing import (
     build_serializer,
+)
+from ducktective.review_graph.navigators import (
+    RequestNavigators,
 )
 from ducktective.vcs.diff_parser import (
     UnifiedDiffParser,
@@ -194,6 +202,95 @@ async def test_plan_falls_back_to_one_pass_on_a_large_file() -> None:
     assert sorted(single_pass.reviewed_paths) == [HELPERS_FILE, SERVICE_FILE]
 
 
+async def test_claim_about_callers_without_looking_is_discarded() -> None:
+    """«Сломает вызывающих» без единого взгляда на них — догадка (D-021)."""
+    guessed = FindingDraft(
+        file_path=SERVICE_FILE,
+        line_start=CHANGED_LINE,
+        line_end=CHANGED_LINE,
+        side=DiffSide.NEW,
+        severity=Severity.MAJOR,
+        category=FindingCategory.CORRECTNESS,
+        title="Ломает контракт",
+        body_markdown="Все места вызова должны быть обновлены",
+        code_fragment=QUOTED_LINE,
+        evidence=[EvidenceDraft(file_path=SERVICE_FILE, snippet=QUOTED_LINE)],
+    )
+    pipeline = LangGraphReviewPipeline([FakeCodeReviewer({SERVICE_FILE: [guessed]})])
+
+    outcome = await pipeline.run(build_request())
+
+    assert outcome.findings == ()
+    assert outcome.discarded_unproven_claim == 1
+    assert outcome.discarded_without_evidence == 0
+
+
+async def test_claim_survives_when_the_code_was_looked_at() -> None:
+    """Посмотрев вызывающих, модель всё равно цитирует изменённую строку."""
+    guessed = FindingDraft(
+        file_path=SERVICE_FILE,
+        line_start=CHANGED_LINE,
+        line_end=CHANGED_LINE,
+        side=DiffSide.NEW,
+        severity=Severity.MAJOR,
+        category=FindingCategory.CORRECTNESS,
+        title="Ломает контракт",
+        body_markdown="Вызывающий не ждёт None",
+        code_fragment=QUOTED_LINE,
+        evidence=[EvidenceDraft(file_path=SERVICE_FILE, snippet=QUOTED_LINE)],
+    )
+    reviewer = FakeCodeReviewer({SERVICE_FILE: [guessed]})
+    reviewer.shown = (
+        CodeFragment(
+            path="app/api.py",
+            start_line=5,
+            end_line=6,
+            text="def handler():\n    builder.build()",
+            role=FragmentRole.CALLER,
+        ),
+    )
+
+    outcome = await LangGraphReviewPipeline([reviewer]).run(build_request())
+
+    assert len(outcome.findings) == 1
+    assert outcome.discarded_unproven_claim == 0
+
+
+async def test_claim_backed_by_shown_code_survives() -> None:
+    """Та же находка проходит, когда вызывающий действительно был показан."""
+    proven = FindingDraft(
+        file_path=SERVICE_FILE,
+        line_start=CHANGED_LINE,
+        line_end=CHANGED_LINE,
+        side=DiffSide.NEW,
+        severity=Severity.MAJOR,
+        category=FindingCategory.CORRECTNESS,
+        title="Ломает контракт",
+        body_markdown="Вызывающий не ждёт None",
+        code_fragment=QUOTED_LINE,
+        evidence=[
+            EvidenceDraft(file_path=SERVICE_FILE, snippet=QUOTED_LINE),
+            EvidenceDraft(file_path="app/api.py", snippet="builder.build()"),
+        ],
+    )
+    reviewer = FakeCodeReviewer({SERVICE_FILE: [proven]})
+    reviewer.shown = (
+        CodeFragment(
+            path="app/api.py",
+            start_line=5,
+            end_line=6,
+            text="def handler():\n    builder.build()",
+            role=FragmentRole.CALLER,
+        ),
+    )
+    pipeline = LangGraphReviewPipeline([reviewer])
+
+    outcome = await pipeline.run(build_request())
+
+    assert len(outcome.findings) == 1
+    assert outcome.discarded_unproven_claim == 0
+
+
 async def test_stages_reach_the_log_before_the_first_model_call() -> None:
     """Лента молчала первые минуты — столько собирается окружение (D3)."""
     reviewer = FakeCodeReviewer({SERVICE_FILE: [build_draft()]})
@@ -216,6 +313,25 @@ async def test_stages_reach_the_log_before_the_first_model_call() -> None:
     assert any("План:" in line for line in stages)
     assert any("Свожу черновики" in line for line in stages)
     assert any("Проверяю доказательства" in line for line in stages)
+
+
+async def test_stale_index_is_not_used_for_navigation() -> None:
+    """Индекс с другого коммита отвечает про другой код — хуже, чем никакого."""
+    by_index: Any = object()
+    by_git: Any = object()
+    navigators = RequestNavigators(
+        indexed=SimpleNamespace(for_repository=lambda repository_id: by_index),
+        git=SimpleNamespace(for_revision=lambda path, revision, reason="": by_git),
+    )
+    request = replace(
+        build_request(),
+        head_sha=CommitSha("b" * 40),
+        repository_path=Path("/repos/ssuz"),
+        index_revision=CommitSha("f" * 40),
+    )
+
+    assert navigators.for_request(request) is by_git
+    assert navigators.for_request(replace(request, index_revision=CommitSha("b" * 40))) is by_index
 
 
 async def test_navigator_of_the_run_reaches_the_reviewer() -> None:
@@ -588,8 +704,7 @@ class RecordingReviewer(FakeCodeReviewer):
         patch_text: str,
         requirements: ModelRequirements,
         context: DiffContext | None = None,
-        navigator: CodeNavigator | None = None,
-        sink: InvestigationSink | None = None,
+        support: ReviewSupport | None = None,
     ) -> FileReviewResult:
         self.asked.append(
             (file.path, self.name, patch_text, () if context is None else context.pieces)

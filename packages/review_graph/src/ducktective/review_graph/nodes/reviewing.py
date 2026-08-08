@@ -21,6 +21,7 @@ from ducktective.core.review.degradation import (
 )
 from ducktective.core.review.ports import (
     CodeReviewer,
+    ReviewSupport,
 )
 from ducktective.core.review.reviewers import (
     ReviewMode,
@@ -81,8 +82,11 @@ def review_node(
                 patch_text=state.file.to_unified_patch(),
                 requirements=state.requirements,
                 context=state.context,
-                navigator=runtime.context.navigator,
-                sink=runtime.context.sink,
+                support=ReviewSupport(
+                    navigator=runtime.context.navigator,
+                    sink=runtime.context.sink,
+                    cancellation=runtime.context.cancellation,
+                ),
             )
         except DomainError as error:
             return _results(
@@ -103,6 +107,7 @@ def review_node(
             FileDrafts(
                 **_common(state),
                 drafts=tuple(outcome.drafts),
+                shown=outcome.shown,
                 usage=outcome.usage,
             )
         )

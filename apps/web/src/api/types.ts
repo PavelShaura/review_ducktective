@@ -246,3 +246,9 @@ export interface Investigation {
   steps: InvestigationStep[];
   next_cursor: number;
 }
+
+export interface ResolvedRevision {
+  revision: string;
+  commit_sha: string;
+  subject: string | null;
+}

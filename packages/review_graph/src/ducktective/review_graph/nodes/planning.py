@@ -36,7 +36,11 @@ from ducktective.review_graph.state import (
 def plan_review_node(
     reviewer_names: tuple[str, ...],
 ) -> RuntimeNode:
-    """Решает, как читать каждый файл.
+    """Решает, как читать каждый файл — до того, как собрано окружение.
+
+    Порядок именно такой: окружение нужно только тому файлу, который читается
+    одним проходом. Агенту оно не собирается вовсе — он добывает нужное сам,
+    и показанное заранее только отучает его спрашивать.
 
     Единственный узел, где принимается решение о стоимости прогона (D-018).
     Ревьюер теперь один (D-022), поэтому узел выбирает не кого позвать,
@@ -57,14 +61,12 @@ def plan_review_node(
     ) -> dict[str, Any]:
         tasks: list[FileReviewTask] = []
         for file in state.request.files:
-            context = state.contexts.get(file.path)
             mode = plan_file_review(file, available=known.keys())
             planned = [known[mode]] if mode is not None else []
             planned.extend(unknown)
             tasks.extend(
                 FileReviewTask(
                     file=file,
-                    context=context,
                     reviewer_name=name,
                     requirements=state.request.requirements,
                 )
@@ -96,9 +98,17 @@ def _describe_plan(tasks: list[FileReviewTask]) -> str:
 def dispatch_reviews(state: ReviewGraphState) -> list[Send] | str:
     """Разводит запланированные пары «файл × ревьюер» по параллельным ветвям.
 
+    Собранное окружение подставляется здесь, а не в плане: план строится
+    раньше сборки, потому что от него зависит, какому файлу окружение вообще
+    нужно.
+
     Пустой дифф не должен упираться в ветвление без исходящих рёбер, поэтому
     при отсутствии задач управление уходит сразу на слияние.
     """
     if not state.tasks:
         return AGGREGATE_NODE
-    return [Send(REVIEW_NODE, task) for task in state.tasks]
+
+    return [
+        Send(REVIEW_NODE, task.model_copy(update={"context": state.contexts.get(task.file.path)}))
+        for task in state.tasks
+    ]

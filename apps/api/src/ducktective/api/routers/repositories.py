@@ -17,6 +17,7 @@ from ducktective.api.dependencies import (
 from ducktective.api.schemas.code_repository import (
     RegisterRepositoryRequest,
     RepositoryResponse,
+    ResolvedRevisionResponse,
 )
 from ducktective.api.schemas.indexing import (
     CancelIndexingResponse,
@@ -35,6 +36,9 @@ from ducktective.application.code_repository.register import (
     RegisterCodeRepository,
     RegisterCodeRepositoryCommand,
     RepositoryAlreadyRegisteredError,
+)
+from ducktective.application.code_repository.resolve_revision import (
+    ResolveRepositoryRevision,
 )
 from ducktective.application.exceptions import (
     PermissionDeniedError,
@@ -58,6 +62,7 @@ from ducktective.config.queues import (
     INDEX_TASK_NAME,
 )
 from ducktective.core.exceptions import (
+    DomainError,
     EntityNotFoundError,
     InvariantViolationError,
     VcsOperationError,
@@ -166,6 +171,34 @@ async def get_index_state(
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(error)) from error
 
     return IndexStateResponse.from_view(view)
+
+
+@router.get("/{repository_id}/revision", response_model=ResolvedRevisionResponse)
+async def resolve_revision(
+    repository_id: UUID,
+    tenant_id: UUID,
+    revision: str,
+    unit_of_work: UnitOfWorkDependency,
+    vcs_provider: VcsProviderDependency,
+) -> ResolvedRevisionResponse:
+    """Разрешает ссылку на ревизию в коммит.
+
+    `HEAD`, имя ветки и `abc123~1` — ссылки, и во что они указывают, знает
+    только git. Интерфейсу это нужно, чтобы честно сравнить ревизию индекса
+    с той, которую собираются ревьюить.
+    """
+    use_case = ResolveRepositoryRevision(unit_of_work, vcs_provider)
+
+    try:
+        view = await use_case.execute(TenantId(tenant_id), RepositoryId(repository_id), revision)
+    except EntityNotFoundError as error:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
+    except PermissionDeniedError as error:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(error)) from error
+    except (DomainError, ValueError) as error:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(error)) from error
+
+    return ResolvedRevisionResponse.from_view(view)
 
 
 @router.post(

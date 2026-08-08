@@ -9,11 +9,14 @@ from uuid import (
     uuid4,
 )
 
+import pytest
+
 from ducktective.core.diff.value_objects import (
     ChangeType,
 )
 from ducktective.core.exceptions import (
     LlmContextOverflowError,
+    ReviewInterruptedError,
 )
 from ducktective.core.llm.value_objects import (
     LlmMessage,
@@ -40,6 +43,7 @@ from ducktective.core.review.investigation import (
 )
 from ducktective.core.review.ports import (
     FileReviewResult,
+    ReviewSupport,
 )
 from ducktective.core.types import (
     ReviewFileId,
@@ -77,6 +81,27 @@ FINDINGS_JSON = json.dumps(
     }
 )
 EMPTY_JSON = '{"findings": []}'
+
+LOCAL_FINDING_JSON = json.dumps(
+    {
+        "findings": [
+            {
+                "line_start": 11,
+                "line_end": 11,
+                "severity": "minor",
+                "category": "correctness",
+                "title": "Значение считается дважды",
+                "body": "Результат вычисляется повторно в той же строке",
+                "code_fragment": "result = self._compute()",
+                "anchor_symbol": "ReportBuilder.build",
+                "confidence": 0.6,
+                "evidence": [
+                    {"snippet": "result = self._compute()", "line_start": 11, "line_end": 11}
+                ],
+            }
+        ]
+    }
+)
 
 
 def build_file() -> ReviewFile:
@@ -216,13 +241,18 @@ def build_reviewer(
     )
 
 
-async def review(reviewer: AgenticCodeReviewer, navigator: Any = None) -> FileReviewResult:
+async def review(
+    reviewer: AgenticCodeReviewer,
+    navigator: Any = None,
+    *,
+    cancellation: Any = None,
+) -> FileReviewResult:
     file = build_file()
     return await reviewer.review_file(
         file,
         patch_text=file.to_unified_patch(),
         requirements=ModelRequirements(),
-        navigator=navigator,
+        support=ReviewSupport(navigator=navigator, cancellation=cancellation),
     )
 
 
@@ -271,7 +301,7 @@ async def test_tools_are_offered_while_investigating_and_dropped_at_the_end() ->
 
 async def test_answer_without_calls_is_taken_as_is() -> None:
     """Просить модель повторить сказанное — лишнее обращение ценой в минуты."""
-    client = ScriptedLlmClient([answer(FINDINGS_JSON)])
+    client = ScriptedLlmClient([answer(LOCAL_FINDING_JSON)])
 
     result = await review(build_reviewer(client), FakeNavigator())
 
@@ -363,7 +393,7 @@ async def test_context_overflow_falls_back_instead_of_failing() -> None:
     result = await review(reviewer, FakeNavigator())
 
     assert len(result.drafts) == 1
-    assert sink.steps[0].kind is StepKind.FALLBACK
+    assert sink.steps[-1].kind is StepKind.FALLBACK
 
 
 async def test_step_limit_forces_the_answer() -> None:
@@ -388,6 +418,53 @@ async def test_unparseable_conclusion_falls_back_to_one_pass() -> None:
     assert len(result.drafts) == 1
     assert sink.steps[-1].kind is StepKind.FALLBACK
     assert "не разобрался" in sink.steps[-1].detail
+
+
+async def test_claim_about_other_code_is_sent_back_once() -> None:
+    """«Сломает вызывающих» без единого вызова — догадка, выданная за факт."""
+    client = ScriptedLlmClient(
+        [answer(FINDINGS_JSON), answer(calls=(call(),)), answer(FINDINGS_JSON)]
+    )
+    navigator = FakeNavigator()
+
+    result = await review(build_reviewer(client), navigator)
+
+    nudge = client.calls[1][-1].content
+    assert "you have not looked at that code" in nudge
+    assert navigator.asked == [("find_callers", "build")]
+    assert len(result.drafts) == 1
+
+
+async def test_the_model_is_sent_back_only_once() -> None:
+    """Упрямый ответ принимается со второго раза, а не крутит цикл до предела."""
+    client = ScriptedLlmClient([answer(FINDINGS_JSON)])
+
+    result = await review(build_reviewer(client, max_steps=4), FakeNavigator())
+
+    assert len(client.calls) == 2
+    assert len(result.drafts) == 1
+
+
+async def test_claim_checked_by_a_tool_passes_without_a_nudge() -> None:
+    client = ScriptedLlmClient([answer(calls=(call(),)), answer(FINDINGS_JSON)])
+
+    result = await review(build_reviewer(client), FakeNavigator())
+
+    assert len(client.calls) == 2
+    assert len(result.drafts) == 1
+
+
+async def test_stop_is_heard_between_calls_to_the_model() -> None:
+    """Цикл идёт до шести обращений — это десяток минут на локальной модели."""
+    client = ScriptedLlmClient([answer(calls=(call(),)), answer(FINDINGS_JSON)])
+
+    async def stop() -> bool:
+        return True
+
+    with pytest.raises(ReviewInterruptedError):
+        await review(build_reviewer(client), FakeNavigator(), cancellation=stop)
+
+    assert client.calls == []
 
 
 async def test_shown_code_comes_back_for_the_evidence_check() -> None:

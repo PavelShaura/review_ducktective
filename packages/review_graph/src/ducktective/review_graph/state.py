@@ -125,4 +125,5 @@ class ReviewGraphState(BaseModel):
     findings: tuple[Finding, ...] = ()
     discarded_outside_diff: int = 0
     discarded_without_evidence: int = 0
+    discarded_unproven_claim: int = 0
     discarded_as_duplicate: int = 0

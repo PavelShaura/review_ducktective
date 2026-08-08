@@ -7,6 +7,7 @@ import type { IndexState as IndexStateData } from "@/api/types";
 import type { NewRepositoryDraft } from "@/components/RepositoryPicker";
 import { IndexState } from "@/components/IndexState";
 import { RepositoryPicker } from "@/components/RepositoryPicker";
+import { shortSha } from "@/lib/format";
 
 const EMPTY_DRAFT: NewRepositoryDraft = { localPath: "", name: "", allowCloud: false };
 
@@ -18,6 +19,8 @@ export default function NewCasePage() {
   const [selectedId, setSelectedId] = useState("");
   const [draft, setDraft] = useState(EMPTY_DRAFT);
   const [isAdding, setIsAdding] = useState(false);
+  const [mode, setMode] = useState<DiffMode>("commit");
+  const [commit, setCommit] = useState("HEAD");
   const [base, setBase] = useState("HEAD~1");
   const [head, setHead] = useState("HEAD");
   const [addedId, setAddedId] = useState("");
@@ -50,7 +53,8 @@ export default function NewCasePage() {
   const start = useMutation({
     mutationFn: async () => {
       const repositoryId = isDraftMode ? await registerDraft(draft) : selectedId;
-      const run = await api.startReview(repositoryId, base, head);
+      const range = revisionRange(mode, { commit, base, head });
+      const run = await api.startReview(repositoryId, range.base, range.head);
       await api.enqueueReview(run.id);
       return run;
     },
@@ -64,8 +68,8 @@ export default function NewCasePage() {
     <div className="mx-auto max-w-2xl">
       <h1 className="font-display text-4xl font-semibold text-paper">Завести дело</h1>
       <p className="mt-2 text-[16px] text-paper-dim">
-        Укажите репозиторий и границы диффа. Ревью выполнит фоновый воркер, страница дела
-        обновится сама.
+        Укажите репозиторий и что смотреть: один коммит целиком или диапазон ревизий.
+        Ревью выполнит фоновый воркер, страница дела обновится сама.
       </p>
 
       <form
@@ -95,14 +99,40 @@ export default function NewCasePage() {
 
         {indexedId ? <IndexState repositoryId={indexedId} /> : null}
 
-        <div className="grid grid-cols-2 gap-4">
-          <Field label="от ревизии">
-            <TextInput value={base} onChange={setBase} placeholder="HEAD~1" />
+        <ModePicker mode={mode} onChange={setMode} />
+
+        {mode === "commit" ? (
+          <Field label="коммит">
+            <TextInput
+              value={commit}
+              onChange={setCommit}
+              placeholder="784418ca23a или HEAD"
+            />
           </Field>
-          <Field label="до ревизии">
-            <TextInput value={head} onChange={setHead} placeholder="HEAD" />
-          </Field>
-        </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="от ревизии">
+              <TextInput
+                value={base}
+                onChange={setBase}
+                placeholder="HEAD~1"
+              />
+            </Field>
+            <Field label="до ревизии">
+              <TextInput
+                value={head}
+                onChange={setHead}
+                placeholder="HEAD"
+              />
+            </Field>
+          </div>
+        )}
+
+        <StaleIndexWarning
+          state={index.data}
+          head={revisionRange(mode, { commit, base, head }).head}
+          repositoryId={indexedId}
+        />
 
         <button
           type="submit"
@@ -238,4 +268,128 @@ function ContextWarning({ state }: ContextWarningProps) {
       по одному диффу и найдёт заметно меньше. Дождитесь конца сборки, если важна полнота.
     </p>
   );
+}
+
+
+/**
+ * Индекс собран не на той ревизии, которую собираются ревьюить.
+ *
+ * Прогон от этого не ломается — инструменты уходят на git и читают нужный
+ * коммит, — но теряют граф вызовов: в индексе с другой ревизии изменённых
+ * символов нет вовсе. Сказать об этом надо до запуска, а не в ленте
+ * расследования, где уже поздно.
+ *
+ * Ревизию разрешает сервер, а не сравнение строк: `HEAD`, имя ветки
+ * и `abc123~1` — ссылки, и во что они указывают, знает только git. Сравнивая
+ * их со строкой из базы, форма сообщала о расхождении там, где его не было.
+ *
+ * Пока индекс собирается, сообщения нет: ревизия ещё меняется, а вторая
+ * поставленная в очередь сборка мешает первой.
+ *
+ * Сказано как факт о том, что произойдёт, а не как упрёк: в поле может стоять
+ * подстановка `HEAD`, которую человек и не выбирал, а знать про отсутствие
+ * графа ему всё равно нужно — до запуска, а не после.
+ */
+function StaleIndexWarning({
+  state,
+  head,
+  repositoryId,
+}: {
+  state: IndexStateData | undefined;
+  head: string;
+  repositoryId: string;
+}) {
+  const queryClient = useQueryClient();
+  const isSettled =
+    Boolean(state?.is_ready) && state?.status !== "running" && state?.status !== "pending";
+
+  const resolved = useQuery({
+    queryKey: ["revision", repositoryId, head],
+    queryFn: () => api.resolveRevision(repositoryId, head),
+    enabled: isSettled && head.trim().length > 0,
+    retry: false,
+  });
+
+  const reindex = useMutation({
+    mutationFn: () => api.startIndexing(repositoryId, head),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["index", repositoryId] }),
+  });
+
+  const indexed = state?.commit_sha;
+  const wanted = resolved.data?.commit_sha;
+  if (!isSettled || !indexed || !wanted || indexed === wanted) {
+    return null;
+  }
+
+  return (
+    <p className="border border-tweed-dim bg-ink-raised px-4 py-3 text-paper-dim">
+      Ревью пойдёт по {shortSha(wanted)}
+      {head.trim() === wanted ? "" : ` (${head.trim()})`}, а индекс собран на{" "}
+      {shortSha(indexed)}. Инструменты прочитают нужный коммит через git — без графа
+      вызовов.{" "}
+      <button
+        type="button"
+        onClick={() => reindex.mutate()}
+        disabled={reindex.isPending}
+        className="text-brass underline-offset-2 hover:underline disabled:opacity-50"
+      >
+        {reindex.isPending ? "ставлю в очередь…" : `проиндексировать ${shortSha(wanted)}`}
+      </button>
+    </p>
+  );
+}
+
+type DiffMode = "commit" | "range";
+
+/**
+ * Что именно ревьюим: один коммит или диапазон.
+ *
+ * Коммит стоит первым и выбран по умолчанию, потому что это обычный случай:
+ * человек смотрит свой pull request и знает его хеш, а границы диапазона
+ * ему приходится выдумывать.
+ */
+function ModePicker({ mode, onChange }: { mode: DiffMode; onChange: (mode: DiffMode) => void }) {
+  const options: Array<{ value: DiffMode; label: string }> = [
+    { value: "commit", label: "один коммит" },
+    { value: "range", label: "диапазон ревизий" },
+  ];
+
+  return (
+    <div className="flex gap-2">
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          onClick={() => onChange(option.value)}
+          className={`rounded-case border px-3 py-1 font-mono text-[12px] tracking-wide transition-colors ${
+            mode === option.value
+              ? "border-brass text-brass"
+              : "border-tweed-dim text-paper-dim hover:text-paper"
+          }`}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Границы диффа для выбранного режима.
+ *
+ * Один коммит разворачивается в пару «его родитель → он сам»: сервер и так
+ * разрешает относительные ссылки в полные хеши, поэтому отдельного вида
+ * запроса для этого не нужно. У первого коммита в истории родителя нет,
+ * и git объяснит это внятнее, чем смогла бы проверка здесь.
+ */
+function revisionRange(
+  mode: DiffMode,
+  values: { commit: string; base: string; head: string },
+): { base: string; head: string } {
+  if (mode === "range") {
+    return { base: values.base, head: values.head };
+  }
+
+  const commit = values.commit.trim() || "HEAD";
+  return { base: `${commit}~1`, head: commit };
 }
