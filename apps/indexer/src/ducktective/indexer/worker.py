@@ -50,8 +50,8 @@ from ducktective.core.types import (
     RepositoryId,
     TenantId,
 )
-from ducktective.indexing.python_parser import (
-    PythonParser,
+from ducktective.indexing.parsers import (
+    build_parser,
 )
 from ducktective.llm.embedder import (
     LiteLlmEmbedder,
@@ -134,7 +134,7 @@ async def build_index_task(
             unit_of_work,
             RedisEventPublisher(ctx["redis"]),
             LocalGitProvider(),
-            PythonParser(),
+            build_parser(),
         ).execute(command)
     except IndexingCancelledError:
         logger.info("index.cancelled", repository_id=repository_id)

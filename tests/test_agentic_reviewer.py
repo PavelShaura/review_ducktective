@@ -294,6 +294,7 @@ async def test_tools_are_offered_while_investigating_and_dropped_at_the_end() ->
         "get_definition",
         "find_callers",
         "get_file_context",
+        "list_files",
     )
     assert client.offered_tools[-1] == ()
     assert client.schemas[-1] is not None

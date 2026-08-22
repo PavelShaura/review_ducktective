@@ -17,6 +17,27 @@ from ducktective.core.types import (
 )
 
 
+LISTING_SCAN = 300
+"""Сколько путей смотрит перечень, прежде чем сказать «более трёхсот».
+
+Точное число важнее, чем кажется: «нашлось шесть» и «нашлось пятьсот»
+ведут к разным следующим шагам — прочитать все или сузить образец.
+Считать их все ради ответа незачем: после трёхсот вывод один и тот же.
+"""
+
+
+NEXT_STEP_HINT = (
+    "Перечень говорит, что файлы есть, но не что в них написано: откройте любой "
+    "через get_file_context, прежде чем делать вывод о содержимом."
+)
+"""Подсказка о следующем шаге.
+
+Живой случай: агент перечислил пятьсот файлов фронта и, не открыв ни одного,
+пошёл проверять свою прежнюю догадку про React. Перечень путей отвечает
+на «что тут есть», но выводы делают по содержимому.
+"""
+
+
 class IndexedCodeNavigator:
     """Навигация по собранному индексу: граф символов и гибридный поиск.
 
@@ -119,6 +140,30 @@ class IndexedCodeNavigator:
             ),
         )
 
+    async def list_files(self, pattern: str, *, limit: int = 40) -> NavigationAnswer:
+        """Пути проиндексированных файлов, подходящих под образец.
+
+        Ответ — карта, а не содержимое: фрагментов здесь нет, потому что
+        десяток файлов целиком вытеснил бы из окна всё остальное. Число
+        найденного называется всегда: «показаны первые сорок из пятисот
+        двадцати» и «нашлось сорок» ведут к разным следующим шагам.
+        """
+        found = await self._symbols.find_paths(self._repository_id, pattern, limit=LISTING_SCAN)
+        if not found:
+            return NavigationAnswer(
+                source=self.source,
+                note=f"Файлов по образцу «{pattern}» в индексе нет",
+            )
+
+        total = f"более {LISTING_SCAN}" if len(found) >= LISTING_SCAN else str(len(found))
+        shown = _spread(found, limit)
+        tail = f", показаны {len(shown)} из {total}" if len(found) > limit else f", всего {total}"
+        listed = "\n".join(shown)
+        return NavigationAnswer(
+            source=self.source,
+            note=(f"Файлы по образцу «{pattern}»{tail}:\n{listed}\n{NEXT_STEP_HINT}"),
+        )
+
     async def _resolve_path(self, path: str) -> str | None:
         """Приводит названный путь к тому, как он лежит в индексе.
 
@@ -173,6 +218,34 @@ class IndexedNavigators:
             symbols=self._symbols,
             search=self._search,
         )
+
+
+def _spread(paths: list[str], limit: int) -> list[str]:
+    """Отбирает перечень так, чтобы были видны разные каталоги.
+
+    Первые сорок по алфавиту — это сорок файлов одной папки, и по ним
+    судят обо всём проекте: на живом вопросе про фронт так наверх попали
+    вендорные библиотеки из `static`, а код приложения не показался вовсе.
+
+    Сначала по одному файлу из каждого каталога, потом остальные: карта
+    важнее полноты, а полноту даёт следующий запрос с уточнённым образцом.
+    """
+    if len(paths) <= limit:
+        return paths
+
+    first_of_directory: list[str] = []
+    remainder: list[str] = []
+    seen: set[str] = set()
+
+    for path in paths:
+        directory = path.rsplit("/", maxsplit=1)[0] if "/" in path else ""
+        if directory in seen:
+            remainder.append(path)
+            continue
+        seen.add(directory)
+        first_of_directory.append(path)
+
+    return sorted([*first_of_directory, *remainder][:limit])
 
 
 def _from_chunk(hit: ChunkHit) -> CodeFragment:

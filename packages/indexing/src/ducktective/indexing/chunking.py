@@ -28,6 +28,13 @@ MIN_CHUNK_TOKENS = 48
 OVERLAP_LINES = 2
 
 DEFINITION_NODES = frozenset({"class_definition", "function_definition", "decorated_definition"})
+"""Узлы определений в Python — значение по умолчанию.
+
+Набор передаётся снаружи, потому что принадлежит языку, а не нарезке:
+у JavaScript определение это `class_declaration` или `lexical_declaration`
+со стрелочной функцией, и зашитый здесь питоновский список превратил бы
+любой другой язык в один сплошной модульный чанк.
+"""
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -74,6 +81,7 @@ def build_chunks(
     source: bytes,
     symbols: list[CodeSymbol],
     module_path: str,
+    definition_nodes: frozenset[str] = DEFINITION_NODES,
 ) -> list[CodeChunk]:
     """Режет файл по границам определений, а не по числу символов.
 
@@ -91,10 +99,10 @@ def build_chunks(
 
     for node in root.named_children:
         fragment = _fragment_of(node, source, by_position)
-        if node.type in DEFINITION_NODES:
+        if node.type in definition_nodes:
             fragments.extend(_flush(module_lines))
             module_lines = []
-            fragments.extend(_split_if_large(node, source, fragment, by_position))
+            fragments.extend(_split_if_large(node, source, fragment, by_position, definition_nodes))
         else:
             module_lines.append(fragment)
 
@@ -127,6 +135,7 @@ def _split_if_large(
     source: bytes,
     fragment: Fragment,
     by_position: dict[tuple[int, int], CodeSymbol],
+    definition_nodes: frozenset[str] = DEFINITION_NODES,
 ) -> list[Fragment]:
     """Разрезает крупное определение по вложенным блокам с перекрытием.
 
@@ -137,7 +146,7 @@ def _split_if_large(
     if fragment.tokens <= MAX_CHUNK_TOKENS:
         return [fragment]
 
-    inner = _inner_definitions(node)
+    inner = _inner_definitions(node, definition_nodes)
     if not inner:
         return _split_by_lines(fragment)
 
@@ -148,12 +157,12 @@ def _split_if_large(
 
     for child in inner:
         child_fragment = _fragment_of(child, source, by_position)
-        pieces.extend(_split_if_large(child, source, child_fragment, by_position))
+        pieces.extend(_split_if_large(child, source, child_fragment, by_position, definition_nodes))
 
     return pieces
 
 
-def _inner_definitions(node: Node) -> list[Node]:
+def _inner_definitions(node: Node, definition_nodes: frozenset[str]) -> list[Node]:
     body = node.child_by_field_name("body")
     if body is None and node.type == "decorated_definition":
         definition = node.child_by_field_name("definition")
@@ -161,7 +170,7 @@ def _inner_definitions(node: Node) -> list[Node]:
     if body is None:
         return []
 
-    return [child for child in body.named_children if child.type in DEFINITION_NODES]
+    return [child for child in body.named_children if child.type in definition_nodes]
 
 
 def _split_by_lines(fragment: Fragment) -> list[Fragment]:

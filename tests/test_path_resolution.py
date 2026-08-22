@@ -111,3 +111,35 @@ async def test_ambiguous_name_is_not_guessed() -> None:
     assert answer.is_empty
     assert answer.note is not None
     assert "src/app/catalog/selection_packs.py" in answer.note
+
+
+async def test_files_can_be_listed_by_extension() -> None:
+    """«Проанализируй по файлам .js» иначе выполнить нечем.
+
+    Без перечня спрашивающий проверяет догадки: ищет `import React`,
+    не находит и заключает, что фронта нет вовсе, — хотя в репозитории
+    пятьсот файлов на другом фреймворке.
+    """
+    navigator = build_navigator(
+        [
+            "src/app/static/registry.js",
+            "src/app/static/forms.js",
+            INDEXED_PATH,
+        ]
+    )
+
+    answer = await navigator.list_files(".js")
+
+    assert answer.note is not None
+    assert "registry.js" in answer.note
+    assert "forms.js" in answer.note
+    assert INDEXED_PATH not in answer.note
+
+
+async def test_listing_says_when_nothing_matches() -> None:
+    """Пустой перечень и «такого вида файлов нет» — разные ответы."""
+    answer = await build_navigator([INDEXED_PATH]).list_files(".rs")
+
+    assert answer.is_empty
+    assert answer.note is not None
+    assert ".rs" in answer.note

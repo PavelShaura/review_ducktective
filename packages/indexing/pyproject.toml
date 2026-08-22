@@ -8,6 +8,8 @@ dependencies = [
     "ducktective-core",
     "tree-sitter>=0.23",
     "tree-sitter-python>=0.23",
+    "tree-sitter-javascript>=0.23",
+    "tree-sitter-typescript>=0.23",
 ]
 
 [tool.uv.sources]

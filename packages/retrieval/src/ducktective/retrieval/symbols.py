@@ -6,6 +6,7 @@ from uuid import (
 )
 
 from sqlalchemy import (
+    ColumnElement,
     Select,
     case,
     func,
@@ -33,6 +34,39 @@ from ducktective.storage.models.indexing import (
     SourceFileModel,
     SymbolEdgeModel,
 )
+
+
+def _ordering(pattern: str) -> list[Any]:
+    """Порядок выдачи путей, разный у двух вопросов.
+
+    «Какой из файлов с таким именем» — короткий путь ближе к названному,
+    и он идёт первым. «Что тут вообще есть» — алфавит: он собирает файлы
+    по каталогам, а длина поднимает наверх вендорные файлы из корня
+    и прячет за ними код приложения.
+    """
+    if "*" in pattern or pattern.startswith("."):
+        return [SourceFileModel.path]
+    return [func.length(SourceFileModel.path), SourceFileModel.path]
+
+
+def _matching(pattern: str) -> ColumnElement[bool]:
+    """Условие на путь по образцу.
+
+    Звёздочка переводится в подстановку SQL, расширение — в совпадение
+    по концу, всё остальное считается хвостом пути. Разделять эти случаи
+    приходится, потому что `.js` и `app/report.py` спрашивают о разном:
+    первое — обо всех файлах вида, второе — об одном месте.
+    """
+    if "*" in pattern:
+        return SourceFileModel.path.like(pattern.replace("*", "%"))
+
+    if pattern.startswith("."):
+        return SourceFileModel.path.like(f"%{pattern}")
+
+    return or_(
+        SourceFileModel.path == pattern,
+        SourceFileModel.path.endswith(f"/{pattern}"),
+    )
 
 
 class PostgresSymbolReader:
@@ -71,15 +105,19 @@ class PostgresSymbolReader:
         *,
         limit: int = 5,
     ) -> list[str]:
-        """Пути, оканчивающиеся на переданный кусок, короткие сначала.
+        """Пути по образцу, короткие сначала.
 
-        Короткий путь при равном окончании — тот, что ближе к названному:
-        `.../selection_packs.py` найдёт и сам файл, и одноимённый в соседнем
-        плагине, и первым должен идти тот, у кого совпадение занимает
-        большую часть пути.
+        Образцов два вида, и оба нужны. Хвост пути — так называют
+        конкретный файл: `.../selection_packs.py` найдёт и сам файл,
+        и одноимённый в соседнем каталоге, и первым пойдёт тот, у кого
+        совпадение занимает большую часть пути.
+
+        Кусок с `*` или расширение — так спрашивают «что тут есть»:
+        `.js` перечислит скрипты, `templates/*` — шаблоны. Без этого
+        спрашивающий проверяет догадки вместо того, чтобы посмотреть.
         """
-        tail = needle.strip().lstrip("/")
-        if not tail:
+        pattern = needle.strip().lstrip("/")
+        if not pattern:
             return []
 
         statement = (
@@ -87,12 +125,9 @@ class PostgresSymbolReader:
             .where(
                 SourceFileModel.repository_id == repository_id,
                 SourceFileModel.is_deleted.is_(False),
-                or_(
-                    SourceFileModel.path == tail,
-                    SourceFileModel.path.endswith(f"/{tail}"),
-                ),
+                _matching(pattern),
             )
-            .order_by(func.length(SourceFileModel.path))
+            .order_by(*_ordering(pattern))
             .limit(limit)
         )
         rows = await self._session.execute(statement)

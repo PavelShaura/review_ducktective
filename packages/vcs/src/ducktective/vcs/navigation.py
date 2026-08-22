@@ -1,4 +1,7 @@
 import re
+from fnmatch import (
+    fnmatch,
+)
 from pathlib import (
     Path,
 )
@@ -147,6 +150,35 @@ class GitCodeNavigator:
         )
         return NavigationAnswer(source=self.source, fragments=(fragment,))
 
+    async def list_files(self, pattern: str, *, limit: int = 40) -> NavigationAnswer:
+        """Файлы ревизии, подходящие под образец.
+
+        Перечень берётся у git, а не с диска: рабочая копия может обгонять
+        ревизию, о которой идёт разговор, и показать в ней файл, которого
+        в обсуждаемом коде нет.
+        """
+        try:
+            tree = await self._git.list_tree(self._repository_path, self._revision)
+        except Exception as error:
+            return NavigationAnswer(
+                source=self.source, note=f"Не удалось прочитать ревизию: {error}"
+            )
+
+        found = sorted(path for path in tree if _matches(path, pattern))
+        if not found:
+            return NavigationAnswer(
+                source=self.source,
+                note=self._note(f"файлов по образцу «{pattern}» в ревизии нет"),
+            )
+
+        shown = found[:limit]
+        tail = f", показаны первые {limit} из {len(found)}" if len(found) > limit else ""
+        listed = "\n".join(shown)
+        return NavigationAnswer(
+            source=self.source,
+            note=f"Файлы по образцу «{pattern}»{tail}:\n{listed}",
+        )
+
     async def _grep(
         self,
         pattern: str,
@@ -230,6 +262,18 @@ class GitNavigators:
         reason: str = NO_INDEX_REASON,
     ) -> GitCodeNavigator:
         return GitCodeNavigator(repository_path, revision, git=self._git, reason=reason)
+
+
+def _matches(path: str, pattern: str) -> bool:
+    """Подходит ли путь под образец: расширение, звёздочка или кусок пути."""
+    cleaned = pattern.strip().lstrip("/")
+    if not cleaned:
+        return False
+    if "*" in cleaned:
+        return fnmatch(path, cleaned if "/" in cleaned else f"*{cleaned}")
+    if cleaned.startswith("."):
+        return path.endswith(cleaned)
+    return path == cleaned or path.endswith(f"/{cleaned}") or cleaned in path
 
 
 def _window(

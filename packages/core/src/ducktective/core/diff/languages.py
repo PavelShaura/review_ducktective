@@ -8,8 +8,12 @@ LANGUAGE_BY_EXTENSION = {
     ".pyi": "python",
     ".js": "javascript",
     ".jsx": "javascript",
+    ".mjs": "javascript",
+    ".cjs": "javascript",
     ".ts": "typescript",
     ".tsx": "typescript",
+    ".mts": "typescript",
+    ".cts": "typescript",
     ".go": "go",
     ".java": "java",
     ".kt": "kotlin",
@@ -28,8 +32,15 @@ LANGUAGE_BY_EXTENSION = {
     ".toml": "toml",
     ".json": "json",
     ".html": "html",
+    ".htm": "html",
     ".css": "css",
+    ".scss": "scss",
+    ".less": "scss",
     ".md": "markdown",
+    ".txt": "text",
+    ".cfg": "toml",
+    ".ini": "toml",
+    ".env": "text",
 }
 
 LANGUAGE_BY_FILENAME = {

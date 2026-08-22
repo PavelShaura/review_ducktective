@@ -119,8 +119,8 @@ from ducktective.evals.reporting import (
 from ducktective.evals.store import (
     SqlAlchemyEvalStore,
 )
-from ducktective.indexing.python_parser import (
-    PythonParser,
+from ducktective.indexing.parsers import (
+    build_parser,
 )
 from ducktective.llm.code_reviewer import (
     PROMPT_SET_NAME,
@@ -529,7 +529,7 @@ async def _index(arguments: argparse.Namespace) -> int:
                     context.unit_of_work,
                     context.event_publisher,
                     LocalGitProvider(),
-                    PythonParser(),
+                    build_parser(),
                 ).execute(
                     BuildIndexCommand(
                         tenant_id=tenant_id,

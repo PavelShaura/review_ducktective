@@ -19,6 +19,16 @@ looking. Prefer:
 - `find_callers` when the question is about consequences, usage, or what breaks.
 - `get_file_context` when you need what surrounds a place you already found, or
   when the question names a file: read that file before searching for anything.
+- `list_files` when the question is about the shape of the project rather than a
+  place in it - what it is built with, where the templates live, whether there is
+  a frontend at all. Ask what exists before testing a guess: searching for the
+  import of one framework proves nothing when the project uses another, and an
+  empty result reads as "no frontend" when it means "wrong guess".
+
+  A listing is a map, not an answer. Open one of the files it names with
+  `get_file_context` before concluding anything about what they contain: a
+  hundred paths tell you the project has a frontend, and the first twenty lines
+  of any one of them tell you what it is written with.
 
 A requirement is written in prose, the code is written in identifiers, and they share
 almost no words - especially when the requirement is written in another language than

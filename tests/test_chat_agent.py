@@ -127,6 +127,10 @@ class FakeNavigator:
         self.asked.append(("get_file_context", path))
         return self._answer()
 
+    async def list_files(self, pattern: str, *, limit: int = 40) -> NavigationAnswer:
+        self.asked.append(("list_files", pattern))
+        return NavigationAnswer(source=NavigationSource.INDEX, note=f"Файлы по «{pattern}»")
+
     def _answer(self) -> NavigationAnswer:
         return NavigationAnswer(
             source=NavigationSource.INDEX,

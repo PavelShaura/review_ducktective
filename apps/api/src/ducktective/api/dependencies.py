@@ -115,7 +115,7 @@ def build_chat_use_case(app: FastAPI) -> AskQuestion:
         RedisEventPublisher(app.state.redis),
         build_chat_agent(
             local_provider=settings.local_llm_provider,
-            local_model=settings.local_review_model,
+            local_model=settings.local_chat_model or settings.local_review_model,
             local_base_url=settings.local_llm_base_url,
             local_api_key=settings.local_llm_api_key,
             cloud_model=settings.cloud_review_model,

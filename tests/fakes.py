@@ -374,8 +374,12 @@ class FakeSymbolReader:
         limit: int = 5,
     ) -> list[str]:
         self.asked_paths.append(needle)
-        tail = needle.lstrip("/")
-        return [path for path in self._paths if path == tail or path.endswith(f"/{tail}")][:limit]
+        pattern = needle.lstrip("/")
+        if pattern.startswith("."):
+            return [path for path in self._paths if path.endswith(pattern)][:limit]
+        return [path for path in self._paths if path == pattern or path.endswith(f"/{pattern}")][
+            :limit
+        ]
 
     async def callees(
         self,

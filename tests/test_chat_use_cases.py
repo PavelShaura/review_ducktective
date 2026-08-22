@@ -113,6 +113,9 @@ class SilentNavigator:
     ) -> NavigationAnswer:
         return NavigationAnswer(source=NavigationSource.INDEX)
 
+    async def list_files(self, pattern: str, *, limit: int = 40) -> NavigationAnswer:
+        return NavigationAnswer(source=NavigationSource.INDEX)
+
 
 class SilentNavigators:
     """Фабрика навигаторов: помнит, о каком репозитории спрашивали."""

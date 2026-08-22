@@ -107,6 +107,23 @@ GET_FILE_CONTEXT = ToolSpec(
     },
 )
 
+LIST_FILES = ToolSpec(
+    name="list_files",
+    description=(
+        "List the files of this repository matching a pattern: an extension like '.js', "
+        "a directory like 'templates/', a glob like 'src/*/models.py'. Use it to see what "
+        "the project actually contains before assuming what it is built with - guessing a "
+        "framework and searching for its import proves nothing when the guess is wrong."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "pattern": {"type": "string", "description": "Extension, directory or glob"},
+        },
+        "required": ["pattern"],
+    },
+)
+
 SEARCH_DOCUMENT = ToolSpec(
     name="search_document",
     description=(
@@ -123,7 +140,7 @@ SEARCH_DOCUMENT = ToolSpec(
     },
 )
 
-NAVIGATION_TOOLS = (SEARCH_CODE, GET_DEFINITION, FIND_CALLERS, GET_FILE_CONTEXT)
+NAVIGATION_TOOLS = (SEARCH_CODE, GET_DEFINITION, FIND_CALLERS, GET_FILE_CONTEXT, LIST_FILES)
 
 
 @dataclass(frozen=True)
@@ -244,6 +261,8 @@ class NavigationToolbox:
                 str(arguments["name"]),
                 limit=int(arguments.get("limit", 8)),
             )
+        if name == LIST_FILES.name:
+            return await self._navigator.list_files(str(arguments["pattern"]))
         if name == GET_FILE_CONTEXT.name:
             return await self._navigator.get_file_context(
                 str(arguments["path"]),
