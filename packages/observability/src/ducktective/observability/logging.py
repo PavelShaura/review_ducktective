@@ -8,6 +8,16 @@ from typing import (
 import structlog
 
 
+SELF_HANDLED_LOGGERS = ("LiteLLM",)
+"""Библиотеки, которые вешают свой обработчик и пишут строку сами.
+
+Их записи не пропускаются в корневой логгер: иначе каждая появляется дважды —
+раз в их формате, раз в нашем, — и лог прогона состоит из повторов. Глушится
+распространение, а не сама библиотека: строка про выбранную модель полезна,
+лишним её делает только дубль.
+"""
+
+
 def configure_logging(
     *,
     level: str = "INFO",
@@ -26,6 +36,9 @@ def configure_logging(
         stream=stream or sys.stdout,
         level=getattr(logging, level.upper(), logging.INFO),
     )
+
+    for name in SELF_HANDLED_LOGGERS:
+        logging.getLogger(name).propagate = False
 
     renderer: Any = (
         structlog.processors.JSONRenderer(ensure_ascii=False)

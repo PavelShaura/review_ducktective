@@ -85,6 +85,16 @@ class LlmOutputTruncatedError(LlmOutputError):
     """
 
 
+class SearchTimedOutError(DomainError):
+    """Поиск по индексу не уложился в отведённое время.
+
+    Названа доменом, потому что обрабатывать её приходится вызывающему:
+    сборщику контекста пустая выдача годится — окружение необязательно,
+    — а инструменту навигации нет, потому что «не успел» и «ничего нет»
+    для спрашивающего означают разное.
+    """
+
+
 class EntityNotFoundError(DomainError):
     def __init__(self, entity_type: str, entity_id: object) -> None:
         super().__init__(f"{entity_type} не найден: {entity_id}")

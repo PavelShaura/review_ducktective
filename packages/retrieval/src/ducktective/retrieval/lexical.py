@@ -24,6 +24,10 @@ from ducktective.core.types import (
     QualifiedName,
     RepositoryId,
 )
+from ducktective.retrieval.deadline import (
+    DEFAULT_SEARCH_TIMEOUT_MS,
+    within_deadline,
+)
 from ducktective.storage.models.indexing import (
     CodeChunkModel,
     CodeSymbolModel,
@@ -32,6 +36,27 @@ from ducktective.storage.models.indexing import (
 
 
 SEARCH_CONFIGURATION = "simple"
+
+MAX_QUERY_TERMS = 40
+"""Сколько слов запроса доходит до базы.
+
+Слова соединяются через «или», поэтому длина запроса решает не точность,
+а объём работы: под условие из семисот слов подходит почти каждый фрагмент
+базы, ранг приходится считать для всех, и `LIMIT` не спасает — сортировать
+всё равно надо посчитанное. На `ssuz` такой запрос — 762 слова на 38 826
+чанков — шёл восемь минут и держал прогон целиком.
+
+Предел стоит здесь, а не у вызывающего: запрос из целого файла может
+прийти и от внешнего клиента, а обещание отвечать за отведённое время
+даёт поиск, а не тот, кто его позвал.
+"""
+
+MIN_TERM_LENGTH = 3
+"""Короткое слово есть везде и не различает ничего.
+
+Отбор идёт по длине: составные имена вроде `declaration_pack` и `weasyprint`
+сужают выдачу, а `if`, `to` и `id` только расширяют её до всей базы.
+"""
 
 
 class PostgresLexicalSearch:
@@ -44,8 +69,11 @@ class PostgresLexicalSearch:
     «ReviewRun» не нашёл бы то, что записано как «review run».
     """
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self, session: AsyncSession, *, timeout_ms: int = DEFAULT_SEARCH_TIMEOUT_MS
+    ) -> None:
         self._session = session
+        self._timeout_ms = timeout_ms
 
     async def search_chunks(
         self,
@@ -80,7 +108,11 @@ class PostgresLexicalSearch:
             .limit(limit)
         )
 
-        rows = await self._session.execute(statement)
+        rows = await within_deadline(
+            self._session,
+            lambda: self._session.execute(statement),
+            timeout_ms=self._timeout_ms,
+        )
         return [
             ChunkHit(
                 chunk_id=CodeChunkId(row.id),
@@ -128,7 +160,11 @@ class PostgresLexicalSearch:
             .limit(limit)
         )
 
-        rows = await self._session.execute(statement)
+        rows = await within_deadline(
+            self._session,
+            lambda: self._session.execute(statement),
+            timeout_ms=self._timeout_ms,
+        )
         return [
             SymbolHit(
                 symbol_id=CodeSymbolId(row.id),
@@ -150,10 +186,27 @@ def _to_tsquery(query: str) -> ColumnElement[Any] | None:
     Строгое «и» на коде почти всегда даёт пустую выдачу: человек пишет
     «where review run created», а в тексте эти слова живут порознь.
     Ранжирование само поднимет фрагменты, где совпало больше.
+
+    Слов берётся ограниченное число и самые длинные из них: «или» по всему
+    словарю запроса перестаёт быть поиском — под него подходит вся база.
     """
-    prepared = build_search_text(query)
-    words = {word for word in prepared.replace("\n", " ").split() if word.isalnum()}
+    words = _distinctive_terms(query)
     if not words:
         return None
 
     return func.to_tsquery(SEARCH_CONFIGURATION, " | ".join(sorted(words)))
+
+
+def _distinctive_terms(query: str, *, limit: int = MAX_QUERY_TERMS) -> set[str]:
+    """Отбирает слова, которые сужают выдачу, а не расширяют её.
+
+    Короткий запрос доходит целиком: у человека, спросившего два слова,
+    отбирать нечего. Обрезается длинный — тот, что собран из целого файла.
+    """
+    prepared = build_search_text(query)
+    words = {word for word in prepared.replace("\n", " ").split() if word.isalnum()}
+    if len(words) <= limit:
+        return words
+
+    long_enough = {word for word in words if len(word) >= MIN_TERM_LENGTH} or words
+    return set(sorted(long_enough, key=lambda word: (-len(word), word))[:limit])

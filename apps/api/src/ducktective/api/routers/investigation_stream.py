@@ -1,3 +1,9 @@
+from contextlib import (
+    suppress,
+)
+from typing import (
+    Any,
+)
 from uuid import (
     UUID,
 )
@@ -6,6 +12,9 @@ from fastapi import (
     APIRouter,
     WebSocket,
     WebSocketDisconnect,
+)
+from starlette.websockets import (
+    WebSocketState,
 )
 
 from ducktective.api.schemas.review import (
@@ -67,13 +76,53 @@ async def stream_investigation(websocket: WebSocket, run_id: UUID, tenant_id: UU
         async with subscribe_to_steps(websocket.app.state.redis, ReviewRunId(run_id)) as stream:
             recorded = await use_case.execute(TenantId(tenant_id), ReviewRunId(run_id))
             for step in recorded.steps:
-                await websocket.send_json(InvestigationStepResponse.from_view(step).model_dump())
+                payload = InvestigationStepResponse.from_view(step).model_dump()
+                if not await _send(websocket, payload):
+                    return
 
-            async for payload in stream:
-                await websocket.send_json(payload)
+            async for live in stream:
+                if not await _send(websocket, live):
+                    return
     except PermissionDeniedError:
-        await websocket.close(code=WS_FORBIDDEN, reason="Прогон принадлежит другому тенанту")
+        await _close(websocket, WS_FORBIDDEN, "Прогон принадлежит другому тенанту")
     except EntityNotFoundError:
-        await websocket.close(code=WS_NOT_FOUND, reason="Прогон не найден")
+        await _close(websocket, WS_NOT_FOUND, "Прогон не найден")
     except WebSocketDisconnect:
         logger.debug("investigation.stream_closed", run_id=str(run_id))
+
+
+async def _send(websocket: WebSocket, payload: dict[str, Any]) -> bool:
+    """Отправляет шаг, пока есть кому. `False` — смотреть больше некому.
+
+    Уход клиента посреди отправки — обычное дело, а не сбой: страницу
+    закрывают, дело досматривают до конца, а в разработке React монтирует
+    подписку дважды и первый сокет закрывает сам. Транспорт к этому моменту
+    уже закрыт, и запись в него роняет обработчик трейсбеком на весь лог —
+    хотя произошло ровно то, что должно было.
+
+    Состояние сокета проверяется до отправки, но одной проверки мало:
+    закрыться он может и между ней и записью.
+    """
+    if websocket.client_state is not WebSocketState.CONNECTED:
+        return False
+
+    try:
+        await websocket.send_json(payload)
+    except (WebSocketDisconnect, RuntimeError, ConnectionError):
+        return False
+
+    return True
+
+
+async def _close(websocket: WebSocket, code: int, reason: str) -> None:
+    """Прощается, если ещё есть с кем.
+
+    Отказ приходит после `accept()`, и к этому моменту клиента может уже
+    не быть: закрывать закрытое — вторая ошибка поверх первой, и в логе
+    видна будет только она.
+    """
+    if websocket.client_state is not WebSocketState.CONNECTED:
+        return
+
+    with suppress(RuntimeError, ConnectionError):
+        await websocket.close(code=code, reason=reason)

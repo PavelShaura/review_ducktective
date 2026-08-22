@@ -93,6 +93,20 @@ class ReviewHunk:
             return None
         return LineRange(start=self.new_start, end=self.new_start + self.new_lines - 1)
 
+    @property
+    def added_code(self) -> str:
+        """Только то, что в этом ханке появилось, без маркеров.
+
+        Контекстные и удалённые строки описывают код, которого изменение
+        не касалось: искать по ним похожие места значит искать похожее
+        на чужое окружение.
+        """
+        return "\n".join(
+            line[1:]
+            for line in self.patch_text.splitlines()
+            if line.startswith("+") and not line.startswith("+++")
+        )
+
 
 @dataclass(kw_only=True)
 class ReviewFile:
@@ -109,6 +123,11 @@ class ReviewFile:
         return any(
             hunk.new_range is not None and hunk.new_range.contains(line) for hunk in self.hunks
         )
+
+    @property
+    def added_code(self) -> str:
+        """Всё добавленное в файле одним текстом."""
+        return "\n".join(code for hunk in self.hunks if (code := hunk.added_code))
 
     def to_unified_patch(self) -> str:
         """Собирает патч файла целиком.

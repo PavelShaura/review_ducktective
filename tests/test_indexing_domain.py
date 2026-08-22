@@ -25,6 +25,7 @@ from ducktective.core.indexing.events import (
 )
 from ducktective.core.indexing.value_objects import (
     EdgeKind,
+    SnapshotStage,
     SnapshotStatus,
     SymbolKind,
 )
@@ -96,6 +97,23 @@ def test_snapshot_reaches_ready_with_stats() -> None:
     assert snapshot.stats.files_parsed == 3
     assert snapshot.finished_at is not None
     assert len(snapshot.pull_events()) == 2
+
+
+def test_unfinished_vectors_are_reported_without_failing_the_snapshot() -> None:
+    """Символы и граф записаны — снапшот готов, и отказ эмбеддера этого не меняет.
+
+    Молчать при этом нельзя: остановившийся досчёт неотличим от идущего,
+    и доля посчитанных векторов замирает, продолжая обещать поиск по смыслу.
+    """
+    snapshot = build_snapshot()
+    snapshot.mark_running()
+    snapshot.mark_ready(IndexStats(files_total=12, chunks=57))
+    snapshot.enter_stage(SnapshotStage.EMBEDDING)
+
+    snapshot.record_embedding_failure("модель эмбеддингов не ответила")
+
+    assert snapshot.status is SnapshotStatus.READY
+    assert snapshot.failure_reason == "модель эмбеддингов не ответила"
 
 
 def test_finished_snapshot_does_not_change_status() -> None:

@@ -212,9 +212,36 @@ async def _embed(
         )
     except LlmInvocationError as error:
         logger.warning("index.embeddings_skipped", error=str(error))
+        await _record_embedding_failure(
+            unit_of_work,
+            snapshot_id,
+            f"Векторы досчитаны не полностью: модель {settings.local_embedding_model} "
+            f"по адресу {settings.local_embedding_base_url or settings.local_llm_base_url} "
+            f"не ответила. {error}",
+        )
         return 0
 
     return outcome.total
+
+
+async def _record_embedding_failure(
+    unit_of_work: SqlAlchemyUnitOfWork,
+    snapshot_id: IndexSnapshotId,
+    reason: str,
+) -> None:
+    """Пишет на снапшот, почему векторов не будет.
+
+    Без этой отметки прерванный досчёт неотличим от идущего: доля посчитанных
+    замирает, а карточка продолжает объяснять, что векторы считаются. Символы
+    и граф при этом целы, поэтому статус остаётся готовым.
+    """
+    try:
+        async with unit_of_work:
+            snapshot = await unit_of_work.index_snapshots.get(snapshot_id)
+            snapshot.record_embedding_failure(reason)
+            await unit_of_work.commit()
+    except Exception:
+        logger.warning("index.embedding_failure_not_saved", snapshot_id=str(snapshot_id))
 
 
 class WorkerSettings:

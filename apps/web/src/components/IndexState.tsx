@@ -45,7 +45,7 @@ export function IndexState({ repositoryId }: Props) {
     queryFn: () => api.getIndexState(repositoryId),
     enabled: Boolean(repositoryId),
     refetchInterval: (query) =>
-      isBusy(query.state.data) || vectorsPending(query.state.data) ? 2000 : false,
+      isBusy(query.state.data) || vectorsAdvancing(query.state.data) ? 2000 : false,
   });
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["index", repositoryId] });
@@ -337,24 +337,31 @@ interface VectorsProps {
 function Vectors({ state }: VectorsProps) {
   const { chunks, embedded } = state.vectors;
   const percent = Math.min(100, Math.round((embedded / chunks) * 100));
+  const stalled = Boolean(state.failure_reason);
 
   return (
     <div className="mt-3">
       <div className="h-1 overflow-hidden bg-tweed-dim">
         <div
-          className="h-full bg-brass transition-all duration-500"
+          className={`h-full transition-all duration-500 ${stalled ? "bg-critical" : "bg-brass"}`}
           style={{ width: `${percent}%` }}
         />
       </div>
       <p className="case-label mt-1.5">
         символы и граф готовы · векторы {embedded} из {chunks} · {percent}%
+        {stalled ? " · досчёт остановлен" : ""}
       </p>
+      {stalled ? (
+        <p className="mt-1.5 text-[13px] text-critical">{state.failure_reason}</p>
+      ) : null}
       <p className="mt-1 text-[12px] leading-relaxed text-paper-dim">
         Индекс складывается из двух слоёв. Первый — символы и граф вызовов, он уже
         готов: по нему ревью отвечает, кто вызывает изменённый код и что покрывает
         эти строки. Второй — векторы, они дают поиск по смыслу, когда нужное место
-        называется иначе, чем запрос. Пока векторы считаются, ревью опирается
-        на слова и граф: оно работает, но похожие места находит хуже.
+        называется иначе, чем запрос.{" "}
+        {stalled
+          ? "Досчёт оборвался, сам он не возобновится: почините доступ к модели и соберите индекс заново — посчитанное сохранено, пойдёт только остаток."
+          : "Пока векторы считаются, ревью опирается на слова и граф: оно работает, но похожие места находит хуже."}
       </p>
     </div>
   );
@@ -463,4 +470,15 @@ function vectorsPending(state: State | undefined): boolean {
   return Boolean(
     vectors && vectors.chunks > 0 && vectors.embedded < vectors.chunks && !state?.embedding_stopped,
   );
+}
+
+/**
+ * Считаются ли векторы прямо сейчас.
+ *
+ * Отличается от `vectorsPending` одним: оборвавшийся досчёт остаётся
+ * недосчитанным, но перестаёт двигаться. Опрашивать сервер дальше нечего,
+ * а блок про векторы показывать надо — там названа причина.
+ */
+function vectorsAdvancing(state: State | undefined): boolean {
+  return vectorsPending(state) && !state?.failure_reason;
 }

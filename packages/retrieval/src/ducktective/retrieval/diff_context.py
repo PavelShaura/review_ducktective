@@ -1,3 +1,6 @@
+from ducktective.core.exceptions import (
+    SearchTimedOutError,
+)
 from ducktective.core.indexing.value_objects import (
     SymbolKind,
 )
@@ -131,12 +134,22 @@ class DiffContextBuilder:
 
         Ловит копипасту и расхождения с принятыми в проекте решениями —
         то, что обходом графа не находится.
+
+        Ищется по добавленному, а не по патчу целиком: контекстные
+        и удалённые строки описывают код, которого изменение не касалось.
+
+        Не успевший поиск возвращает пустоту, а не срывает сборку: похожие
+        места — самая необязательная часть окружения, и файл без них
+        полезнее, чем прогон, стоящий на одном запросе.
         """
-        query = "\n".join(hunk.patch_text for hunk in file.hunks)
+        query = file.added_code
         if not query.strip():
             return []
 
-        hits = await self._search.search_chunks(repository_id, query, limit=SIMILAR_LIMIT * 2)
+        try:
+            hits = await self._search.search_chunks(repository_id, query, limit=SIMILAR_LIMIT * 2)
+        except SearchTimedOutError:
+            return []
         return [
             hit
             for hit in hits
