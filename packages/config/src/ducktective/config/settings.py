@@ -59,7 +59,17 @@ class Settings(BaseSettings):
     у сервера: локальные сборки на неподдерживаемое поле отвечают по-разному.
     """
 
+    local_review_model_context_window: int = 16384
+    """Окно, с которым локальная модель загружена на сервере, ноль — неизвестно.
+
+    Называет его сервер, а не модель: у LM Studio `max_context_length` и
+    `loaded_context_length` расходятся на порядок, и работает второе. Значение
+    читает роутер: узлу, которому нужен диалог с инструментами, при меньшем
+    окне достаётся облачная модель, если политика репозитория её разрешает.
+    """
+
     cloud_review_model: str = "anthropic/claude-sonnet-5"
+    cloud_review_model_context_window: int = 200000
     llm_timeout_seconds: float = 180.0
     llm_cache_ttl_seconds: int = 7 * 24 * 3600
     llm_max_output_tokens: int = 4096
@@ -84,6 +94,15 @@ class Settings(BaseSettings):
 
     review_queue_name: str = "ducktective:reviews"
     review_job_timeout_seconds: int = 1800
+    review_lock_wait_seconds: float = 240.0
+    """Сколько новая попытка ждёт, пока прежняя отпустит прогон.
+
+    Прежняя узнаёт об отмене перед очередным обращением к модели, то есть
+    с задержкой до одного вызова: при `LLM_TIMEOUT_SECONDS=180` ожидание
+    в четыре минуты покрывает самый долгий из них с запасом. Не дождавшись,
+    задание не висит дальше — попытка, не отвечающая столько времени,
+    ждать себя не заслуживает, а слот воркера один на два прогона.
+    """
 
     mcp_tenant_id: str = ""
     mcp_http_host: str = "127.0.0.1"

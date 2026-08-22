@@ -1,3 +1,10 @@
+from collections.abc import (
+    AsyncIterator,
+)
+from contextlib import (
+    AbstractAsyncContextManager,
+    asynccontextmanager,
+)
 from pathlib import (
     Path,
 )
@@ -19,6 +26,7 @@ from ducktective.core.review.entities import (
 )
 from ducktective.core.review.value_objects import (
     ReviewSource,
+    ReviewStatus,
 )
 from ducktective.core.types import (
     CommitSha,
@@ -28,8 +36,12 @@ from ducktective.review_graph import (
     LangGraphReviewPipeline,
 )
 from ducktective.reviewer.worker import (
+    forget_checkpoint_task,
     run_review_task,
     shutdown,
+)
+from ducktective.storage.locks import (
+    RunLockBusyError,
 )
 from ducktective.vcs.diff_parser import (
     UnifiedDiffParser,
@@ -72,7 +84,23 @@ def build_context(
         "pipeline": LangGraphReviewPipeline([reviewer]),
         "context_builder": None,
         "max_output_tokens": 4096,
+        "run_lock": FreeRunLock(),
     }
+
+
+class FreeRunLock:
+    """Блокировка, которую всегда дают: занятость проверяется своим тестом."""
+
+    @asynccontextmanager
+    async def hold(self, run_id: Any) -> AsyncIterator[None]:
+        yield
+
+
+class BusyRunLock:
+    """Прогон, который держит прежняя попытка."""
+
+    def hold(self, run_id: Any) -> AbstractAsyncContextManager[None]:
+        raise RunLockBusyError("прежняя попытка не отпустила прогон")
 
 
 class _NullPublisher:
@@ -115,6 +143,25 @@ async def test_task_returns_summary(monkeypatch: Any) -> None:
     assert result["run_id"] == str(run.id)
     assert result["status"] == "completed"
     assert result["findings"] == 0
+
+
+async def test_run_held_by_the_previous_attempt_does_not_start_twice(monkeypatch: Any) -> None:
+    """Занятое дело не расследуется вторым заданием и не остаётся «в очереди».
+
+    Две попытки на одном прогоне пишут в общий сохранённый ход и обе зовут
+    модель. Отказ виден человеку: дело неуспешно с названной причиной,
+    а не висит в очереди навсегда.
+    """
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, run = prepare(unit_of_work)
+    context = build_context(unit_of_work, FakeCodeReviewer(), monkeypatch)
+    context["run_lock"] = BusyRunLock()
+
+    result = await run_review_task(context, str(run.id), str(tenant_id))
+
+    assert result["status"] == "failed"
+    assert run.status is ReviewStatus.FAILED
+    assert run.failure_reason is not None
 
 
 async def test_task_reports_domain_error_without_raising(monkeypatch: Any) -> None:
@@ -161,3 +208,35 @@ async def test_shutdown_closes_the_database_even_if_something_else_fails() -> No
         await shutdown(context)
 
     assert engine.disposed is True
+
+
+class RecordingPipeline:
+    """Конвейер, от которого нужен только вызов уборки."""
+
+    def __init__(self, *, failing: bool = False) -> None:
+        self.forgotten: list[str] = []
+        self._failing = failing
+
+    async def forget(self, run_id: Any) -> None:
+        if self._failing:
+            raise RuntimeError("чекпоинтер недоступен")
+        self.forgotten.append(str(run_id))
+
+
+async def test_deleted_run_loses_its_saved_progress() -> None:
+    pipeline = RecordingPipeline()
+    run_id = uuid4()
+
+    result = await forget_checkpoint_task({"pipeline": pipeline}, str(run_id))
+
+    assert pipeline.forgotten == [str(run_id)]
+    assert result["status"] == "forgotten"
+
+
+async def test_unreachable_checkpointer_does_not_fail_the_task() -> None:
+    """Дело уже удалено, и повторять уборку не за чем: причина та же."""
+    result = await forget_checkpoint_task(
+        {"pipeline": RecordingPipeline(failing=True)}, str(uuid4())
+    )
+
+    assert result["status"] == "failed"

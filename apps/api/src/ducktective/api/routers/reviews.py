@@ -71,6 +71,7 @@ from ducktective.application.review.submit_feedback import (
     SubmitFindingFeedbackCommand,
 )
 from ducktective.config.queues import (
+    FORGET_CHECKPOINT_TASK_NAME,
     REVIEW_QUEUE,
     REVIEW_TASK_NAME,
 )
@@ -299,7 +300,14 @@ async def delete_review(
     tenant_id: UUID,
     unit_of_work: UnitOfWorkDependency,
     event_publisher: EventPublisherDependency,
+    task_queue: TaskQueueDependency,
 ) -> None:
+    """Удаляет дело вместе с находками, разметкой и сохранённым ходом.
+
+    Ход убирает воркер отдельной задачей: чекпоинтер открыт у него. Задача
+    ставится после успешного удаления — иначе уборка случилась бы у дела,
+    которое осталось жить.
+    """
     use_case = DeleteReviewRun(unit_of_work, event_publisher)
 
     try:
@@ -308,6 +316,12 @@ async def delete_review(
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
     except PermissionDeniedError as error:
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(error)) from error
+
+    await task_queue.enqueue_job(
+        FORGET_CHECKPOINT_TASK_NAME,
+        str(run_id),
+        _queue_name=REVIEW_QUEUE,
+    )
 
 
 @router.post(

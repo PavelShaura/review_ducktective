@@ -28,6 +28,7 @@ from ducktective.application.review.run_review import (
     RunReview,
 )
 from ducktective.config.queues import (
+    FORGET_CHECKPOINT_TASK_NAME,
     REVIEW_QUEUE,
     REVIEW_TASK_NAME,
 )
@@ -81,6 +82,10 @@ from ducktective.storage.events.step_broadcaster import (
 from ducktective.storage.investigation import (
     RecordingInvestigationSinks,
 )
+from ducktective.storage.locks import (
+    RedisRunLock,
+    RunLockBusyError,
+)
 from ducktective.storage.repositories.investigation import (
     SqlAlchemyInvestigationLog,
 )
@@ -124,6 +129,10 @@ async def startup(ctx: dict[str, Any]) -> None:
         token_budget=settings.context_token_budget,
     )
     ctx["max_output_tokens"] = settings.llm_max_output_tokens
+    ctx["run_lock"] = RedisRunLock(
+        redis_client,
+        wait_seconds=settings.review_lock_wait_seconds,
+    )
     resources = AsyncExitStack()
     ctx["resources"] = resources
     ctx["navigators"] = RequestNavigators(
@@ -155,6 +164,8 @@ async def startup(ctx: dict[str, Any]) -> None:
             cache_ttl_seconds=settings.llm_cache_ttl_seconds,
             timeout_seconds=settings.llm_timeout_seconds,
             local_supports_tools=settings.local_review_model_supports_tools,
+            local_context_window=settings.local_review_model_context_window,
+            cloud_context_window=settings.cloud_review_model_context_window,
         ),
         context_builder=ctx["context_builder"],
         navigators=ctx["navigators"],
@@ -206,6 +217,11 @@ async def run_review_task(
     `resume` со значением по умолчанию: задачи, поставленные в очередь
     до появления продолжения, лежат там с двумя аргументами и обязаны
     отработать как прогон с начала.
+
+    Работа идёт под блокировкой прогона: «прекратить», а следом «продолжить»
+    ставит задание, пока прежняя попытка ещё не узнала об отмене, и без
+    блокировки на одном деле оказались бы две попытки — с общим сохранённым
+    ходом и двойным счётом токенов.
     """
     use_case = RunReview(
         SqlAlchemyUnitOfWork(ctx["session_factory"]),
@@ -216,11 +232,16 @@ async def run_review_task(
 
     logger.info("review.started", run_id=run_id, resume=resume)
     try:
-        outcome = await use_case.execute(
-            TenantId(UUID(tenant_id)),
-            ReviewRunId(UUID(run_id)),
-            resume=resume,
-        )
+        async with ctx["run_lock"].hold(ReviewRunId(UUID(run_id))):
+            outcome = await use_case.execute(
+                TenantId(UUID(tenant_id)),
+                ReviewRunId(UUID(run_id)),
+                resume=resume,
+            )
+    except RunLockBusyError as error:
+        logger.warning("review.previous_attempt_holds_run", run_id=run_id, error=str(error))
+        await _mark_failed(ctx, run_id, error)
+        return {"run_id": run_id, "status": "failed", "error": str(error)}
     except ReviewCancelledError:
         logger.info("review.cancelled", run_id=run_id)
         return {"run_id": run_id, "status": "cancelled"}
@@ -257,6 +278,27 @@ async def run_review_task(
     }
 
 
+async def forget_checkpoint_task(ctx: dict[str, Any], run_id: str) -> dict[str, Any]:
+    """Убирает сохранённый ход удалённого дела.
+
+    Ставится в очередь после удаления, а не делается внутри него: чекпоинтер
+    живёт здесь, а удаляет api. Опоздание безвредно — дело уже удалено, и ход
+    без него никому не отдаётся, — а вот оставленный чекпоинт хранит патчи
+    всех файлов прогона, то есть это вопрос не только места на диске.
+
+    Ошибка не пробрасывается: повторная попытка arq упрётся в ту же причину,
+    а дело удалено в любом случае.
+    """
+    try:
+        await ctx["pipeline"].forget(ReviewRunId(UUID(run_id)))
+    except Exception as error:
+        logger.warning("review.checkpoint_not_forgotten", run_id=run_id, error=str(error))
+        return {"run_id": run_id, "status": "failed"}
+
+    logger.info("review.checkpoint_forgotten", run_id=run_id)
+    return {"run_id": run_id, "status": "forgotten"}
+
+
 async def _mark_failed(ctx: dict[str, Any], run_id: str, error: Exception) -> None:
     """Переводит прогон в неуспешный после непредвиденной ошибки.
 
@@ -282,7 +324,10 @@ class WorkerSettings:
     на этапе импорта модуля ещё не обязан быть валидным.
     """
 
-    functions: ClassVar[list[Any]] = [func(run_review_task, name=REVIEW_TASK_NAME)]
+    functions: ClassVar[list[Any]] = [
+        func(run_review_task, name=REVIEW_TASK_NAME),
+        func(forget_checkpoint_task, name=FORGET_CHECKPOINT_TASK_NAME),
+    ]
     queue_name = REVIEW_QUEUE
     on_startup = startup
     on_shutdown = shutdown

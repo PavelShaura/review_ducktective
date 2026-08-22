@@ -743,6 +743,8 @@ def _build_reviewers(
         cache_ttl_seconds=settings.llm_cache_ttl_seconds,
         timeout_seconds=settings.llm_timeout_seconds,
         local_supports_tools=settings.local_review_model_supports_tools,
+        local_context_window=settings.local_review_model_context_window,
+        cloud_context_window=settings.cloud_review_model_context_window,
     )
 
 

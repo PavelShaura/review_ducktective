@@ -21,6 +21,16 @@ class ModelChoice:
     до ошибки, — и узнать правду можно только неудачным прогоном.
     """
 
+    context_window: int = 0
+    """Сколько токенов помещается в эту модель, ноль — неизвестно.
+
+    Величина берётся из настройки, потому что называет её сервер, а не модель:
+    у `gemma-4-12b` в LM Studio `max_context_length` — 262 144, а загружена
+    она была с 16 640, и считать надо по второму. Неизвестное окно требованиям
+    узла не противоречит: отказать модели за то, что она о себе не рассказала,
+    хуже, чем попробовать.
+    """
+
 
 class ModelRouter:
     """Выбор модели под требования узла и политику репозитория.
@@ -59,13 +69,39 @@ class ModelRouter:
         return self._cloud_choice.supports_tools
 
     def select(self, requirements: ModelRequirements) -> ModelChoice:
+        """Модель под требования узла.
+
+        Локальная выбирается, пока она этим требованиям отвечает: облако
+        стоит денег и выпускает код наружу, поэтому уход туда обязан быть
+        обоснован тем, чего локальная модель не умеет, а не общим желанием
+        качества.
+
+        При запрещённом или отсутствующем облаке узел получает локальную
+        модель, даже если она его требований не выполняет: отказ оставил бы
+        файл без ревью, а откат на одноразовый проход у ревьюера уже есть
+        и сработает по настоящей причине — переполнению окна.
+        """
         if not requirements.cloud_allowed or not self.cloud_available:
             return self._local_choice
 
         assert self._cloud_choice is not None
-        if requirements.needs_tool_calling and not self._local_choice.supports_tools:
+        if not self._satisfies(self._local_choice, requirements):
             return self._cloud_choice
         if not requirements.needs_deep_reasoning:
             return self._local_choice
 
         return self._cloud_choice
+
+    @staticmethod
+    def _satisfies(choice: ModelChoice, requirements: ModelRequirements) -> bool:
+        """Отвечает ли модель тому, что попросил узел.
+
+        Неизвестное окно считается достаточным: сервер о нём не сказал,
+        а отказ по невысказанному признаку уводил бы в облако весь агентный
+        режим на любой сборке, которая себя не описывает.
+        """
+        if requirements.needs_tool_calling and not choice.supports_tools:
+            return False
+        return not (
+            choice.context_window and requirements.min_context_tokens > choice.context_window
+        )

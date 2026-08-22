@@ -1,4 +1,12 @@
 REVIEW_TASK_NAME = "run_review_task"
+FORGET_CHECKPOINT_TASK_NAME = "forget_checkpoint_task"
+"""Уборка сохранённого хода за удалённым делом.
+
+Задача воркера, а не работа api: чекпоинтер открыт там же, где идут прогоны,
+и заводить ради удаления второй пул соединений с langgraph в процессе api
+значит платить за чужую деталь на каждом запуске.
+"""
+
 INDEX_TASK_NAME = "build_index_task"
 
 REVIEW_QUEUE = "arq:queue:review"

@@ -79,6 +79,52 @@ def test_tool_calling_stays_local_when_the_local_model_can_call_tools() -> None:
     assert choice is LOCAL
 
 
+NARROW_LOCAL = ModelChoice(model="ollama/small", provider="ollama", context_window=8192)
+
+
+def test_node_that_needs_a_wider_window_gets_the_cloud_model() -> None:
+    """Цикл с инструментами копит диалог и упирается там, где проходу хватало."""
+    router = ModelRouter(
+        local_choice=NARROW_LOCAL,
+        cloud_choice=ModelChoice(model="anthropic/claude-sonnet-5", provider="anthropic"),
+        cloud_enabled=True,
+    )
+
+    choice = router.select(ModelRequirements(min_context_tokens=16384, cloud_allowed=True))
+
+    assert choice.provider == "anthropic"
+
+
+def test_window_that_fits_keeps_the_work_local() -> None:
+    router = ModelRouter(
+        local_choice=ModelChoice(model="ollama/wide", provider="ollama", context_window=32768),
+        cloud_choice=CLOUD,
+        cloud_enabled=True,
+    )
+
+    choice = router.select(ModelRequirements(min_context_tokens=16384, cloud_allowed=True))
+
+    assert choice is not CLOUD
+
+
+def test_unknown_window_is_not_a_reason_to_leave() -> None:
+    """Сервер о размере не сказал — это не то же самое, что «не поместится»."""
+    router = build_router()
+
+    choice = router.select(ModelRequirements(min_context_tokens=16384, cloud_allowed=True))
+
+    assert choice is LOCAL
+
+
+def test_narrow_window_stays_local_when_the_policy_forbids_the_cloud() -> None:
+    """Отказ оставил бы файл без ревью; откат на одноразовый проход есть у ревьюера."""
+    router = ModelRouter(local_choice=NARROW_LOCAL, cloud_choice=CLOUD, cloud_enabled=True)
+
+    choice = router.select(ModelRequirements(min_context_tokens=16384, cloud_allowed=False))
+
+    assert choice is NARROW_LOCAL
+
+
 def test_agentic_mode_knows_in_advance_that_it_has_nowhere_to_run() -> None:
     """Ответ нужен до прогона, а не на первом вызове посреди файла."""
     router = ModelRouter(local_choice=TOOLLESS_LOCAL, cloud_choice=CLOUD, cloud_enabled=True)

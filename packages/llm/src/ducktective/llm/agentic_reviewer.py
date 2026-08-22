@@ -69,6 +69,20 @@ DEFAULT_MAX_STEPS = 5
 будет уже негде.
 """
 
+AGENTIC_MIN_CONTEXT_TOKENS = 16384
+"""Окно, ниже которого цикл не имеет смысла.
+
+Измерено, а не выбрано: при 8192 системный промпт, собранное окружение
+и зарезервированный ответ оставляли на дифф около тысячи токенов — файлы
+крупнее падали с `exceed_context_size_error` ещё в одноразовом проходе.
+Диалог с инструментами копит поверх этого каждый показанный фрагмент,
+поэтому меньше шестнадцати тысяч он упирается в потолок раньше, чем успевает
+что-нибудь выяснить.
+
+Требование заявляется роутеру: узел не выбирает модель сам, но обязан сказать,
+чего ему не хватит.
+"""
+
 TRUNCATED_CALLS_MESSAGE = (
     "Your previous message hit the output token limit, so the arguments of your tool "
     "calls may be incomplete. None of them were executed. Re-issue the call you need, "
@@ -462,10 +476,13 @@ def _with_tool_calling(requirements: ModelRequirements) -> ModelRequirements:
 
     Роутер выбирает по нему провайдера: модель без вызова инструментов
     диалога не выдержит, и узнать об этом нужно до первого обращения.
+    Окно заявляется тем же способом и по той же причине — цикл копит диалог,
+    и модели, которой хватало на один проход, ему может не хватить.
     """
     return ModelRequirements(
         needs_deep_reasoning=requirements.needs_deep_reasoning,
         needs_tool_calling=True,
+        min_context_tokens=max(requirements.min_context_tokens, AGENTIC_MIN_CONTEXT_TOKENS),
         cloud_allowed=requirements.cloud_allowed,
         max_output_tokens=requirements.max_output_tokens,
         temperature=requirements.temperature,

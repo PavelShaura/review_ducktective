@@ -37,6 +37,8 @@ def build_model_router(
     cloud_api_key: str,
     cloud_enabled: bool,
     local_supports_tools: bool = True,
+    local_context_window: int = 0,
+    cloud_context_window: int = 0,
 ) -> ModelRouter:
     """Собирает роутер.
 
@@ -50,9 +52,15 @@ def build_model_router(
         api_base=local_base_url,
         api_key=local_api_key or None,
         supports_tools=local_supports_tools,
+        context_window=local_context_window,
     )
     cloud_choice = (
-        ModelChoice(model=cloud_model, provider="anthropic", api_key=cloud_api_key)
+        ModelChoice(
+            model=cloud_model,
+            provider="anthropic",
+            api_key=cloud_api_key,
+            context_window=cloud_context_window,
+        )
         if cloud_api_key
         else None
     )
@@ -76,6 +84,8 @@ def build_code_reviewers(
     cache_ttl_seconds: int,
     timeout_seconds: float,
     local_supports_tools: bool = True,
+    local_context_window: int = 0,
+    cloud_context_window: int = 0,
     agentic_enabled: bool = True,
     max_agent_steps: int = DEFAULT_MAX_STEPS,
     sink: InvestigationSink | None = None,
@@ -106,6 +116,8 @@ def build_code_reviewers(
         cloud_api_key=cloud_api_key,
         cloud_enabled=cloud_enabled,
         local_supports_tools=local_supports_tools,
+        local_context_window=local_context_window,
+        cloud_context_window=cloud_context_window,
     )
     cache = (
         RedisResponseCache(redis_client, ttl_seconds=cache_ttl_seconds)
