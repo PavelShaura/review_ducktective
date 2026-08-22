@@ -36,7 +36,7 @@ from tests.integration.test_review_run_persistence import (
     build_run,
     prepare_repository,
 )
-from tests.test_review_graph import (
+from tests.review_graph.test_review_graph import (
     HELPERS_FILE,
     SERVICE_FILE,
     build_draft,

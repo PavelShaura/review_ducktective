@@ -42,14 +42,14 @@ from ducktective.mcp_server.server import (
 from ducktective.retrieval.navigation import (
     IndexedNavigators,
 )
+from tests.application.test_retrieval_use_cases import (
+    chunk,
+    symbol,
+)
 from tests.fakes import (
     FakeChunkSearch,
     FakeSymbolReader,
     FakeUnitOfWork,
-)
-from tests.test_retrieval_use_cases import (
-    chunk,
-    symbol,
 )
 
 
