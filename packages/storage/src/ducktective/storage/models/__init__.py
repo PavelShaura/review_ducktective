@@ -1,6 +1,11 @@
 from ducktective.storage.models.base import (
     Base,
 )
+from ducktective.storage.models.chat import (
+    ConversationAttachmentModel,
+    ConversationModel,
+    MessageModel,
+)
 from ducktective.storage.models.code_repository import (
     CodeRepositoryModel,
 )
@@ -40,6 +45,8 @@ __all__ = [
     "CodeChunkModel",
     "CodeRepositoryModel",
     "CodeSymbolModel",
+    "ConversationAttachmentModel",
+    "ConversationModel",
     "EmbeddingModelModel",
     "EvalCaseModel",
     "EvalDatasetModel",
@@ -49,6 +56,7 @@ __all__ = [
     "FindingFeedbackModel",
     "FindingModel",
     "IndexSnapshotModel",
+    "MessageModel",
     "PromptVersionModel",
     "ReviewFileModel",
     "ReviewHunkModel",

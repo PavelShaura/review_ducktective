@@ -1,7 +1,8 @@
 import { lazy, Suspense } from "react";
-import { Link, Route, Routes } from "react-router";
+import { Link, NavLink, Route, Routes } from "react-router";
 
 const CaseListPage = lazy(() => import("@/pages/CaseListPage"));
+const ChatPage = lazy(() => import("@/pages/ChatPage"));
 const CasePage = lazy(() => import("@/pages/CasePage"));
 const MarksPage = lazy(() => import("@/pages/MarksPage"));
 const NewCasePage = lazy(() => import("@/pages/NewCasePage"));
@@ -17,6 +18,7 @@ export function App() {
             <Route path="/cases/new" element={<NewCasePage />} />
             <Route path="/cases/:runId" element={<CasePage />} />
             <Route path="/marks" element={<MarksPage />} />
+            <Route path="/chat" element={<ChatPage />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </Suspense>
@@ -43,19 +45,26 @@ function Header() {
           <span className="case-label hidden sm:inline">дела о качестве кода</span>
         </span>
       </Link>
-      <nav className="flex items-center gap-3">
-        <Link
-          to="/marks"
-          className="font-mono text-[13px] tracking-wide text-paper-dim transition-colors hover:text-brass"
-        >
+      <nav className="flex items-center gap-4">
+        <NavLink to="/chat" className="nav-action nav-chat" title="Спросить о коде">
+          <span className="nav-live" aria-hidden />
+          Чат
+        </NavLink>
+
+        <span className="nav-divider" aria-hidden />
+
+        <NavLink to="/marks" className="nav-action nav-marks" title="Картотека вердиктов">
+          <span className="nav-mark-stamp" aria-hidden>
+            ✓
+          </span>
           отметки
-        </Link>
-        <Link
-          to="/cases/new"
-          className="rounded-case border border-tweed px-4 py-2 font-mono text-[13px] tracking-wide text-paper-dim transition-colors hover:border-brass hover:text-brass"
-        >
-          новое дело
-        </Link>
+        </NavLink>
+
+        <span className="nav-divider" aria-hidden />
+
+        <NavLink to="/cases/new" className="nav-action nav-case" title="Запустить ревью диффа">
+          + новое ревью
+        </NavLink>
       </nav>
     </header>
   );

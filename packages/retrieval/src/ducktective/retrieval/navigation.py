@@ -81,6 +81,24 @@ class IndexedCodeNavigator:
             start_line,
             end_line,
         )
+        note: str | None = None
+
+        if not covering:
+            resolved = await self._resolve_path(path)
+            if resolved is None:
+                return NavigationAnswer(
+                    source=self.source, note=await self._missing_path_note(path)
+                )
+
+            note = f"Путь назван как {path}, в индексе он лежит как {resolved}"
+            covering = await self._symbols.symbols_covering(
+                self._repository_id,
+                resolved,
+                start_line,
+                end_line,
+            )
+            path = resolved
+
         if not covering:
             return NavigationAnswer(
                 source=self.source,
@@ -93,12 +111,53 @@ class IndexedCodeNavigator:
 
         return NavigationAnswer(
             source=self.source,
+            note=note,
             fragments=(
                 *(_definition(context) for context in covering),
                 *(_contract(context, FragmentRole.CALLEE) for context in callees),
                 *(_contract(context, FragmentRole.CALLER) for context in callers),
             ),
         )
+
+    async def _resolve_path(self, path: str) -> str | None:
+        """Приводит названный путь к тому, как он лежит в индексе.
+
+        В индексе путь относительный, а человек называет файл так, как видит
+        его у себя: абсолютным путём из редактора, куском с середины, одним
+        именем. Сначала ищется совпадение по концу пути, потом — по имени
+        файла: `/home/user/proj/src/app/packs.py` и `packs.py` должны
+        приводить к одному и тому же месту.
+
+        Разрешает инструмент, а не спрашивающий: требовать от него знания
+        о корне репозитория значит требовать знания об устройстве индекса.
+        """
+        for needle in _path_needles(path):
+            found = await self._symbols.find_paths(self._repository_id, needle, limit=2)
+            if len(found) == 1:
+                return found[0]
+            if found:
+                return None
+        return None
+
+    async def _missing_path_note(self, path: str) -> str:
+        """Объясняет промах и называет похожие пути.
+
+        Пустой ответ и «такого файла нет» читаются одинаково, а значат
+        разное: файл может лежать под другим корнем или называться так же,
+        как ещё три в соседних плагинах. Названные кандидаты превращают
+        тупик в следующий запрос.
+        """
+        candidates: list[str] = []
+        for needle in _path_needles(path):
+            candidates = await self._symbols.find_paths(self._repository_id, needle, limit=5)
+            if candidates:
+                break
+
+        if not candidates:
+            return f"Файла {path} в индексе нет"
+
+        listed = ", ".join(candidates)
+        return f"Файла {path} в индексе нет. Похожие пути: {listed}"
 
 
 class IndexedNavigators:
@@ -155,6 +214,16 @@ def _contract(context: SymbolContext, role: FragmentRole) -> CodeFragment:
         role=role,
         title=f"{context.qualified_name} · {context.kind.value}",
     )
+
+
+def _path_needles(path: str) -> list[str]:
+    """Куски пути, по которым его стоит искать, от точного к общему."""
+    cleaned = path.strip().strip("\"'").lstrip("/")
+    if not cleaned:
+        return []
+
+    name = cleaned.rsplit("/", maxsplit=1)[-1]
+    return [cleaned] if cleaned == name else [cleaned, name]
 
 
 def _ambiguity_note(name: str, found: int) -> str | None:

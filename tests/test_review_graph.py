@@ -326,7 +326,7 @@ async def test_stale_index_is_not_used_for_navigation() -> None:
     request = replace(
         build_request(),
         head_sha=CommitSha("b" * 40),
-        repository_path=Path("/repos/ssuz"),
+        repository_path=Path("/repos/library"),
         index_revision=CommitSha("f" * 40),
     )
 

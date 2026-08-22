@@ -21,6 +21,7 @@ ReviewHunkId = NewType("ReviewHunkId", UUID)
 FindingId = NewType("FindingId", UUID)
 FindingFeedbackId = NewType("FindingFeedbackId", UUID)
 ConversationId = NewType("ConversationId", UUID)
+MessageId = NewType("MessageId", UUID)
 
 CommitSha = NewType("CommitSha", str)
 ContentHash = NewType("ContentHash", str)

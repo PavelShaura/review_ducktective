@@ -2,6 +2,7 @@ import asyncio
 import re
 import time
 from collections.abc import (
+    AsyncIterator,
     Sequence,
 )
 from typing import (
@@ -30,6 +31,7 @@ from ducktective.core.llm.value_objects import (
     LlmMessage,
     LlmResponse,
     LlmRole,
+    LlmStreamPiece,
     LlmUsage,
     ModelRequirements,
     ToolCall,
@@ -113,14 +115,53 @@ class LiteLlmClient:
             await self._cache.put(cache_key, response)
         return response
 
-    async def _invoke(
+    async def stream(
+        self,
+        messages: list[LlmMessage],
+        *,
+        requirements: ModelRequirements,
+        tools: Sequence[ToolSpec] | None = None,
+    ) -> AsyncIterator[LlmStreamPiece]:
+        """Ответ по мере появления; итог приходит последним куском.
+
+        Повторов здесь нет, в отличие от `complete`: часть ответа уже
+        показана человеку, и вторая попытка начала бы писать другой текст
+        поверх начатого. Сбой посреди потока честнее прервать.
+        """
+        choice = self._router.select(requirements)
+        payload = self._payload(choice, messages, requirements, None, tools)
+        payload["stream"] = True
+        payload["stream_options"] = {"include_usage": True}
+
+        started_at = time.monotonic()
+        collected = _StreamCollector()
+
+        try:
+            async for chunk in await litellm.acompletion(**payload):
+                text = collected.absorb(chunk)
+                if text:
+                    yield LlmStreamPiece(text=text)
+        except ContextWindowExceededError as error:
+            raise _context_overflow_error(choice.model, error) from error
+        except Exception as error:
+            if _mentions_context_overflow(str(error)):
+                raise _context_overflow_error(choice.model, error) from error
+            raise LlmUnavailableError(
+                f"Модель {choice.model} прервала ответ: {error}",
+                model=choice.model,
+            ) from error
+
+        latency_ms = int((time.monotonic() - started_at) * 1000)
+        yield LlmStreamPiece(response=collected.finish(choice, latency_ms))
+
+    def _payload(
         self,
         choice: Any,
         messages: list[LlmMessage],
         requirements: ModelRequirements,
         json_schema: dict[str, Any] | None,
-        tools: Sequence[ToolSpec] | None = None,
-    ) -> LlmResponse:
+        tools: Sequence[ToolSpec] | None,
+    ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "model": choice.model,
             "messages": [_to_wire(message) for message in messages],
@@ -139,6 +180,17 @@ class LiteLlmClient:
                 "type": "json_schema",
                 "json_schema": {"name": "review", "schema": json_schema, "strict": False},
             }
+        return payload
+
+    async def _invoke(
+        self,
+        choice: Any,
+        messages: list[LlmMessage],
+        requirements: ModelRequirements,
+        json_schema: dict[str, Any] | None,
+        tools: Sequence[ToolSpec] | None = None,
+    ) -> LlmResponse:
+        payload = self._payload(choice, messages, requirements, json_schema, tools)
 
         last_error: Exception | None = None
         for attempt in range(1, self._max_attempts + 1):
@@ -227,6 +279,92 @@ def _tool_to_wire(tool: ToolSpec) -> dict[str, Any]:
             "parameters": tool.parameters,
         },
     }
+
+
+class _StreamCollector:
+    """Собирает ответ из приращений.
+
+    Текст приходит кусками, а вызовы инструментов — по частям: имя в одном
+    приращении, аргументы по буквам в следующих, и связывает их порядковый
+    номер, а не идентификатор. Поэтому вызовы копятся по индексу и становятся
+    ответом только в конце.
+
+    Расход токенов приходит отдельным куском в самом хвосте и только если
+    сервер согласился его прислать: у локальных сборок это не гарантировано,
+    и тогда счётчики остаются нулевыми — соврать было бы хуже.
+    """
+
+    def __init__(self) -> None:
+        self._text: list[str] = []
+        self._calls: dict[int, dict[str, str]] = {}
+        self._finish_reason: str | None = None
+        self._usage: LlmUsage = LlmUsage()
+
+    def absorb(self, chunk: Any) -> str:
+        usage = getattr(chunk, "usage", None)
+        if usage is not None:
+            self._usage = LlmUsage(
+                input_tokens=getattr(usage, "prompt_tokens", 0) or 0,
+                output_tokens=getattr(usage, "completion_tokens", 0) or 0,
+            )
+
+        choices = getattr(chunk, "choices", None) or ()
+        if not choices:
+            return ""
+
+        first = choices[0]
+        self._finish_reason = getattr(first, "finish_reason", None) or self._finish_reason
+
+        delta = getattr(first, "delta", None)
+        if delta is None:
+            return ""
+
+        self._absorb_tool_calls(delta)
+        text = getattr(delta, "content", None) or ""
+        if text:
+            self._text.append(text)
+        return str(text)
+
+    def finish(self, choice: Any, latency_ms: int) -> LlmResponse:
+        return LlmResponse(
+            content="".join(self._text),
+            model=choice.model,
+            provider=choice.provider,
+            usage=self._usage,
+            latency_ms=latency_ms,
+            is_truncated=self._finish_reason == "length",
+            tool_calls=tuple(
+                ToolCall(
+                    id=call.get("id") or f"call_{index}",
+                    name=call.get("name", ""),
+                    arguments=call.get("arguments") or "{}",
+                )
+                for index, call in sorted(self._calls.items())
+                if call.get("name")
+            ),
+        )
+
+    def _absorb_tool_calls(self, delta: Any) -> None:
+        for position, raw in enumerate(getattr(delta, "tool_calls", None) or ()):
+            index = getattr(raw, "index", None)
+            index = position if index is None else int(index)
+            call = self._calls.setdefault(index, {"id": "", "name": "", "arguments": ""})
+
+            identifier = getattr(raw, "id", None)
+            if identifier:
+                call["id"] = str(identifier)
+
+            function = getattr(raw, "function", None)
+            if function is None:
+                continue
+
+            name = getattr(function, "name", None)
+            if name:
+                call["name"] = str(name)
+
+            arguments = getattr(function, "arguments", None)
+            if arguments:
+                call["arguments"] += str(arguments)
 
 
 def _read_tool_calls(message: Any) -> tuple[ToolCall, ...]:

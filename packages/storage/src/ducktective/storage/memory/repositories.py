@@ -2,6 +2,9 @@ from uuid import (
     uuid4,
 )
 
+from ducktective.core.chat.entities import (
+    Conversation,
+)
 from ducktective.core.code_repository.entities import (
     CodeRepository,
 )
@@ -31,6 +34,7 @@ from ducktective.core.types import (
     CodeChunkId,
     CodeSymbolId,
     ContentHash,
+    ConversationId,
     EmbeddingModelId,
     IndexSnapshotId,
     QualifiedName,
@@ -139,6 +143,61 @@ class InMemoryReviewRunRepository:
         return collected
 
     def _tracked(self) -> list[ReviewRun]:
+        return [*self._committed.values(), *self._pending.values()]
+
+
+class InMemoryConversationRepository:
+    """Репозиторий агрегата Conversation в памяти процесса."""
+
+    def __init__(self) -> None:
+        self._committed: dict[ConversationId, Conversation] = {}
+        self._pending: dict[ConversationId, Conversation] = {}
+        self._removed_events: list[DomainEvent] = []
+
+    def add(self, conversation: Conversation) -> None:
+        self._pending[conversation.id] = conversation
+
+    async def get(self, conversation_id: ConversationId) -> Conversation:
+        conversation = self._pending.get(conversation_id) or self._committed.get(conversation_id)
+        if conversation is None:
+            raise EntityNotFoundError("Conversation", conversation_id)
+        return conversation
+
+    async def list_for_repository(
+        self,
+        tenant_id: TenantId,
+        repository_id: RepositoryId,
+        *,
+        limit: int = 50,
+    ) -> list[Conversation]:
+        found = [
+            conversation
+            for conversation in self._tracked()
+            if conversation.tenant_id == tenant_id and conversation.repository_id == repository_id
+        ]
+        found.sort(key=lambda conversation: conversation.updated_at, reverse=True)
+        return found[:limit]
+
+    async def remove(self, conversation: Conversation) -> None:
+        self._pending.pop(conversation.id, None)
+        self._committed.pop(conversation.id, None)
+        self._removed_events.extend(conversation.pull_events())
+
+    def commit(self) -> None:
+        self._committed.update(self._pending)
+        self._pending.clear()
+
+    def rollback(self) -> None:
+        self._pending.clear()
+
+    def collect_events(self) -> list[DomainEvent]:
+        collected = self._removed_events
+        self._removed_events = []
+        for conversation in self._tracked():
+            collected.extend(conversation.pull_events())
+        return collected
+
+    def _tracked(self) -> list[Conversation]:
         return [*self._committed.values(), *self._pending.values()]
 
 

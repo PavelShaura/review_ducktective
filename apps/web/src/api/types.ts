@@ -252,3 +252,58 @@ export interface ResolvedRevision {
   commit_sha: string;
   subject: string | null;
 }
+
+export type ChatRole = "user" | "assistant" | "tool";
+
+export interface ToolCall {
+  call_id: string;
+  name: string;
+  arguments: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  role: ChatRole;
+  content: string;
+  created_at: string;
+  tool_calls: ToolCall[];
+  tool_name: string | null;
+  model: string | null;
+  tokens_input: number;
+  tokens_output: number;
+}
+
+export interface AttachedDocument {
+  name: string;
+  size: number;
+}
+
+export interface Conversation {
+  id: string;
+  repository_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+  document: AttachedDocument | null;
+  messages: ChatMessage[];
+}
+
+export type ChatEventKind =
+  | "token"
+  | "tool_call"
+  | "tool_result"
+  | "note"
+  | "answer"
+  | "failure";
+
+export interface ChatEvent {
+  kind: ChatEventKind;
+  text: string;
+  tool_name: string | null;
+  tool_arguments: string | null;
+  tool_call_id: string | null;
+  model: string | null;
+  tokens_input: number;
+  tokens_output: number;
+}

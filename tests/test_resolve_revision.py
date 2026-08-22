@@ -38,9 +38,9 @@ OTHER_TENANT_ID = TenantId(uuid4())
 def registered(unit_of_work: FakeUnitOfWork, *, tenant_id: TenantId = TENANT_ID) -> CodeRepository:
     repository = CodeRepository.register(
         tenant_id=tenant_id,
-        name="ssuz",
+        name="library",
         vcs_provider=VcsProvider.LOCAL,
-        local_path=Path("/repos/ssuz"),
+        local_path=Path("/repos/library"),
     )
     unit_of_work.code_repositories.add(repository)
     return repository

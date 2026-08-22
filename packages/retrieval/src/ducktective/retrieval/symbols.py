@@ -8,6 +8,7 @@ from uuid import (
 from sqlalchemy import (
     Select,
     case,
+    func,
     or_,
     select,
 )
@@ -62,6 +63,40 @@ class PostgresSymbolReader:
             .order_by(CodeSymbolModel.end_line - CodeSymbolModel.start_line)
         )
         return await self._read(statement)
+
+    async def find_paths(
+        self,
+        repository_id: RepositoryId,
+        needle: str,
+        *,
+        limit: int = 5,
+    ) -> list[str]:
+        """Пути, оканчивающиеся на переданный кусок, короткие сначала.
+
+        Короткий путь при равном окончании — тот, что ближе к названному:
+        `.../selection_packs.py` найдёт и сам файл, и одноимённый в соседнем
+        плагине, и первым должен идти тот, у кого совпадение занимает
+        большую часть пути.
+        """
+        tail = needle.strip().lstrip("/")
+        if not tail:
+            return []
+
+        statement = (
+            select(SourceFileModel.path)
+            .where(
+                SourceFileModel.repository_id == repository_id,
+                SourceFileModel.is_deleted.is_(False),
+                or_(
+                    SourceFileModel.path == tail,
+                    SourceFileModel.path.endswith(f"/{tail}"),
+                ),
+            )
+            .order_by(func.length(SourceFileModel.path))
+            .limit(limit)
+        )
+        rows = await self._session.execute(statement)
+        return [row.path for row in rows]
 
     async def find_by_name(
         self,

@@ -5,6 +5,9 @@ from ducktective.core.retrieval.ports import (
 from ducktective.core.types import (
     RepositoryId,
 )
+from ducktective.retrieval.lexical import (
+    looks_literal,
+)
 
 
 RRF_CONSTANT = 60
@@ -12,6 +15,23 @@ RRF_CONSTANT = 60
 
 Значение из исходной работы про Reciprocal Rank Fusion: оно не даёт первому
 месту в одном источнике перевесить весь другой список.
+"""
+
+LITERAL_WEIGHTS = (1.0, 0.6)
+PROSE_WEIGHTS = (0.6, 1.0)
+"""Чему верить больше — словам или векторам, в зависимости от запроса.
+
+Спросили литералом — `/catalog_branch_select`, `AccessChecker` — отвечают
+слова: совпадение точное и единственное, а вектор на таком запросе
+предлагает похожее вместо того самого.
+
+Спросили словами — «где проверяются права» — отвечают векторы. Код
+английский, вопрос русский, и лексической половине совпадать не с чем:
+на живом индексе закрытой базы она отдавала миграции и тесты, где случайно
+встретились слова вопроса.
+
+Перевес мягкий, не отключение: у обеих половин остаётся право поднять
+фрагмент, который вторая не нашла, — ради этого слияние и делалось.
 """
 
 
@@ -39,13 +59,15 @@ class HybridSearch:
         lexical_hits = await self._lexical.search_chunks(repository_id, query, limit=candidates)
         vector_hits = await self._vector.search_chunks(repository_id, query, limit=candidates)
 
+        lexical_weight, vector_weight = LITERAL_WEIGHTS if looks_literal(query) else PROSE_WEIGHTS
+
         scores: dict[str, float] = {}
         by_id: dict[str, ChunkHit] = {}
 
-        for hits in (lexical_hits, vector_hits):
+        for hits, weight in ((lexical_hits, lexical_weight), (vector_hits, vector_weight)):
             for rank, hit in enumerate(hits, start=1):
                 key = str(hit.chunk_id)
-                scores[key] = scores.get(key, 0.0) + 1.0 / (RRF_CONSTANT + rank)
+                scores[key] = scores.get(key, 0.0) + weight / (RRF_CONSTANT + rank)
                 by_id.setdefault(key, hit)
 
         ordered = sorted(scores.items(), key=lambda item: item[1], reverse=True)

@@ -7,6 +7,9 @@ from typing import (
     runtime_checkable,
 )
 
+from ducktective.core.chat.ports import (
+    ConversationRepository,
+)
 from ducktective.core.code_repository.ports import (
     CodeRepositoryRepository,
 )
@@ -50,6 +53,9 @@ class UnitOfWork(Protocol):
 
     @property
     def embeddings(self) -> EmbeddingStore: ...
+
+    @property
+    def conversations(self) -> ConversationRepository: ...
 
     async def __aenter__(self) -> Self: ...
 

@@ -7,17 +7,32 @@ from arq import (
 )
 from fastapi import (
     Depends,
+    FastAPI,
     Request,
 )
 
+from ducktective.application.chat.ask import (
+    AskQuestion,
+)
 from ducktective.config.settings import (
     Settings,
 )
 from ducktective.core.review.ports import (
     CodeReviewer,
 )
+from ducktective.llm.embedder import (
+    LiteLlmEmbedder,
+)
 from ducktective.llm.factory import (
+    build_chat_agent,
     build_code_reviewers,
+)
+from ducktective.retrieval.navigation import (
+    IndexedNavigators,
+)
+from ducktective.retrieval.session_scope import (
+    SessionScopedHybridSearch,
+    SessionScopedSymbolReader,
 )
 from ducktective.storage.events.redis_publisher import (
     RedisEventPublisher,
@@ -64,6 +79,56 @@ def get_investigation_log(request: Request) -> SqlAlchemyInvestigationLog:
 def get_task_queue(request: Request) -> ArqRedis:
     queue: ArqRedis = request.app.state.task_queue
     return queue
+
+
+def build_navigators(app: FastAPI) -> IndexedNavigators:
+    """Навигация по индексу для разговора.
+
+    Собирается на каждый вопрос: внутри только сессии из общей фабрики,
+    состояния между вопросами у неё нет, а держать её в состоянии
+    приложения значит завести вторую точку правды о настройках.
+    """
+    settings: Settings = app.state.settings
+    session_factory = app.state.session_factory
+    embedder = LiteLlmEmbedder(
+        model=settings.local_embedding_model,
+        dimensions=settings.embedding_dimensions,
+        base_url=settings.local_embedding_base_url or None,
+        api_key=settings.local_llm_api_key,
+    )
+    return IndexedNavigators(
+        symbols=SessionScopedSymbolReader(session_factory),
+        search=SessionScopedHybridSearch(session_factory, embedder),
+    )
+
+
+def build_chat_use_case(app: FastAPI) -> AskQuestion:
+    """Собирает разговор: агент, навигация и запись реплик.
+
+    Живёт здесь, а не в зависимостях FastAPI, потому что нужен сокету:
+    у веб-сокета нет цикла «запрос — ответ», в который `Depends`
+    встраивается.
+    """
+    settings: Settings = app.state.settings
+    return AskQuestion(
+        SqlAlchemyUnitOfWork(app.state.session_factory),
+        RedisEventPublisher(app.state.redis),
+        build_chat_agent(
+            local_provider=settings.local_llm_provider,
+            local_model=settings.local_review_model,
+            local_base_url=settings.local_llm_base_url,
+            local_api_key=settings.local_llm_api_key,
+            cloud_model=settings.cloud_review_model,
+            cloud_api_key=settings.anthropic_api_key,
+            cloud_enabled=settings.cloud_providers_allowed,
+            timeout_seconds=settings.llm_timeout_seconds,
+            local_supports_tools=settings.local_review_model_supports_tools,
+            local_context_window=settings.local_review_model_context_window,
+            cloud_context_window=settings.cloud_review_model_context_window,
+        ),
+        build_navigators(app),
+        max_output_tokens=settings.llm_max_output_tokens,
+    )
 
 
 def get_code_reviewers(request: Request) -> tuple[CodeReviewer, ...]:

@@ -14,6 +14,9 @@ from sqlalchemy.ext.asyncio import (
 from ducktective.core.events import (
     DomainEvent,
 )
+from ducktective.storage.repositories.chat import (
+    SqlAlchemyConversationRepository,
+)
 from ducktective.storage.repositories.code_repository import (
     SqlAlchemyCodeRepositoryRepository,
 )
@@ -55,6 +58,7 @@ class SqlAlchemyUnitOfWork:
         self._source_files: SqlAlchemySourceFileRepository | None = None
         self._symbol_edges: SqlAlchemySymbolEdgeRepository | None = None
         self._embeddings: SqlAlchemyEmbeddingStore | None = None
+        self._conversations: SqlAlchemyConversationRepository | None = None
         self._collected_events: list[DomainEvent] = []
 
     @property
@@ -98,6 +102,12 @@ class SqlAlchemyUnitOfWork:
         if self._embeddings is None:
             self._embeddings = SqlAlchemyEmbeddingStore(self.session)
         return self._embeddings
+
+    @property
+    def conversations(self) -> SqlAlchemyConversationRepository:
+        if self._conversations is None:
+            self._conversations = SqlAlchemyConversationRepository(self.session)
+        return self._conversations
 
     async def __aenter__(self) -> Self:
         if self._session is not None:
@@ -144,6 +154,7 @@ class SqlAlchemyUnitOfWork:
             self._index_snapshots,
             self._source_files,
             self._symbol_edges,
+            self._conversations,
         ]
         return [repository for repository in candidates if repository is not None]
 
@@ -159,3 +170,4 @@ class SqlAlchemyUnitOfWork:
         self._source_files = None
         self._symbol_edges = None
         self._embeddings = None
+        self._conversations = None

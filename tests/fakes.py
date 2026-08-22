@@ -65,6 +65,7 @@ from ducktective.core.types import (
     TenantId,
 )
 from ducktective.storage.memory.repositories import (
+    InMemoryConversationRepository,
     InMemoryEmbeddingStore,
     InMemoryIndexSnapshotRepository,
     InMemorySourceFileRepository,
@@ -145,6 +146,7 @@ class FakeUnitOfWork:
         self.source_files = InMemorySourceFileRepository(self.index_snapshots)
         self.symbol_edges = InMemorySymbolEdgeRepository(self.source_files)
         self.embeddings = InMemoryEmbeddingStore(self.source_files)
+        self.conversations = InMemoryConversationRepository()
         self.commit_calls = 0
         self.rollback_calls = 0
         self.is_active = False
@@ -165,6 +167,7 @@ class FakeUnitOfWork:
         self.commit_calls += 1
         self.index_snapshots.commit()
         self.source_files.commit()
+        self.conversations.commit()
 
     async def rollback(self) -> None:
         self.rollback_calls += 1
@@ -179,6 +182,7 @@ class FakeUnitOfWork:
             collected.extend(run.pull_events())
         collected.extend(self.index_snapshots.collect_events())
         collected.extend(self.source_files.collect_events())
+        collected.extend(self.conversations.collect_events())
         return collected
 
 
@@ -330,13 +334,16 @@ class FakeSymbolReader:
         callees: list[SymbolContext] | None = None,
         callers: list[SymbolContext] | None = None,
         by_name: dict[str, list[SymbolContext]] | None = None,
+        paths: list[str] | None = None,
     ) -> None:
         self._covering = covering or []
         self._callees = callees or []
         self._callers = callers or []
         self._by_name = by_name or {}
+        self._paths = paths or []
         self.asked_lines: list[tuple[int, int]] = []
         self.asked_names: list[str] = []
+        self.asked_paths: list[str] = []
         self.asked_caller_ids: list[list[CodeSymbolId]] = []
 
     async def symbols_covering(
@@ -358,6 +365,17 @@ class FakeSymbolReader:
     ) -> list[SymbolContext]:
         self.asked_names.append(name)
         return self._by_name.get(name, [])[:limit]
+
+    async def find_paths(
+        self,
+        repository_id: RepositoryId,
+        needle: str,
+        *,
+        limit: int = 5,
+    ) -> list[str]:
+        self.asked_paths.append(needle)
+        tail = needle.lstrip("/")
+        return [path for path in self._paths if path == tail or path.endswith(f"/{tail}")][:limit]
 
     async def callees(
         self,

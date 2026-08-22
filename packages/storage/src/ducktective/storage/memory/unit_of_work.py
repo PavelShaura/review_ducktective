@@ -11,6 +11,7 @@ from ducktective.core.events import (
 )
 from ducktective.storage.memory.repositories import (
     InMemoryCodeRepositoryRepository,
+    InMemoryConversationRepository,
     InMemoryEmbeddingStore,
     InMemoryIndexSnapshotRepository,
     InMemoryReviewRunRepository,
@@ -48,6 +49,7 @@ class InMemoryUnitOfWork:
         self.source_files = InMemorySourceFileRepository(self.index_snapshots)
         self.symbol_edges = InMemorySymbolEdgeRepository(self.source_files)
         self.embeddings = InMemoryEmbeddingStore(self.source_files)
+        self.conversations = InMemoryConversationRepository()
         self._collected_events: list[DomainEvent] = []
         self._is_active = False
 
@@ -96,4 +98,5 @@ class InMemoryUnitOfWork:
             self.source_files,
             self.symbol_edges,
             self.embeddings,
+            self.conversations,
         ]

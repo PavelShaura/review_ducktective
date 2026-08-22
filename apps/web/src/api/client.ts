@@ -1,4 +1,5 @@
 import type {
+  Conversation,
   DiffSide,
   Feedback,
   FeedbackDigest,
@@ -14,6 +15,12 @@ import type {
 } from "@/api/types";
 
 const TENANT_ID = import.meta.env.VITE_TENANT_ID ?? "11111111-1111-1111-1111-111111111111";
+
+/** Разговор, в который попал человек, и завели ли его сейчас. */
+export interface StartedConversation {
+  conversation: Conversation;
+  isNew: boolean;
+}
 
 export interface ContextWindow {
   side: DiffSide;
@@ -40,6 +47,22 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(response.status, await readErrorMessage(response));
   }
   return (await response.json()) as T;
+}
+
+/** Ответ вместе с кодом: им сервер отличает заведённое от возвращённого. */
+async function requestWithStatus<T>(
+  path: string,
+  init?: RequestInit,
+): Promise<{ data: T; status: number }> {
+  const response = await fetch(`/api${path}`, {
+    ...init,
+    headers: { "Content-Type": "application/json", ...init?.headers },
+  });
+
+  if (!response.ok) {
+    throw new ApiError(response.status, await readErrorMessage(response));
+  }
+  return { data: (await response.json()) as T, status: response.status };
 }
 
 async function readErrorMessage(response: Response): Promise<string> {
@@ -150,6 +173,51 @@ export const api = {
 
   enqueueReview: (runId: string) =>
     request<ReviewRun>(`/reviews/${runId}/run?tenant_id=${TENANT_ID}`, { method: "POST" }),
+
+  listConversations: (repositoryId: string) =>
+    request<Conversation[]>(
+      `/chat/conversations?repository_id=${repositoryId}&tenant_id=${TENANT_ID}`,
+    ),
+
+  startConversation: async (repositoryId: string): Promise<StartedConversation> => {
+    const { data, status } = await requestWithStatus<Conversation>(`/chat/conversations`, {
+      method: "POST",
+      body: JSON.stringify({ repository_id: repositoryId, tenant_id: TENANT_ID }),
+    });
+    return { conversation: data, isNew: status === 201 };
+  },
+
+  attachDocument: (conversationId: string, name: string, text: string) =>
+    request<Conversation>(
+      `/chat/conversations/${conversationId}/document?tenant_id=${TENANT_ID}`,
+      { method: "PUT", body: JSON.stringify({ name, text }) },
+    ),
+
+  detachDocument: (conversationId: string) =>
+    request<Conversation>(
+      `/chat/conversations/${conversationId}/document?tenant_id=${TENANT_ID}`,
+      { method: "DELETE" },
+    ),
+
+  getConversation: (conversationId: string) =>
+    request<Conversation>(`/chat/conversations/${conversationId}?tenant_id=${TENANT_ID}`),
+
+  deleteConversation: async (conversationId: string): Promise<void> => {
+    const response = await fetch(`/api/chat/conversations/${conversationId}?tenant_id=${TENANT_ID}`, {
+      method: "DELETE",
+    });
+    if (!response.ok) {
+      throw new ApiError(response.status, response.statusText);
+    }
+  },
+
+  chatStream: (conversationId: string): WebSocket => {
+    const scheme = window.location.protocol === "https:" ? "wss" : "ws";
+    return new WebSocket(
+      `${scheme}://${window.location.host}/api/chat/conversations/${conversationId}` +
+        `/stream?tenant_id=${TENANT_ID}`,
+    );
+  },
 
   investigationStream: (runId: string): WebSocket => {
     const scheme = window.location.protocol === "https:" ? "wss" : "ws";

@@ -108,3 +108,23 @@ class LlmResponse:
     @property
     def has_tool_calls(self) -> bool:
         return bool(self.tool_calls)
+
+
+@dataclass(frozen=True, kw_only=True)
+class LlmStreamPiece:
+    """Кусок ответа, пришедший до того, как ответ дописан.
+
+    Приращения текста идут по мере генерации, а итог приходит последним
+    и единственный раз: только к концу становится известно, попросила ли
+    модель инструменты и во сколько токенов обошёлся ответ.
+
+    Одним типом вместо двух, потому что поток один: разделять их значит
+    заставлять вызывающего разбирать объединение на каждом куске.
+    """
+
+    text: str = ""
+    response: LlmResponse | None = None
+
+    @property
+    def is_final(self) -> bool:
+        return self.response is not None

@@ -65,13 +65,22 @@ async def test_result_present_in_both_sources_wins() -> None:
 
 
 async def test_incomparable_scores_do_not_leak_into_ranking() -> None:
-    """У лексики и векторов разные шкалы — учитывается только порядок."""
+    """У лексики и векторов разные шкалы — учитывается только порядок.
+
+    Оценки источников не переносятся в итог ни в каком виде: место
+    определяют ранг и вес источника, а собственная шкала остаётся снаружи.
+    """
     lexical = [hit("first", score=0.001)]
     vector = [hit("second", score=999.0)]
 
-    results = await search(lexical, vector)
+    swapped_lexical = [hit("first", score=999.0)]
+    swapped_vector = [hit("second", score=0.001)]
 
-    assert {result.score for result in results} == {results[0].score}
+    results = await search(lexical, vector)
+    swapped = await search(swapped_lexical, swapped_vector)
+
+    assert [result.breadcrumb for result in results] == [result.breadcrumb for result in swapped]
+    assert all(result.score < 1.0 for result in results)
 
 
 async def test_results_of_one_source_survive_when_other_is_empty() -> None:

@@ -6,6 +6,12 @@ from typing import (
     Any,
 )
 
+from ducktective.core.chat.documents import (
+    select_passages,
+)
+from ducktective.core.chat.entities import (
+    AttachedDocument,
+)
 from ducktective.core.llm.value_objects import (
     ToolCall,
     ToolSpec,
@@ -101,6 +107,22 @@ GET_FILE_CONTEXT = ToolSpec(
     },
 )
 
+SEARCH_DOCUMENT = ToolSpec(
+    name="search_document",
+    description=(
+        "Search the document attached to this conversation - a requirement, a spec, a page "
+        "exported from Confluence. Use it when the question refers to what is written there, "
+        "or to check the code against what it says."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "What to look for in the document"},
+        },
+        "required": ["query"],
+    },
+)
+
 NAVIGATION_TOOLS = (SEARCH_CODE, GET_DEFINITION, FIND_CALLERS, GET_FILE_CONTEXT)
 
 
@@ -136,13 +158,23 @@ class NavigationToolbox:
         navigator: CodeNavigator,
         *,
         result_chars: int = MAX_TOOL_RESULT_CHARS,
+        document: AttachedDocument | None = None,
     ) -> None:
         self._navigator = navigator
         self._result_chars = result_chars
+        self._document = document
 
     @property
     def specs(self) -> tuple[ToolSpec, ...]:
-        return NAVIGATION_TOOLS
+        """Инструменты, предложенные модели.
+
+        Поиск по документу появляется только когда документ приложен:
+        инструмент, отвечающий «прикладывать нечего», тратит и шаг цикла,
+        и место в окне, где перечислены инструменты.
+        """
+        if self._document is None:
+            return NAVIGATION_TOOLS
+        return (*NAVIGATION_TOOLS, SEARCH_DOCUMENT)
 
     async def execute(self, call: ToolCall) -> ToolExecutionResult:
         try:
@@ -150,10 +182,13 @@ class NavigationToolbox:
         except ValueError as error:
             return ToolExecutionResult(str(error), is_error=True)
 
+        if call.name == SEARCH_DOCUMENT.name:
+            return self._search_document(arguments)
+
         try:
             answer = await self._dispatch(call.name, arguments)
         except KeyError:
-            available = ", ".join(tool.name for tool in NAVIGATION_TOOLS)
+            available = ", ".join(tool.name for tool in self.specs)
             return ToolExecutionResult(
                 f"Инструмента «{call.name}» нет. Доступны: {available}",
                 is_error=True,
@@ -166,6 +201,31 @@ class NavigationToolbox:
         return ToolExecutionResult(
             render_for_model(answer, limit=self._result_chars),
             fragments=answer.fragments,
+        )
+
+    def _search_document(self, arguments: dict[str, Any]) -> ToolExecutionResult:
+        """Куски приложенного документа, относящиеся к запросу.
+
+        Фрагментами кода они не притворяются: у них нет ни файла, ни строк,
+        и в проверке доказательств им делать нечего. Абзац назван номером —
+        так на него можно сослаться в ответе, не выдавая за место в коде.
+        """
+        if self._document is None:
+            return ToolExecutionResult("К разговору не приложен документ", is_error=True)
+
+        query = str(arguments.get("query", "")).strip()
+        if not query:
+            return ToolExecutionResult("Пустой запрос к документу", is_error=True)
+
+        passages = select_passages(self._document.text, query)
+        if not passages:
+            return ToolExecutionResult(
+                f"В документе «{self._document.name}» ничего не нашлось по запросу «{query}»"
+            )
+
+        rendered = "\n\n".join(f"Абзац {passage.number}\n{passage.text}" for passage in passages)
+        return ToolExecutionResult(
+            _clipped(f"Документ «{self._document.name}»\n\n{rendered}", self._result_chars)
         )
 
     async def _dispatch(self, name: str, arguments: dict[str, Any]) -> NavigationAnswer:

@@ -2,6 +2,9 @@ from redis.asyncio import (
     Redis,
 )
 
+from ducktective.core.chat.ports import (
+    ChatAgent,
+)
 from ducktective.core.review.investigation import (
     InvestigationSink,
 )
@@ -14,6 +17,10 @@ from ducktective.llm.agentic_reviewer import (
 )
 from ducktective.llm.cache import (
     RedisResponseCache,
+)
+from ducktective.llm.chat_agent import (
+    AgenticChatAgent,
+    PresetChatAgent,
 )
 from ducktective.llm.client import (
     LiteLlmClient,
@@ -69,6 +76,50 @@ def build_model_router(
         cloud_choice=cloud_choice,
         cloud_enabled=cloud_enabled and cloud_choice is not None,
     )
+
+
+def build_chat_agent(
+    *,
+    local_provider: str,
+    local_model: str,
+    local_base_url: str,
+    local_api_key: str,
+    cloud_model: str,
+    cloud_api_key: str,
+    cloud_enabled: bool,
+    timeout_seconds: float,
+    local_supports_tools: bool = True,
+    local_context_window: int = 0,
+    cloud_context_window: int = 0,
+) -> ChatAgent:
+    """Собирает агента разговора.
+
+    Кэш ответов не подключается: два одинаковых вопроса в разговоре означают,
+    что первый ответ не устроил, и выдать тот же второй раз — худшее, что
+    можно сделать. Ревью повторяет один и тот же дифф, разговор — нет.
+
+    Агент выбирается один раз и по тому же признаку, что и ревьюер: цикл
+    с инструментами там, где модель их умеет, преднабор — где нет.
+    """
+    router = build_model_router(
+        local_provider=local_provider,
+        local_model=local_model,
+        local_base_url=local_base_url,
+        local_api_key=local_api_key,
+        cloud_model=cloud_model,
+        cloud_api_key=cloud_api_key,
+        cloud_enabled=cloud_enabled,
+        local_supports_tools=local_supports_tools,
+        local_context_window=local_context_window,
+        cloud_context_window=cloud_context_window,
+    )
+    client = LiteLlmClient(router, timeout_seconds=timeout_seconds)
+    preset = PresetChatAgent(client)
+
+    if not router.supports_tool_calling(cloud_allowed=cloud_enabled):
+        return preset
+
+    return AgenticChatAgent(client, fallback=preset)
 
 
 def build_code_reviewers(

@@ -19,6 +19,8 @@ from redis.asyncio import (
 )
 
 from ducktective.api.routers import (
+    chat,
+    chat_stream,
     health,
     investigation_stream,
     repositories,
@@ -87,6 +89,8 @@ def create_app() -> FastAPI:
     app.include_router(repositories.router)
     app.include_router(reviews.router)
     app.include_router(investigation_stream.router)
+    app.include_router(chat.router)
+    app.include_router(chat_stream.router)
     return app
 
 

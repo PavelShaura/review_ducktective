@@ -109,6 +109,20 @@ class SessionScopedSymbolReader:
                 limit=limit,
             )
 
+    async def find_paths(
+        self,
+        repository_id: RepositoryId,
+        needle: str,
+        *,
+        limit: int = 5,
+    ) -> list[str]:
+        async with self._session_factory() as session:
+            return await PostgresSymbolReader(session).find_paths(
+                repository_id,
+                needle,
+                limit=limit,
+            )
+
     async def callees(
         self,
         symbol_ids: list[CodeSymbolId],

@@ -66,10 +66,10 @@ export default function NewCasePage() {
 
   return (
     <div className="mx-auto max-w-2xl">
-      <h1 className="font-display text-4xl font-semibold text-paper">Завести дело</h1>
+      <h1 className="font-display text-4xl font-semibold text-paper">Новое ревью</h1>
       <p className="mt-2 text-[16px] text-paper-dim">
-        Укажите репозиторий и что смотреть: один коммит целиком или диапазон ревизий.
-        Ревью выполнит фоновый воркер, страница дела обновится сама.
+        Укажите репозиторий и что ревьюить: один коммит целиком или диапазон ревизий.
+        Прогон выполнит фоновый воркер, страница обновится сама.
       </p>
 
       <form
@@ -137,9 +137,9 @@ export default function NewCasePage() {
         <button
           type="submit"
           disabled={start.isPending || !isReady}
-          className="rounded-case border border-brass px-5 py-2 font-mono text-[13px] tracking-wide text-brass transition-colors hover:bg-brass hover:text-ink disabled:opacity-50"
+          className="action-brass"
         >
-          {start.isPending ? "отправляю в работу…" : "начать расследование"}
+          {start.isPending ? "запускаю ревью…" : "запустить ревью"}
         </button>
 
         <ContextWarning state={index.data} />

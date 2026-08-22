@@ -303,6 +303,426 @@
     border-color: color-mix(in srgb, var(--color-nitpick) 40%, transparent);
   }
 
+  /* Ответ агента разметкой. Заголовков модель почти не ставит, а списки,
+     выделения и фрагменты кода — постоянно, и именно они делают ответ
+     читаемым: место в коде видно раньше, чем прочитан абзац. */
+  .answer > :first-child {
+    margin-top: 0;
+  }
+
+  .answer > :last-child {
+    margin-bottom: 0;
+  }
+
+  .answer p,
+  .answer ul,
+  .answer ol,
+  .answer pre {
+    margin: 0.65rem 0;
+  }
+
+  .answer ul,
+  .answer ol {
+    padding-left: 1.15rem;
+  }
+
+  .answer ul {
+    list-style: disc;
+  }
+
+  .answer ol {
+    list-style: decimal;
+  }
+
+  .answer li {
+    margin: 0.2rem 0;
+  }
+
+  .answer strong {
+    color: var(--color-brass);
+    font-weight: 600;
+  }
+
+  .answer h1,
+  .answer h2,
+  .answer h3 {
+    font-family: var(--font-display);
+    font-size: 15px;
+    font-weight: 600;
+    margin: 0.9rem 0 0.4rem;
+  }
+
+  /* Имя файла со строками — самое ценное в ответе: по нему проверяют. */
+  .answer code {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    padding: 0.05rem 0.3rem;
+    border-radius: 2px;
+    background: color-mix(in srgb, var(--color-paper) 8%, transparent);
+    color: var(--color-paper);
+  }
+
+  .answer pre {
+    background: var(--color-ink-sunken);
+    border: 1px solid var(--color-tweed-dim);
+    border-radius: var(--radius-case);
+    padding: 0.7rem 0.85rem;
+    overflow-x: auto;
+  }
+
+  .answer pre code {
+    background: transparent;
+    padding: 0;
+    font-size: 12px;
+    line-height: 1.55;
+  }
+
+  .answer a {
+    color: var(--color-brass);
+    text-decoration: underline;
+  }
+
+  .answer blockquote {
+    border-left: 2px solid var(--color-tweed);
+    padding-left: 0.8rem;
+    color: var(--color-paper-dim);
+  }
+
+  /* Приложенный документ: ярлык на папке, не кнопка. */
+  .attachment-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    max-width: 22rem;
+    padding: 0.35rem 0.7rem;
+    border-radius: var(--radius-case);
+    border: 1px solid var(--color-tweed-dim);
+    background: var(--texture-tweed), var(--color-ink-raised);
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    color: var(--color-paper);
+  }
+
+  /* Подсказка в поле вопроса: она нужна один раз, пока поле пустое,
+     и не должна спорить с набранным текстом за внимание. */
+  .composer-input::placeholder {
+    color: color-mix(in srgb, var(--color-paper-dim) 40%, transparent);
+  }
+
+  /* Кнопки чата. Обрамление у всех, но вес разный: заводящее действие
+     залито латунью, второстепенное держится контуром. */
+  .action-brass {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    padding: 0.5rem 0.9rem;
+    border-radius: var(--radius-case);
+    border: 1px solid color-mix(in srgb, var(--color-ink) 60%, var(--color-brass));
+    background: var(--color-brass);
+    color: var(--color-ink);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.45);
+    transition:
+      background-color 140ms ease,
+      box-shadow 140ms ease,
+      transform 140ms ease;
+  }
+
+  .action-brass:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--color-brass) 82%, white);
+    transform: translateY(-1px);
+    box-shadow: 0 3px 8px -2px rgb(0 0 0 / 0.55);
+  }
+
+  .action-brass:disabled {
+    opacity: 0.5;
+    box-shadow: none;
+  }
+
+  .action-quiet {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    padding: 0.45rem 0.85rem;
+    border-radius: var(--radius-case);
+    border: 1px solid var(--color-tweed-dim);
+    background: color-mix(in srgb, var(--color-paper) 4%, transparent);
+    color: var(--color-paper-dim);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    letter-spacing: 0.06em;
+    transition:
+      border-color 140ms ease,
+      color 140ms ease,
+      background-color 140ms ease;
+  }
+
+  .action-quiet:hover:not(:disabled) {
+    border-color: var(--color-brass);
+    color: var(--color-brass);
+    background: color-mix(in srgb, var(--color-brass) 10%, transparent);
+  }
+
+  .action-quiet:disabled {
+    opacity: 0.45;
+  }
+
+  /* Выбор репозитория — корешки папок в картотеке: выбранный выдвинут
+     латунным торцом, остальные лежат ровно. */
+  .repo-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.9rem;
+    border-radius: var(--radius-case);
+    border: 1px solid var(--color-tweed-dim);
+    background: var(--texture-tweed), var(--color-ink-raised);
+    color: var(--color-paper-dim);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    transition:
+      border-color 140ms ease,
+      color 140ms ease,
+      box-shadow 140ms ease;
+  }
+
+  .repo-tab:hover {
+    border-color: var(--color-tweed);
+    color: var(--color-paper);
+  }
+
+  .repo-tab[aria-pressed="true"] {
+    color: var(--color-paper);
+    border-color: var(--color-tweed);
+    box-shadow:
+      inset 3px 0 0 var(--color-brass),
+      0 2px 6px -3px rgb(0 0 0 / 0.6);
+  }
+
+  /* Разговор в списке — карточка дела в миниатюре: заголовок, дата, счётчик
+     реплик. Открытый помечен латунным корешком, как раскрытый файл. */
+  .thread-card {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    /* Первым вопросом может быть путь без единого пробела: без переноса
+       внутри слова карточка растягивается и выталкивает соседей из колонки. */
+    overflow-wrap: anywhere;
+    padding: 0.6rem 0.75rem;
+    border-radius: var(--radius-case);
+    border: 1px solid var(--color-tweed-dim);
+    background: var(--color-ink-raised);
+    color: var(--color-paper-dim);
+    text-align: left;
+    transition:
+      border-color 140ms ease,
+      color 140ms ease,
+      box-shadow 140ms ease;
+  }
+
+  .thread-card:hover {
+    border-color: var(--color-tweed);
+    color: var(--color-paper);
+  }
+
+  .thread-card[aria-current="true"] {
+    color: var(--color-paper);
+    border-color: var(--color-tweed);
+    box-shadow:
+      inset 3px 0 0 var(--color-brass),
+      0 2px 6px -3px rgb(0 0 0 / 0.6);
+  }
+
+  .thread-count {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    padding: 0.05rem 0.35rem;
+    border-radius: 3px;
+    border: 1px solid var(--color-tweed-dim);
+    color: var(--color-paper-dim);
+  }
+
+  .thread-remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: var(--radius-case);
+    border: 1px solid var(--color-tweed-dim);
+    color: var(--color-paper-dim);
+    transition:
+      border-color 140ms ease,
+      color 140ms ease;
+  }
+
+  .thread-remove:hover {
+    border-color: var(--color-critical);
+    color: var(--color-critical);
+  }
+
+  /* Реплики. Вопрос — на бумажной подложке, ответ — на столе: так видно,
+     кто говорит, не читая текста. */
+  .bubble-user {
+    background: var(--texture-tweed), var(--color-ink-raised);
+    border: 1px solid var(--color-tweed-dim);
+    border-radius: var(--radius-case);
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.4);
+  }
+
+  .bubble-agent {
+    border-left: 2px solid var(--color-brass-dim);
+    padding-left: 0.9rem;
+  }
+
+  /* Карточка обращения к кодовой базе: свёрнутая улика, которую можно
+     развернуть и проверить. */
+  .tool-card {
+    border: 1px solid var(--color-tweed-dim);
+    border-radius: var(--radius-case);
+    background: color-mix(in srgb, var(--color-brass) 5%, transparent);
+    transition: border-color 140ms ease;
+  }
+
+  .tool-card:hover {
+    border-color: var(--color-tweed);
+  }
+
+  /* Три пункта шапки — три разные вещи, и выглядеть они обязаны по-разному.
+     Общая у них только посадка: одна высота, один шрифт, одна отбивка. */
+  .nav-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.9rem;
+    border-radius: var(--radius-case);
+    border: 1px solid transparent;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    letter-spacing: 0.08em;
+    white-space: nowrap;
+    transition:
+      background-color 140ms ease,
+      border-color 140ms ease,
+      color 140ms ease,
+      box-shadow 140ms ease,
+      transform 140ms ease;
+  }
+
+  /* Чат — единственное место, где что-то происходит в реальном времени,
+     поэтому у него живой огонёк, а не просто цвет. */
+  .nav-chat {
+    border-color: var(--color-brass-dim);
+    color: var(--color-brass);
+    background: color-mix(in srgb, var(--color-brass) 8%, transparent);
+  }
+
+  .nav-chat:hover {
+    background: color-mix(in srgb, var(--color-brass) 18%, transparent);
+    border-color: var(--color-brass);
+    box-shadow: 0 0 14px -4px var(--color-brass);
+  }
+
+  .nav-chat[aria-current="page"] {
+    background: color-mix(in srgb, var(--color-brass) 22%, transparent);
+    border-color: var(--color-brass);
+  }
+
+  .nav-live {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--color-brass);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-brass) 70%, transparent);
+    animation: nav-live-pulse 2.4s ease-out infinite;
+  }
+
+  @keyframes nav-live-pulse {
+    0% {
+      box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-brass) 65%, transparent);
+      opacity: 1;
+    }
+    70% {
+      box-shadow: 0 0 0 7px transparent;
+      opacity: 0.55;
+    }
+    100% {
+      box-shadow: 0 0 0 0 transparent;
+      opacity: 1;
+    }
+  }
+
+  /* Отметки — картотека вердиктов, и знак у неё штампованный: галочка
+     в рамке, зелёная, как подтверждённая находка. */
+  .nav-marks {
+    border-color: var(--color-tweed-dim);
+    color: var(--color-paper-dim);
+  }
+
+  .nav-marks:hover {
+    border-color: color-mix(in srgb, var(--color-confirmed) 65%, transparent);
+    color: var(--color-confirmed);
+  }
+
+  .nav-marks[aria-current="page"] {
+    border-color: color-mix(in srgb, var(--color-confirmed) 65%, transparent);
+    color: var(--color-confirmed);
+    background: color-mix(in srgb, var(--color-confirmed) 10%, transparent);
+  }
+
+  .nav-mark-stamp {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border: 1px solid currentColor;
+    border-radius: 2px;
+    font-size: 10px;
+    line-height: 1;
+  }
+
+  /* Новое дело — единственное действие, которое что-то заводит, поэтому
+     оно залито латунью, как метка находок на ярлыке файла. */
+  .nav-case {
+    background: var(--color-brass);
+    color: var(--color-ink);
+    border-color: color-mix(in srgb, var(--color-ink) 60%, var(--color-brass));
+    font-weight: 600;
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.45);
+  }
+
+  .nav-case:hover {
+    background: color-mix(in srgb, var(--color-brass) 82%, white);
+    transform: translateY(-1px);
+    box-shadow: 0 3px 8px -2px rgb(0 0 0 / 0.55);
+  }
+
+  /* Разделитель между пунктами: они не варианты одного выбора, а три
+     отдельные двери. */
+  .nav-divider {
+    width: 1px;
+    align-self: stretch;
+    background: var(--color-tweed-dim);
+    opacity: 0.6;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .nav-live {
+      animation: none;
+    }
+
+    .nav-case:hover {
+      transform: none;
+    }
+  }
+
   /* Кнопки вердикта лежат на тонированной плашке и должны быть светлее её:
      это основное действие в интерфейсе, ради него всё и открывают. */
   .verdict-button {
