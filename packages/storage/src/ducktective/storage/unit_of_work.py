@@ -31,8 +31,8 @@ from ducktective.storage.repositories.indexing import (
     SqlAlchemySourceFileRepository,
     SqlAlchemySymbolEdgeRepository,
 )
-from ducktective.storage.repositories.model_profile import (
-    SqlAlchemyModelProfileRepository,
+from ducktective.storage.repositories.provider_connection import (
+    SqlAlchemyProviderConnectionRepository,
 )
 from ducktective.storage.repositories.review_run import (
     SqlAlchemyReviewRunRepository,
@@ -90,7 +90,7 @@ class SqlAlchemyUnitOfWork:
         self._tenants: SqlAlchemyTenantRepository | None = None
         self._user_accounts: SqlAlchemyUserAccountRepository | None = None
         self._invitations: SqlAlchemyInvitationRepository | None = None
-        self._model_profiles: SqlAlchemyModelProfileRepository | None = None
+        self._provider_connections: SqlAlchemyProviderConnectionRepository | None = None
         self._collected_events: list[DomainEvent] = []
 
     @property
@@ -160,10 +160,10 @@ class SqlAlchemyUnitOfWork:
         return self._invitations
 
     @property
-    def model_profiles(self) -> SqlAlchemyModelProfileRepository:
-        if self._model_profiles is None:
-            self._model_profiles = SqlAlchemyModelProfileRepository(self.session)
-        return self._model_profiles
+    def provider_connections(self) -> SqlAlchemyProviderConnectionRepository:
+        if self._provider_connections is None:
+            self._provider_connections = SqlAlchemyProviderConnectionRepository(self.session)
+        return self._provider_connections
 
     async def __aenter__(self) -> Self:
         if self._session is not None:
@@ -217,7 +217,7 @@ class SqlAlchemyUnitOfWork:
             self._tenants,
             self._user_accounts,
             self._invitations,
-            self._model_profiles,
+            self._provider_connections,
         ]
         return [repository for repository in candidates if repository is not None]
 
@@ -237,4 +237,4 @@ class SqlAlchemyUnitOfWork:
         self._tenants = None
         self._user_accounts = None
         self._invitations = None
-        self._model_profiles = None
+        self._provider_connections = None

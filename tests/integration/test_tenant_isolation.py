@@ -29,8 +29,8 @@ from ducktective.core.code_repository.value_objects import (
     ModelTrust,
     VcsProvider,
 )
-from ducktective.core.llm.model_profile import (
-    ModelProfile,
+from ducktective.core.llm.provider_connection import (
+    ProviderConnection,
 )
 from ducktective.core.review.entities import (
     ReviewRun,
@@ -46,8 +46,8 @@ from ducktective.core.types import (
 from ducktective.storage.models.code_repository import (
     CodeRepositoryModel,
 )
-from ducktective.storage.models.model_profile import (
-    ModelProfileModel,
+from ducktective.storage.models.provider_connection import (
+    ProviderConnectionModel,
 )
 from ducktective.storage.models.review import (
     ReviewRunModel,
@@ -216,10 +216,10 @@ async def test_child_rows_follow_their_parent(
     assert set(own).isdisjoint(set(foreign))
 
 
-async def test_model_of_another_organization_is_neither_read_nor_written(
+async def test_connection_of_another_organization_is_neither_read_nor_written(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    """Модели организации закрыты политикой так же, как её прогоны.
+    """Подключения организации закрыты политикой так же, как её прогоны.
 
     Проверка появилась после живой ошибки: ручка открывала транзакцию без
     названного тенанта — ту, что предназначена контуру входа, — и вставка
@@ -229,30 +229,32 @@ async def test_model_of_another_organization_is_neither_read_nor_written(
     second_tenant = await create_tenant(session_factory)
 
     async with SqlAlchemyUnitOfWork(session_factory, tenant_id=first_tenant) as unit_of_work:
-        unit_of_work.model_profiles.add(
-            ModelProfile.create(
+        unit_of_work.provider_connections.add(
+            ProviderConnection.create(
                 tenant_id=first_tenant,
                 name="free",
-                model="openrouter/model:free",
+                default_model="openrouter/model:free",
                 encrypted_api_key="ciphertext",
             )
         )
         await unit_of_work.commit()
 
     async with SqlAlchemyUnitOfWork(session_factory, tenant_id=first_tenant) as unit_of_work:
-        assert len(await unit_of_work.model_profiles.list_for_tenant(first_tenant)) == 1
+        assert len(await unit_of_work.provider_connections.list_for_tenant(first_tenant)) == 1
 
     async with SqlAlchemyUnitOfWork(session_factory, tenant_id=second_tenant) as unit_of_work:
-        assert await unit_of_work.model_profiles.list_for_tenant(first_tenant) == []
+        assert await unit_of_work.provider_connections.list_for_tenant(first_tenant) == []
 
     async with session_factory() as session:
         await bind_tenant(session, second_tenant)
         session.add(
-            ModelProfileModel(
+            ProviderConnectionModel(
                 id=uuid4(),
                 tenant_id=first_tenant,
                 name="smuggled",
-                model="openrouter/model:free",
+                default_model="openrouter/model:free",
+                catalogue=[],
+                catalogue_refreshed_at=None,
                 provider="openrouter",
                 base_url="",
                 encrypted_api_key="",

@@ -13,20 +13,22 @@ from pydantic import (
 from ducktective.core.code_repository.value_objects import (
     ModelTrust,
 )
-from ducktective.core.llm.model_profile import (
-    ModelProfile,
-)
 from ducktective.core.llm.presets import (
     ModelPreset,
 )
+from ducktective.core.llm.provider_connection import (
+    ProviderConnection,
+)
 
 
-class ModelProfileResponse(BaseModel):
-    """Модель организации. Ключ не отдаётся — только признак, что он задан."""
+class ProviderConnectionResponse(BaseModel):
+    """Подключение организации. Ключ не отдаётся — только признак, что он задан."""
 
     id: UUID
     name: str
-    model: str
+    default_model: str
+    models: list[str]
+    catalogue_refreshed_at: datetime | None
     provider: str
     base_url: str
     trust: ModelTrust
@@ -38,27 +40,30 @@ class ModelProfileResponse(BaseModel):
     created_at: datetime
 
     @classmethod
-    def from_domain(cls, profile: ModelProfile) -> "ModelProfileResponse":
+    def from_domain(cls, connection: ProviderConnection) -> "ProviderConnectionResponse":
         return cls(
-            id=profile.id,
-            name=profile.name,
-            model=profile.model,
-            provider=profile.provider,
-            base_url=profile.base_url,
-            trust=profile.trust,
-            supports_tools=profile.supports_tools,
-            context_window=profile.context_window,
-            note=profile.note,
-            is_enabled=profile.is_enabled,
-            has_api_key=bool(profile.encrypted_api_key),
-            created_at=profile.created_at,
+            id=connection.id,
+            name=connection.name,
+            default_model=connection.default_model,
+            models=list(connection.models),
+            catalogue_refreshed_at=connection.catalogue_refreshed_at,
+            provider=connection.provider,
+            base_url=connection.base_url,
+            trust=connection.trust,
+            supports_tools=connection.supports_tools,
+            context_window=connection.context_window,
+            note=connection.note,
+            is_enabled=connection.is_enabled,
+            has_api_key=bool(connection.encrypted_api_key),
+            created_at=connection.created_at,
         )
 
 
-class AddModelRequest(BaseModel):
+class AddConnectionRequest(BaseModel):
     name: str = Field(min_length=1, max_length=64)
-    model: str = Field(min_length=1, max_length=255)
     api_key: str = ""
+    default_model: str = ""
+    catalogue: list[str] = Field(default_factory=list)
     provider: str = ""
     base_url: str = ""
     trust: ModelTrust = ModelTrust.TRAINING_REMOTE
@@ -67,10 +72,10 @@ class AddModelRequest(BaseModel):
     note: str = ""
 
 
-class UpdateModelRequest(BaseModel):
-    """Правка модели. Пустой ключ значит «оставить прежний», а не «стереть»."""
+class UpdateConnectionRequest(BaseModel):
+    """Правка подключения. Пустой ключ значит «оставить прежний», а не «стереть»."""
 
-    model: str | None = None
+    default_model: str | None = None
     api_key: str | None = None
     base_url: str | None = None
     trust: ModelTrust | None = None
@@ -108,3 +113,18 @@ class ModelPresetResponse(BaseModel):
             signup_url=preset.signup_url,
             note=preset.note,
         )
+
+
+class ProbeConnectionRequest(BaseModel):
+    """Проверка до сохранения: отвечает ли провайдер на этот ключ."""
+
+    model: str = Field(min_length=1, max_length=255)
+    api_key: str = ""
+    provider: str = ""
+    base_url: str = ""
+
+
+class ProbeConnectionResponse(BaseModel):
+    is_reachable: bool
+    detail: str
+    models: list[str] = Field(default_factory=list)

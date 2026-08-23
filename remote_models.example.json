@@ -9,6 +9,17 @@
     "note": "Платный провайдер: запросы не используются для обучения"
   },
   {
+    "name": "opencode-go",
+    "model": "openai/kimi-k3",
+    "provider": "openai",
+    "base_url": "https://opencode.ai/zen/go/v1",
+    "api_key_env": "OPENCODE_API_KEY",
+    "trust": "private_remote",
+    "supports_tools": true,
+    "context_window": 128000,
+    "note": "Подписка на открытые модели: лимит долларовый, а не по числу обращений"
+  },
+  {
     "name": "gemini-flash",
     "model": "gemini/gemini-2.5-flash",
     "api_key_env": "GEMINI_API_KEY",

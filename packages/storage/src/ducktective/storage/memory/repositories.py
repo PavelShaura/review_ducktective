@@ -27,9 +27,9 @@ from ducktective.core.indexing.ports import (
 from ducktective.core.indexing.value_objects import (
     SnapshotStatus,
 )
-from ducktective.core.llm.model_profile import (
-    ModelProfile,
-    ModelProfileId,
+from ducktective.core.llm.provider_connection import (
+    ConnectionId,
+    ProviderConnection,
 )
 from ducktective.core.review.entities import (
     ReviewRun,
@@ -647,34 +647,34 @@ class InMemoryInvitationRepository:
         return [*self._committed.values(), *self._pending.values()]
 
 
-class InMemoryModelProfileRepository:
-    """Модели организации в памяти процесса."""
+class InMemoryProviderConnectionRepository:
+    """Подключения организации в памяти процесса."""
 
     def __init__(self) -> None:
-        self._committed: dict[ModelProfileId, ModelProfile] = {}
-        self._pending: dict[ModelProfileId, ModelProfile] = {}
+        self._committed: dict[ConnectionId, ProviderConnection] = {}
+        self._pending: dict[ConnectionId, ProviderConnection] = {}
 
-    def add(self, profile: ModelProfile) -> None:
-        self._pending[profile.id] = profile
+    def add(self, connection: ProviderConnection) -> None:
+        self._pending[connection.id] = connection
 
-    async def get(self, profile_id: ModelProfileId) -> ModelProfile:
-        profile = self._pending.get(profile_id) or self._committed.get(profile_id)
-        if profile is None:
-            raise EntityNotFoundError("ModelProfile", profile_id)
-        return profile
+    async def get(self, connection_id: ConnectionId) -> ProviderConnection:
+        connection = self._pending.get(connection_id) or self._committed.get(connection_id)
+        if connection is None:
+            raise EntityNotFoundError("ProviderConnection", connection_id)
+        return connection
 
-    async def list_for_tenant(self, tenant_id: TenantId) -> list[ModelProfile]:
-        return [profile for profile in self._tracked() if profile.tenant_id == tenant_id]
+    async def list_for_tenant(self, tenant_id: TenantId) -> list[ProviderConnection]:
+        return [connection for connection in self._tracked() if connection.tenant_id == tenant_id]
 
-    async def find_by_name(self, tenant_id: TenantId, name: str) -> ModelProfile | None:
-        for profile in self._tracked():
-            if profile.tenant_id == tenant_id and profile.name == name:
-                return profile
+    async def find_by_name(self, tenant_id: TenantId, name: str) -> ProviderConnection | None:
+        for connection in self._tracked():
+            if connection.tenant_id == tenant_id and connection.name == name:
+                return connection
         return None
 
-    async def remove(self, profile: ModelProfile) -> None:
-        self._pending.pop(profile.id, None)
-        self._committed.pop(profile.id, None)
+    async def remove(self, connection: ProviderConnection) -> None:
+        self._pending.pop(connection.id, None)
+        self._committed.pop(connection.id, None)
 
     def commit(self) -> None:
         self._committed.update(self._pending)
@@ -685,9 +685,9 @@ class InMemoryModelProfileRepository:
 
     def collect_events(self) -> list[DomainEvent]:
         collected: list[DomainEvent] = []
-        for profile in self._tracked():
-            collected.extend(profile.pull_events())
+        for connection in self._tracked():
+            collected.extend(connection.pull_events())
         return collected
 
-    def _tracked(self) -> list[ModelProfile]:
+    def _tracked(self) -> list[ProviderConnection]:
         return [*self._committed.values(), *self._pending.values()]

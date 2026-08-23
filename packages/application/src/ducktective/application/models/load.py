@@ -11,7 +11,8 @@ from ducktective.core.code_repository.value_objects import (
 from ducktective.core.exceptions import (
     SecretNotDecryptableError,
 )
-from ducktective.core.llm.model_profile import (
+from ducktective.core.llm.provider_connection import (
+    ProviderConnection,
     SecretCipher,
 )
 from ducktective.core.ports import (
@@ -25,7 +26,7 @@ from ducktective.core.types import (
 
 @dataclass(frozen=True, kw_only=True)
 class ResolvedModel:
-    """Модель организации с расшифрованным ключом, готовая к вызову.
+    """Модель подключения с расшифрованным ключом, готовая к вызову.
 
     Живёт ровно столько, сколько собирается роутер: расшифрованный ключ
     не кладётся ни в ответ API, ни в журнал, ни в состояние прогона.
@@ -42,14 +43,14 @@ class ResolvedModel:
 
 
 class LoadTenantModels(TransactionalUseCase):
-    """Модели организации для роутера.
+    """Модели организации для роутера — по одной на каждую модель подключения.
 
     Отдельно от чтения списка в интерфейс: там ключ не нужен и не должен
     покидать базу вовсе, здесь без него нельзя обратиться к провайдеру.
 
-    Модель, чей ключ не расшифровался сменившимся секретом, пропускается:
-    отказ собрать роутер целиком оставил бы прогон без единой модели,
-    включая локальную, которой секрет не нужен.
+    Подключение, чей ключ не расшифровался сменившимся секретом, пропускается:
+    отказ собрать роутер целиком оставил бы прогон без единой модели, включая
+    локальную, которой секрет не нужен.
     """
 
     def __init__(
@@ -63,33 +64,45 @@ class LoadTenantModels(TransactionalUseCase):
 
     async def execute(self, tenant_id: TenantId) -> tuple[ResolvedModel, ...]:
         async with self._unit_of_work:
-            profiles = await self._unit_of_work.model_profiles.list_for_tenant(tenant_id)
+            connections = await self._unit_of_work.provider_connections.list_for_tenant(tenant_id)
 
         resolved: list[ResolvedModel] = []
-        for profile in profiles:
-            if not profile.is_enabled:
+        for connection in connections:
+            if not connection.is_enabled:
                 continue
 
-            api_key = ""
-            if profile.encrypted_api_key:
-                if self._cipher is None:
-                    continue
-                try:
-                    api_key = self._cipher.decrypt(profile.encrypted_api_key)
-                except SecretNotDecryptableError:
-                    continue
+            api_key = self._decrypt(connection)
+            if api_key is None:
+                continue
 
-            resolved.append(
-                ResolvedModel(
-                    name=profile.name,
-                    model=profile.model,
-                    provider=profile.provider,
-                    base_url=profile.base_url,
-                    api_key=api_key,
-                    trust=profile.trust,
-                    supports_tools=profile.supports_tools,
-                    context_window=profile.context_window,
-                )
-            )
+            resolved.extend(self._models_of(connection, api_key))
 
         return tuple(resolved)
+
+    def _decrypt(self, connection: ProviderConnection) -> str | None:
+        """`None` означает «это подключение сейчас непригодно»."""
+        if not connection.encrypted_api_key:
+            return ""
+        if self._cipher is None:
+            return None
+
+        try:
+            return self._cipher.decrypt(connection.encrypted_api_key)
+        except SecretNotDecryptableError:
+            return None
+
+    @staticmethod
+    def _models_of(connection: ProviderConnection, api_key: str) -> list[ResolvedModel]:
+        return [
+            ResolvedModel(
+                name=connection.qualified(model),
+                model=model,
+                provider=connection.provider,
+                base_url=connection.base_url,
+                api_key=api_key,
+                trust=connection.trust,
+                supports_tools=connection.supports_tools,
+                context_window=connection.context_window,
+            )
+            for model in connection.models
+        ]

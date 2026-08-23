@@ -25,8 +25,8 @@ from ducktective.storage.models.indexing import (
     SourceFileModel,
     SymbolEdgeModel,
 )
-from ducktective.storage.models.model_profile import (
-    ModelProfileModel,
+from ducktective.storage.models.provider_connection import (
+    ProviderConnectionModel,
 )
 from ducktective.storage.models.review import (
     FindingEvidenceModel,
@@ -61,8 +61,8 @@ __all__ = [
     "FindingModel",
     "IndexSnapshotModel",
     "MessageModel",
-    "ModelProfileModel",
     "PromptVersionModel",
+    "ProviderConnectionModel",
     "ReviewFileModel",
     "ReviewHunkModel",
     "ReviewRunModel",

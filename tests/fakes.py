@@ -79,7 +79,7 @@ from ducktective.storage.memory.repositories import (
     InMemoryEmbeddingStore,
     InMemoryIndexSnapshotRepository,
     InMemoryInvitationRepository,
-    InMemoryModelProfileRepository,
+    InMemoryProviderConnectionRepository,
     InMemorySourceFileRepository,
     InMemorySymbolEdgeRepository,
     InMemoryTenantRepository,
@@ -164,7 +164,7 @@ class FakeUnitOfWork:
         self.tenants = InMemoryTenantRepository()
         self.user_accounts = InMemoryUserAccountRepository()
         self.invitations = InMemoryInvitationRepository()
-        self.model_profiles = InMemoryModelProfileRepository()
+        self.provider_connections = InMemoryProviderConnectionRepository()
         self.commit_calls = 0
         self.rollback_calls = 0
         self.is_active = False
@@ -189,7 +189,7 @@ class FakeUnitOfWork:
         self.tenants.commit()
         self.user_accounts.commit()
         self.invitations.commit()
-        self.model_profiles.commit()
+        self.provider_connections.commit()
 
     async def rollback(self) -> None:
         self.rollback_calls += 1
@@ -208,7 +208,7 @@ class FakeUnitOfWork:
         collected.extend(self.tenants.collect_events())
         collected.extend(self.user_accounts.collect_events())
         collected.extend(self.invitations.collect_events())
-        collected.extend(self.model_profiles.collect_events())
+        collected.extend(self.provider_connections.collect_events())
         return collected
 
 

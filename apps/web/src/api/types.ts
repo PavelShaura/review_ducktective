@@ -360,10 +360,12 @@ export interface IssuedInvitation extends Invitation {
 }
 
 
-export interface ModelProfile {
+export interface ProviderConnection {
   id: string;
   name: string;
-  model: string;
+  default_model: string;
+  models: string[];
+  catalogue_refreshed_at: string | null;
   provider: string;
   base_url: string;
   trust: ModelTrust;
@@ -389,14 +391,22 @@ export interface ModelPreset {
   note: string;
 }
 
-export interface AddModelPayload {
+export interface AddConnectionPayload {
   name: string;
-  model: string;
   api_key: string;
+  default_model: string;
+  catalogue: string[];
   provider: string;
   base_url: string;
   trust: ModelTrust;
   supports_tools: boolean;
   context_window: number;
   note: string;
+}
+
+
+export interface ProbeResult {
+  is_reachable: boolean;
+  detail: string;
+  models: string[];
 }

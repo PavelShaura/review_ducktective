@@ -1,4 +1,5 @@
 import type {
+  AddConnectionPayload,
   AvailableModel,
   Conversation,
   CurrentUser,
@@ -10,14 +11,14 @@ import type {
   FileContext,
   FilePatch,
   IndexState,
-  Invitation,
   Investigation,
+  Invitation,
   IssuedInvitation,
-  AddModelPayload,
   Member,
   ModelPreset,
-  ModelProfile,
   Organization,
+  ProbeResult,
+  ProviderConnection,
   Repository,
   ResolvedRevision,
   ReviewRun,
@@ -266,24 +267,43 @@ export const api = {
 
   getCurrentUser: () => request<CurrentUser>("/auth/me"),
 
-  listModelProfiles: () => request<ModelProfile[]>("/organization/models"),
+  listConnections: () => request<ProviderConnection[]>("/organization/models"),
 
   listModelPresets: () => request<ModelPreset[]>("/organization/models/presets"),
 
-  addModelProfile: (payload: AddModelPayload) =>
-    request<ModelProfile>("/organization/models", {
+  probeConnection: (payload: {
+    model: string;
+    api_key?: string;
+    provider?: string;
+    base_url?: string;
+  }) =>
+    request<ProbeResult>("/organization/models/probe", {
       method: "POST",
       body: JSON.stringify(payload),
     }),
 
-  updateModelProfile: (profileId: string, payload: Partial<AddModelPayload> & { is_enabled?: boolean }) =>
-    request<ModelProfile>(`/organization/models/${profileId}`, {
+  addConnection: (payload: AddConnectionPayload) =>
+    request<ProviderConnection>("/organization/models", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  refreshCatalogue: (connectionId: string) =>
+    request<ProviderConnection>(`/organization/models/${connectionId}/catalogue`, {
+      method: "POST",
+    }),
+
+  updateConnection: (
+    connectionId: string,
+    payload: Partial<AddConnectionPayload> & { is_enabled?: boolean },
+  ) =>
+    request<ProviderConnection>(`/organization/models/${connectionId}`, {
       method: "PATCH",
       body: JSON.stringify(payload),
     }),
 
-  deleteModelProfile: (profileId: string) =>
-    requestVoid(`/organization/models/${profileId}`, { method: "DELETE" }),
+  deleteConnection: (connectionId: string) =>
+    requestVoid(`/organization/models/${connectionId}`, { method: "DELETE" }),
 
   createOrganization: (slug: string, name: string) =>
     request<Organization>("/organizations", {

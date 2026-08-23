@@ -7,6 +7,7 @@ from uuid import (
 
 from sqlalchemy import (
     Boolean,
+    DateTime,
     Enum,
     ForeignKey,
     Integer,
@@ -14,6 +15,9 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+)
+from sqlalchemy.dialects.postgresql import (
+    JSONB,
 )
 from sqlalchemy.orm import (
     Mapped,
@@ -31,10 +35,10 @@ from ducktective.storage.models.enums import (
 )
 
 
-class ModelProfileModel(Base):
-    """Удалённая модель организации. Ключ лежит шифротекстом."""
+class ProviderConnectionModel(Base):
+    """Доступ организации к провайдеру. Ключ лежит шифротекстом."""
 
-    __tablename__ = "model_profile"
+    __tablename__ = "provider_connection"
     __table_args__ = (UniqueConstraint("tenant_id", "name"),)
 
     id: Mapped[UUID] = mapped_column(primary_key=True)
@@ -43,7 +47,12 @@ class ModelProfileModel(Base):
         index=True,
     )
     name: Mapped[str] = mapped_column(String(64))
-    model: Mapped[str] = mapped_column(String(255))
+    default_model: Mapped[str] = mapped_column(String(255))
+    catalogue: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    catalogue_refreshed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     provider: Mapped[str] = mapped_column(String(64), default="")
     base_url: Mapped[str] = mapped_column(Text, default="")
     encrypted_api_key: Mapped[str] = mapped_column(Text, default="")

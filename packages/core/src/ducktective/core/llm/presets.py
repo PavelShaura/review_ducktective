@@ -45,6 +45,20 @@ MODEL_PRESETS: tuple[ModelPreset, ...] = (
         "часть моделей на период бесплатности учится на запросах",
     ),
     ModelPreset(
+        key="opencode-go",
+        title="OpenCode Go (подписка)",
+        model="openai/kimi-k3",
+        provider="openai",
+        base_url="https://opencode.ai/zen/go/v1",
+        trust=ModelTrust.PRIVATE_REMOTE,
+        context_window=128000,
+        signup_url="https://opencode.ai/auth",
+        note="Подписка на открытые модели. Лимит долларовый, а не по числу "
+        "обращений, — для разговора это важнее: цикл тратит по запросу на шаг. "
+        "У большинства моделей нулевое хранение и запрет обучения; исключения "
+        "названы в их описании у провайдера",
+    ),
+    ModelPreset(
         key="openrouter-free",
         title="OpenRouter, бесплатный маршрут",
         model="openrouter/openai/gpt-oss-120b:free",

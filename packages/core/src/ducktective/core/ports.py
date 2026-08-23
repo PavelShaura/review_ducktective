@@ -22,8 +22,8 @@ from ducktective.core.indexing.ports import (
     SourceFileRepository,
     SymbolEdgeRepository,
 )
-from ducktective.core.llm.model_profile import (
-    ModelProfileRepository,
+from ducktective.core.llm.provider_connection import (
+    ProviderConnectionRepository,
 )
 from ducktective.core.review.ports import (
     ReviewRunRepository,
@@ -75,7 +75,7 @@ class UnitOfWork(Protocol):
     def invitations(self) -> InvitationRepository: ...
 
     @property
-    def model_profiles(self) -> ModelProfileRepository: ...
+    def provider_connections(self) -> ProviderConnectionRepository: ...
 
     async def __aenter__(self) -> Self: ...
 
