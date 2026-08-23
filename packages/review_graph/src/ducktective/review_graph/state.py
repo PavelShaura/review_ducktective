@@ -1,6 +1,7 @@
 import operator
 from dataclasses import (
     dataclass,
+    field,
 )
 from typing import (
     Annotated,
@@ -31,6 +32,7 @@ from ducktective.core.review.drafts import (
 from ducktective.core.review.entities import (
     Finding,
     ReviewFile,
+    RunDiff,
 )
 from ducktective.core.review.investigation import (
     InvestigationSink,
@@ -56,6 +58,7 @@ class ReviewRuntimeContext:
     cancellation: CancellationCheck | None = None
     navigator: CodeNavigator | None = None
     sink: InvestigationSink | None = None
+    diff: RunDiff = field(default_factory=RunDiff)
 
 
 class FileReviewTask(BaseModel):

@@ -6,6 +6,7 @@ from typing import (
 )
 
 from ducktective.core.indexing.value_objects import (
+    EdgeKind,
     SymbolKind,
 )
 from ducktective.core.retrieval.context import (
@@ -63,6 +64,30 @@ class SymbolContext:
     text: str
 
 
+CALL_EDGES = (EdgeKind.CALLS,)
+"""Вид связи, о котором спрашивают «кто вызывает».
+
+Выделен постоянной, потому что раньше подразумевался: обход брал соседей
+по любому ребру, а ответ подписывался вызовом. Наследник, импортёр
+и декоратор попадали в список того, что сломается от правки сигнатуры,
+хотя сигнатуру они не вызывают.
+"""
+
+
+@dataclass(frozen=True, kw_only=True)
+class RelatedSymbol:
+    """Сосед по графу вместе с видом связи.
+
+    Вид едет рядом с символом, а не остаётся в запросе: «наследует»,
+    «импортирует» и «вызывает» — доказательства разной силы и разного
+    смысла, и подписать их одним словом значит выдать одно за другое.
+    """
+
+    context: SymbolContext
+    kind: EdgeKind
+    is_resolved: bool
+
+
 class SymbolReader(Protocol):
     """Чтение символов и их окружения по графу."""
 
@@ -117,6 +142,7 @@ class SymbolReader(Protocol):
         self,
         symbol_ids: list[CodeSymbolId],
         *,
+        kinds: tuple[EdgeKind, ...] = CALL_EDGES,
         limit: int = 20,
     ) -> list[SymbolContext]:
         """То, что вызывает изменённый код: сигнатуры и контракты."""
@@ -126,9 +152,35 @@ class SymbolReader(Protocol):
         self,
         symbol_ids: list[CodeSymbolId],
         *,
+        kinds: tuple[EdgeKind, ...] = CALL_EDGES,
         limit: int = 20,
     ) -> list[SymbolContext]:
         """Кто вызывает изменённый код — ответ на вопрос «что сломается»."""
+        ...
+
+    async def referring(
+        self,
+        symbol_ids: list[CodeSymbolId],
+        *,
+        kinds: tuple[EdgeKind, ...] = (),
+        limit: int = 20,
+    ) -> list[RelatedSymbol]:
+        """Все, кто ссылается на символ, вместе с видом ссылки.
+
+        Направление одно — входящее: спрашивают о последствиях правки,
+        а что символ делает сам, видно из его тела. Пустой перечень видов
+        означает «любая связь», и тогда ответ разнороден по построению —
+        поэтому вид приходит с каждым соседом.
+        """
+        ...
+
+    async def edge_kinds(self, symbol_ids: list[CodeSymbolId]) -> dict[EdgeKind, int]:
+        """Сколько входящих связей каждого вида есть у символа.
+
+        Нужно, чтобы отфильтрованный ответ не выглядел исчерпывающим:
+        «вызывающих нет» при трёх наследниках — правда, которая читается
+        как «этот код никому не нужен».
+        """
         ...
 
 

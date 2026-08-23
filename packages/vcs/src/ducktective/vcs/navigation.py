@@ -14,6 +14,7 @@ from ducktective.core.retrieval.navigation import (
     FragmentRole,
     NavigationAnswer,
     NavigationSource,
+    ReferenceRelation,
     clip_code,
 )
 from ducktective.vcs.git_provider import (
@@ -37,6 +38,29 @@ CALLERS_NOTE = (
     "вызывающие найдены поиском по имени. Однофамильцы из других классов сюда тоже "
     "попадают, а вызовы через переменную — нет"
 )
+REFERENCES_NOTE = (
+    "ссылки найдены поиском по словам: вид связи угадан по форме строки, а не взят "
+    "из графа, поэтому наследник через промежуточный класс сюда не попадёт"
+)
+
+REFERENCE_PATTERNS = {
+    ReferenceRelation.SUBCLASSES: "(class|extends|implements).*\\b{name}\\b",
+    ReferenceRelation.IMPORTERS: "(import|from|require).*\\b{name}\\b",
+    ReferenceRelation.RAISED_BY: "(raise|throw)[[:space:]]+{name}\\b",
+}
+"""Чем выглядит связь в строке кода, когда графа нет.
+
+Точности здесь не будет: `class Foo(Bar)` и `class Foo extends Bar` — это
+всё, чем наследование отличается от упоминания в тексте. Оговорка едет
+с ответом, потому что читающему разницу видно только оттуда (D-021).
+"""
+
+RELATION_ROLES = {
+    ReferenceRelation.ANY: FragmentRole.RELATED,
+    ReferenceRelation.SUBCLASSES: FragmentRole.SUBCLASS,
+    ReferenceRelation.IMPORTERS: FragmentRole.IMPORTER,
+    ReferenceRelation.RAISED_BY: FragmentRole.RAISER,
+}
 
 
 class GitCodeNavigator:
@@ -125,6 +149,43 @@ class GitCodeNavigator:
                 role=FragmentRole.CALLER,
             ),
             note=self._note(CALLERS_NOTE),
+        )
+
+    async def find_references(
+        self,
+        name: str,
+        *,
+        relation: ReferenceRelation = ReferenceRelation.ANY,
+        limit: int = 20,
+    ) -> NavigationAnswer:
+        """Ссылки, узнанные по форме строки.
+
+        Без графа вид связи не хранится нигде, и различить его можно только
+        тем, как строка написана. Перечень операций от этого не меняется —
+        меняется точность, и она названа в ответе.
+        """
+        short_name = _short_name(name)
+        template = REFERENCE_PATTERNS.get(relation)
+
+        if template is None:
+            hits = await self._grep(short_name, limit=limit)
+        else:
+            pattern = template.format(name=re.escape(short_name))
+            hits = await self._grep(pattern, limit=limit, regexp=True)
+
+        found = [hit for hit in hits if not _is_definition(hit.text, short_name)]
+        if not found:
+            return NavigationAnswer(source=self.source, note=self._note(REFERENCES_NOTE))
+
+        return NavigationAnswer(
+            source=self.source,
+            fragments=await self._windows(
+                found,
+                before=1,
+                after=1,
+                role=RELATION_ROLES[relation],
+            ),
+            note=self._note(REFERENCES_NOTE),
         )
 
     async def get_file_context(

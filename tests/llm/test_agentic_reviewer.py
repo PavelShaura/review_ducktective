@@ -32,10 +32,12 @@ from ducktective.core.retrieval.navigation import (
     FragmentRole,
     NavigationAnswer,
     NavigationSource,
+    ReferenceRelation,
 )
 from ducktective.core.review.entities import (
     ReviewFile,
     ReviewHunk,
+    RunDiff,
 )
 from ducktective.core.review.investigation import (
     InvestigationStep,
@@ -202,6 +204,16 @@ class FakeNavigator:
         self.asked.append(("get_definition", name))
         return self._answer()
 
+    async def find_references(
+        self,
+        name: str,
+        *,
+        relation: ReferenceRelation = ReferenceRelation.ANY,
+        limit: int = 20,
+    ) -> NavigationAnswer:
+        self.asked.append(("find_references", name))
+        return self._answer()
+
     async def find_callers(self, name: str, *, limit: int = 20) -> NavigationAnswer:
         self.asked.append(("find_callers", name))
         return self._answer()
@@ -246,13 +258,18 @@ async def review(
     navigator: Any = None,
     *,
     cancellation: Any = None,
+    diff: RunDiff | None = None,
 ) -> FileReviewResult:
     file = build_file()
     return await reviewer.review_file(
         file,
         patch_text=file.to_unified_patch(),
         requirements=ModelRequirements(),
-        support=ReviewSupport(navigator=navigator, cancellation=cancellation),
+        support=ReviewSupport(
+            navigator=navigator,
+            cancellation=cancellation,
+            diff=diff or RunDiff(),
+        ),
     )
 
 
@@ -293,6 +310,7 @@ async def test_tools_are_offered_while_investigating_and_dropped_at_the_end() ->
         "search_code",
         "get_definition",
         "find_callers",
+        "find_references",
         "get_file_context",
         "list_files",
     )
@@ -494,3 +512,27 @@ async def test_usage_of_every_step_is_counted() -> None:
 
     assert result.usage.input_tokens == 200
     assert result.usage.output_tokens == 100
+
+
+async def test_the_rest_of_the_diff_is_offered_when_the_run_has_other_files() -> None:
+    """Ревьюер видит свой файл; правка живёт в нескольких."""
+    client = ScriptedLlmClient([answer(FINDINGS_JSON)])
+    neighbour = build_file()
+    neighbour.path = "app/api.py"
+
+    await review(
+        build_reviewer(client),
+        FakeNavigator(),
+        diff=RunDiff((build_file(), neighbour)),
+    )
+
+    assert "get_diff_summary" in client.offered_tools[0]
+    assert "get_file_diff" in client.offered_tools[0]
+
+
+async def test_a_single_file_run_offers_navigation_only() -> None:
+    client = ScriptedLlmClient([answer(FINDINGS_JSON)])
+
+    await review(build_reviewer(client), FakeNavigator(), diff=RunDiff((build_file(),)))
+
+    assert "get_diff_summary" not in client.offered_tools[0]

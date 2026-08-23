@@ -1,18 +1,27 @@
+from ducktective.core.indexing.value_objects import (
+    EdgeKind,
+)
 from ducktective.core.retrieval.navigation import (
+    EDGE_NAMES,
+    EDGE_ROLES,
+    RELATION_EDGES,
     CodeFragment,
     CodeNavigator,
     FragmentRole,
     NavigationAnswer,
     NavigationSource,
+    ReferenceRelation,
     clip_code,
 )
 from ducktective.core.retrieval.ports import (
+    CALL_EDGES,
     ChunkHit,
     ChunkSearch,
     SymbolContext,
     SymbolReader,
 )
 from ducktective.core.types import (
+    CodeSymbolId,
     RepositoryId,
 )
 
@@ -75,18 +84,75 @@ class IndexedCodeNavigator:
         )
 
     async def find_callers(self, name: str, *, limit: int = 20) -> NavigationAnswer:
+        """Вызывающие — и только они.
+
+        Прежде сюда попадал сосед по любому ребру: наследник базового класса
+        и модуль, импортировавший функцию, приходили под подписью «вызывается
+        из». Правка сигнатуры ломает их иначе, чем вызывающих, а решение
+        принималось по общему списку.
+        """
         targets = await self._symbols.find_by_name(self._repository_id, name)
         if not targets:
             return NavigationAnswer(source=self.source)
 
-        callers = await self._symbols.callers(
-            [context.symbol_id for context in targets],
-            limit=limit,
-        )
+        symbol_ids = [context.symbol_id for context in targets]
+        callers = await self._symbols.callers(symbol_ids, limit=limit)
         return NavigationAnswer(
             source=self.source,
             fragments=tuple(_contract(context, FragmentRole.CALLER) for context in callers),
+            note=await self._other_kinds_note(symbol_ids, shown=CALL_EDGES),
         )
+
+    async def find_references(
+        self,
+        name: str,
+        *,
+        relation: ReferenceRelation = ReferenceRelation.ANY,
+        limit: int = 20,
+    ) -> NavigationAnswer:
+        """Ссылающиеся на символ, подписанные видом ссылки."""
+        targets = await self._symbols.find_by_name(self._repository_id, name)
+        if not targets:
+            return NavigationAnswer(source=self.source)
+
+        symbol_ids = [context.symbol_id for context in targets]
+        wanted = RELATION_EDGES[relation]
+        related = await self._symbols.referring(symbol_ids, kinds=wanted, limit=limit)
+        note = await self._other_kinds_note(symbol_ids, shown=wanted)
+
+        return NavigationAnswer(
+            source=self.source,
+            fragments=tuple(
+                _contract(neighbour.context, EDGE_ROLES[neighbour.kind]) for neighbour in related
+            ),
+            note=note or _ambiguity_note(name, len(targets)),
+        )
+
+    async def _other_kinds_note(
+        self,
+        symbol_ids: list[CodeSymbolId],
+        *,
+        shown: tuple[EdgeKind, ...],
+    ) -> str | None:
+        """Называет связи, которые в этот ответ не попали.
+
+        Отфильтрованная выдача читается как исчерпывающая: «вызывающих нет»
+        при двенадцати импортёрах — правда, из которой делают вывод, что код
+        никому не нужен. Счёт по видам стоит одного запроса и снимает вывод.
+        """
+        if not shown:
+            return None
+
+        counts = await self._symbols.edge_kinds(symbol_ids)
+        others = {kind: total for kind, total in counts.items() if kind not in shown and total}
+        if not others:
+            return None
+
+        listed = ", ".join(
+            f"{EDGE_NAMES[kind]} — {total}"
+            for kind, total in sorted(others.items(), key=lambda pair: -pair[1])
+        )
+        return f"Показаны не все связи. Есть и другие: {listed}. Их покажет find_references."
 
     async def get_file_context(
         self,

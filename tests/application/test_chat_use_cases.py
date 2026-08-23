@@ -48,6 +48,7 @@ from ducktective.core.retrieval.navigation import (
     CodeNavigator,
     NavigationAnswer,
     NavigationSource,
+    ReferenceRelation,
 )
 from ducktective.core.types import (
     CommitSha,
@@ -101,6 +102,15 @@ class SilentNavigator:
         return NavigationAnswer(source=NavigationSource.INDEX)
 
     async def find_callers(self, name: str, *, limit: int = 20) -> NavigationAnswer:
+        return NavigationAnswer(source=NavigationSource.INDEX)
+
+    async def find_references(
+        self,
+        name: str,
+        *,
+        relation: ReferenceRelation = ReferenceRelation.ANY,
+        limit: int = 20,
+    ) -> NavigationAnswer:
         return NavigationAnswer(source=NavigationSource.INDEX)
 
     async def get_file_context(

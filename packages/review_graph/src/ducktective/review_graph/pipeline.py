@@ -27,6 +27,9 @@ from ducktective.core.retrieval.ports import (
 from ducktective.core.review.degradation import (
     NodeDegradation,
 )
+from ducktective.core.review.entities import (
+    RunDiff,
+)
 from ducktective.core.review.investigation import (
     InvestigationSink,
     InvestigationSinks,
@@ -112,6 +115,7 @@ class LangGraphReviewPipeline:
                     cancellation=cancellation,
                     navigator=self._navigator_for(request),
                     sink=self._sink_for(request),
+                    diff=RunDiff(request.files),
                 ),
                 config=self._config(request),
             )

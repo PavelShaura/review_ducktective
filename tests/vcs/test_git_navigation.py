@@ -8,6 +8,7 @@ import pytest
 from ducktective.core.retrieval.navigation import (
     FragmentRole,
     NavigationSource,
+    ReferenceRelation,
 )
 from ducktective.vcs.git_provider import (
     LocalGitProvider,
@@ -36,6 +37,13 @@ def handle(request):
     return {"total": total}
 """
 
+MONTHLY = """from app.report import ReportBuilder
+
+
+class MonthlyReport(ReportBuilder):
+    period = "month"
+"""
+
 
 def run_git(repository_path: Path, *arguments: str) -> str:
     result = subprocess.run(
@@ -56,6 +64,7 @@ def repository(tmp_path: Path) -> Path:
     (tmp_path / "app").mkdir()
     (tmp_path / "app" / "report.py").write_text(REPORT, encoding="utf-8")
     (tmp_path / "app" / "api.py").write_text(API, encoding="utf-8")
+    (tmp_path / "app" / "monthly.py").write_text(MONTHLY, encoding="utf-8")
     run_git(tmp_path, "add", "-A")
     run_git(tmp_path, "commit", "-qm", "initial")
     return tmp_path
@@ -104,6 +113,44 @@ async def test_callers_exclude_the_definition_itself(repository: Path) -> None:
     assert answer.fragments
     assert all("def build_total" not in fragment.text for fragment in answer.fragments)
     assert {fragment.path for fragment in answer.fragments} == {"app/report.py", "app/api.py"}
+
+
+async def test_subclasses_are_recognised_by_the_shape_of_the_line(repository: Path) -> None:
+    """Без графа наследование отличает от упоминания только форма строки."""
+    answer = await navigator(repository).find_references(
+        "ReportBuilder",
+        relation=ReferenceRelation.SUBCLASSES,
+    )
+
+    assert [fragment.path for fragment in answer.fragments] == ["app/monthly.py"]
+    assert answer.fragments[0].role is FragmentRole.SUBCLASS
+
+
+async def test_importers_are_recognised_by_the_shape_of_the_line(repository: Path) -> None:
+    answer = await navigator(repository).find_references(
+        "ReportBuilder",
+        relation=ReferenceRelation.IMPORTERS,
+    )
+
+    assert {fragment.path for fragment in answer.fragments} == {"app/api.py", "app/monthly.py"}
+    assert all(fragment.role is FragmentRole.IMPORTER for fragment in answer.fragments)
+
+
+async def test_references_admit_that_the_kind_was_guessed(repository: Path) -> None:
+    """Оговорка едет с ответом: читающему разницу видно только оттуда."""
+    answer = await navigator(repository).find_references("ReportBuilder")
+
+    assert answer.note is not None
+    assert "поиском по словам" in answer.note
+
+
+async def test_references_exclude_the_definition_itself(repository: Path) -> None:
+    answer = await navigator(repository).find_references(
+        "ReportBuilder",
+        relation=ReferenceRelation.SUBCLASSES,
+    )
+
+    assert all("class ReportBuilder" not in fragment.text for fragment in answer.fragments)
 
 
 async def test_stale_index_is_named_as_the_reason(repository: Path) -> None:

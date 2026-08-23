@@ -41,6 +41,7 @@ from ducktective.core.retrieval.navigation import (
     CodeFragment,
     NavigationAnswer,
     NavigationSource,
+    ReferenceRelation,
 )
 from ducktective.core.types import (
     CommitSha,
@@ -114,6 +115,16 @@ class FakeNavigator:
 
     async def find_callers(self, name: str, *, limit: int = 20) -> NavigationAnswer:
         self.asked.append(("find_callers", name))
+        return self._answer()
+
+    async def find_references(
+        self,
+        name: str,
+        *,
+        relation: ReferenceRelation = ReferenceRelation.ANY,
+        limit: int = 20,
+    ) -> NavigationAnswer:
+        self.asked.append(("find_references", name))
         return self._answer()
 
     async def get_file_context(

@@ -6,11 +6,16 @@ from sqlalchemy.ext.asyncio import (
 from ducktective.core.indexing.ports import (
     Embedder,
 )
+from ducktective.core.indexing.value_objects import (
+    EdgeKind,
+)
 from ducktective.core.retrieval.context import (
     DiffContext,
 )
 from ducktective.core.retrieval.ports import (
+    CALL_EDGES,
     ChunkHit,
+    RelatedSymbol,
     SymbolContext,
 )
 from ducktective.core.review.entities import (
@@ -127,19 +132,47 @@ class SessionScopedSymbolReader:
         self,
         symbol_ids: list[CodeSymbolId],
         *,
+        kinds: tuple[EdgeKind, ...] = CALL_EDGES,
         limit: int = 20,
     ) -> list[SymbolContext]:
         async with self._session_factory() as session:
-            return await PostgresSymbolReader(session).callees(symbol_ids, limit=limit)
+            return await PostgresSymbolReader(session).callees(
+                symbol_ids,
+                kinds=kinds,
+                limit=limit,
+            )
 
     async def callers(
         self,
         symbol_ids: list[CodeSymbolId],
         *,
+        kinds: tuple[EdgeKind, ...] = CALL_EDGES,
         limit: int = 20,
     ) -> list[SymbolContext]:
         async with self._session_factory() as session:
-            return await PostgresSymbolReader(session).callers(symbol_ids, limit=limit)
+            return await PostgresSymbolReader(session).callers(
+                symbol_ids,
+                kinds=kinds,
+                limit=limit,
+            )
+
+    async def referring(
+        self,
+        symbol_ids: list[CodeSymbolId],
+        *,
+        kinds: tuple[EdgeKind, ...] = (),
+        limit: int = 20,
+    ) -> list[RelatedSymbol]:
+        async with self._session_factory() as session:
+            return await PostgresSymbolReader(session).referring(
+                symbol_ids,
+                kinds=kinds,
+                limit=limit,
+            )
+
+    async def edge_kinds(self, symbol_ids: list[CodeSymbolId]) -> dict[EdgeKind, int]:
+        async with self._session_factory() as session:
+            return await PostgresSymbolReader(session).edge_kinds(symbol_ids)
 
 
 class SessionScopedHybridSearch:

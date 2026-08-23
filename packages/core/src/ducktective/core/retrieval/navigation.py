@@ -11,6 +11,9 @@ from typing import (
     Protocol,
 )
 
+from ducktective.core.indexing.value_objects import (
+    EdgeKind,
+)
 from ducktective.core.types import (
     RepositoryId,
 )
@@ -51,6 +54,55 @@ class FragmentRole(StrEnum):
     CALLEE = "callee"
     CALLER = "caller"
     MATCH = "match"
+    SUBCLASS = "subclass"
+    IMPORTER = "importer"
+    RAISER = "raiser"
+    DECORATED = "decorated"
+    RELATED = "related"
+
+
+class ReferenceRelation(StrEnum):
+    """Чем именно ссылаются на символ.
+
+    Перечень короче, чем видов рёбер в графе: спрашивают о том, что меняет
+    решение. «Кто наследует этот класс» и «кто импортирует этот модуль» —
+    разные последствия правки, а `references` не спрашивают вовсе, потому
+    что ответ на него — «примерно всё».
+    """
+
+    ANY = "any"
+    SUBCLASSES = "subclasses"
+    IMPORTERS = "importers"
+    RAISED_BY = "raised_by"
+
+
+RELATION_EDGES: dict[ReferenceRelation, tuple[EdgeKind, ...]] = {
+    ReferenceRelation.ANY: (),
+    ReferenceRelation.SUBCLASSES: (EdgeKind.INHERITS,),
+    ReferenceRelation.IMPORTERS: (EdgeKind.IMPORTS,),
+    ReferenceRelation.RAISED_BY: (EdgeKind.RAISES,),
+}
+"""Какими рёбрами отвечает каждый вопрос. Пустой набор — любыми."""
+
+EDGE_ROLES: dict[EdgeKind, FragmentRole] = {
+    EdgeKind.CALLS: FragmentRole.CALLER,
+    EdgeKind.INHERITS: FragmentRole.SUBCLASS,
+    EdgeKind.IMPORTS: FragmentRole.IMPORTER,
+    EdgeKind.RAISES: FragmentRole.RAISER,
+    EdgeKind.DECORATES: FragmentRole.DECORATED,
+    EdgeKind.REFERENCES: FragmentRole.RELATED,
+}
+"""Как читать соседа, пришедшего по ребру этого вида."""
+
+EDGE_NAMES: dict[EdgeKind, str] = {
+    EdgeKind.CALLS: "вызовы",
+    EdgeKind.INHERITS: "наследование",
+    EdgeKind.IMPORTS: "импорт",
+    EdgeKind.RAISES: "возбуждение исключения",
+    EdgeKind.DECORATES: "декорирование",
+    EdgeKind.REFERENCES: "упоминание",
+}
+"""Как связь называется в оговорке к ответу."""
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -110,7 +162,27 @@ class CodeNavigator(Protocol):
         ...
 
     async def find_callers(self, name: str, *, limit: int = 20) -> NavigationAnswer:
-        """Показывает, откуда символ вызывается, — что сломается, если его тронуть."""
+        """Показывает, откуда символ вызывается, — что сломается, если его тронуть.
+
+        Отвечает вызовами и только ими. Наследование, импорт и остальные
+        связи спрашиваются отдельно: они тоже показывают, что сломается,
+        но сломается по-другому, и лечится это по-другому.
+        """
+        ...
+
+    async def find_references(
+        self,
+        name: str,
+        *,
+        relation: ReferenceRelation = ReferenceRelation.ANY,
+        limit: int = 20,
+    ) -> NavigationAnswer:
+        """Показывает, кто ссылается на символ и каким образом.
+
+        Дополняет `find_callers` там, где связь не вызов: базовый класс
+        ломает наследников, а не вызывающих, и перечень последних на вопрос
+        «что сломается от правки контракта» отвечает пустотой.
+        """
         ...
 
     async def get_file_context(

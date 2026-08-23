@@ -23,6 +23,9 @@ from ducktective.core.exceptions import (
     LlmUnavailableError,
     VcsOperationError,
 )
+from ducktective.core.indexing.value_objects import (
+    EdgeKind,
+)
 from ducktective.core.llm.value_objects import (
     LlmMessage,
     LlmResponse,
@@ -38,7 +41,9 @@ from ducktective.core.retrieval.navigation import (  # noqa: TC001
     CodeNavigator,
 )
 from ducktective.core.retrieval.ports import (
+    CALL_EDGES,
     ChunkHit,
+    RelatedSymbol,
     SymbolContext,
 )
 from ducktective.core.review.drafts import (
@@ -333,18 +338,23 @@ class FakeSymbolReader:
         covering: list[SymbolContext] | None = None,
         callees: list[SymbolContext] | None = None,
         callers: list[SymbolContext] | None = None,
+        referring: list[RelatedSymbol] | None = None,
+        kind_counts: dict[EdgeKind, int] | None = None,
         by_name: dict[str, list[SymbolContext]] | None = None,
         paths: list[str] | None = None,
     ) -> None:
         self._covering = covering or []
         self._callees = callees or []
         self._callers = callers or []
+        self._referring = referring or []
+        self._kind_counts = kind_counts or {}
         self._by_name = by_name or {}
         self._paths = paths or []
         self.asked_lines: list[tuple[int, int]] = []
         self.asked_names: list[str] = []
         self.asked_paths: list[str] = []
         self.asked_caller_ids: list[list[CodeSymbolId]] = []
+        self.asked_kinds: list[tuple[EdgeKind, ...]] = []
 
     async def symbols_covering(
         self,
@@ -385,18 +395,37 @@ class FakeSymbolReader:
         self,
         symbol_ids: list[CodeSymbolId],
         *,
+        kinds: tuple[EdgeKind, ...] = CALL_EDGES,
         limit: int = 20,
     ) -> list[SymbolContext]:
+        self.asked_kinds.append(kinds)
         return self._callees[:limit]
 
     async def callers(
         self,
         symbol_ids: list[CodeSymbolId],
         *,
+        kinds: tuple[EdgeKind, ...] = CALL_EDGES,
         limit: int = 20,
     ) -> list[SymbolContext]:
         self.asked_caller_ids.append(symbol_ids)
+        self.asked_kinds.append(kinds)
         return self._callers[:limit]
+
+    async def referring(
+        self,
+        symbol_ids: list[CodeSymbolId],
+        *,
+        kinds: tuple[EdgeKind, ...] = (),
+        limit: int = 20,
+    ) -> list[RelatedSymbol]:
+        self.asked_kinds.append(kinds)
+        if not kinds:
+            return self._referring[:limit]
+        return [related for related in self._referring if related.kind in kinds][:limit]
+
+    async def edge_kinds(self, symbol_ids: list[CodeSymbolId]) -> dict[EdgeKind, int]:
+        return dict(self._kind_counts)
 
 
 class FakeChunkSearch:

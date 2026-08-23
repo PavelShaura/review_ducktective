@@ -167,6 +167,41 @@ class ReviewFile:
         )
 
 
+@dataclass(frozen=True)
+class RunDiff:
+    """Дифф прогона целиком, каким его видит ревьюер одного файла.
+
+    Правка редко живёт в одном файле: поднятая версия зависимости меняет
+    и манифест, и образ, и то, что её вызывает. Ревьюер читает файлы по
+    одному, и без остального диффа «вызывающие не обновлены» говорится
+    о файле, обновлённом соседним ханком того же прогона.
+    """
+
+    files: tuple[ReviewFile, ...] = ()
+
+    def others(self, path: str) -> tuple[ReviewFile, ...]:
+        """Файлы прогона, кроме названного."""
+        return tuple(item for item in self.files if item.path != path)
+
+    def at(self, path: str) -> ReviewFile | None:
+        """Файл диффа по названному пути.
+
+        Хвост пути тоже подходит: путь называет модель, а она берёт его
+        из сводки, из своего патча или из ответа инструмента навигации,
+        и совпадать посимвольно они не обязаны.
+        """
+        wanted = path.strip().strip("\"'").lstrip("/")
+        if not wanted:
+            return None
+
+        for item in self.files:
+            if item.path == wanted:
+                return item
+
+        matching = [item for item in self.files if item.path.endswith(f"/{wanted}")]
+        return matching[0] if len(matching) == 1 else None
+
+
 @dataclass(kw_only=True)
 class Evidence:
     kind: EvidenceKind

@@ -16,7 +16,13 @@ looking. Prefer:
   nature: the person asks "where are permissions checked", not "show me
   AccessChecker" — search finds the place by meaning.
 - `get_definition` when you know the name and need the body or the contract.
-- `find_callers` when the question is about consequences, usage, or what breaks.
+- `find_callers` when the question is about consequences, usage, or what breaks by
+  being called. Calls only.
+- `find_references` when the connection is not a call: which classes inherit this base
+  class (`subclasses`), which modules import it (`importers`), what raises this
+  exception (`raised_by`), or `any` to see every kind at once. A base class has few
+  callers and many subclasses, and asking `find_callers` about one answers "nothing
+  uses this" about code the whole project is built on.
 - `get_file_context` when you need what surrounds a place you already found, or
   when the question names a file: read that file before searching for anything.
 - `list_files` when the question is about the shape of the project rather than a

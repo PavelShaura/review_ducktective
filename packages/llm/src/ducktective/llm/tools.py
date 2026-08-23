@@ -4,6 +4,7 @@ from dataclasses import (
 )
 from typing import (
     Any,
+    Protocol,
 )
 
 from ducktective.core.chat.documents import (
@@ -22,6 +23,7 @@ from ducktective.core.retrieval.navigation import (
     FragmentRole,
     NavigationAnswer,
     NavigationSource,
+    ReferenceRelation,
 )
 
 
@@ -43,6 +45,11 @@ ROLE_TITLES = {
     FragmentRole.CALLEE: "Вызывает",
     FragmentRole.CALLER: "Вызывается из",
     FragmentRole.MATCH: "Совпадение",
+    FragmentRole.SUBCLASS: "Наследует",
+    FragmentRole.IMPORTER: "Импортирует",
+    FragmentRole.RAISER: "Возбуждает",
+    FragmentRole.DECORATED: "Декорирован им",
+    FragmentRole.RELATED: "Ссылается",
 }
 
 SEARCH_CODE = ToolSpec(
@@ -80,8 +87,10 @@ GET_DEFINITION = ToolSpec(
 FIND_CALLERS = ToolSpec(
     name="find_callers",
     description=(
-        "Show where a symbol is called from. This answers what breaks if the change alters "
-        "its contract."
+        "Show where a symbol is called from - calls only. This answers what breaks if the "
+        "change alters its contract. For subclasses, importers or other kinds of reference, "
+        "use find_references: a base class breaks the classes that inherit it, and those "
+        "never appear among its callers."
     ),
     parameters={
         "type": "object",
@@ -104,6 +113,30 @@ GET_FILE_CONTEXT = ToolSpec(
             "end_line": {"type": "integer"},
         },
         "required": ["path", "start_line", "end_line"],
+    },
+)
+
+FIND_REFERENCES = ToolSpec(
+    name="find_references",
+    description=(
+        "Show what refers to a symbol other than by calling it, and how. Use "
+        "'subclasses' for the classes that inherit it, 'importers' for the modules that "
+        "import it, 'raised_by' for the code that raises it, 'any' to see every kind of "
+        "reference at once. Changing a base class or a shared module breaks these, and "
+        "find_callers does not list them."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "description": "Symbol name"},
+            "relation": {
+                "type": "string",
+                "enum": [relation.value for relation in ReferenceRelation],
+                "description": "Kind of reference, default 'any'",
+            },
+            "limit": {"type": "integer", "description": "How many references, default 8"},
+        },
+        "required": ["name"],
     },
 )
 
@@ -140,7 +173,14 @@ SEARCH_DOCUMENT = ToolSpec(
     },
 )
 
-NAVIGATION_TOOLS = (SEARCH_CODE, GET_DEFINITION, FIND_CALLERS, GET_FILE_CONTEXT, LIST_FILES)
+NAVIGATION_TOOLS = (
+    SEARCH_CODE,
+    GET_DEFINITION,
+    FIND_CALLERS,
+    FIND_REFERENCES,
+    GET_FILE_CONTEXT,
+    LIST_FILES,
+)
 
 
 @dataclass(frozen=True)
@@ -155,6 +195,20 @@ class ToolExecutionResult:
     text: str
     fragments: tuple[CodeFragment, ...] = ()
     is_error: bool = False
+
+
+class Toolbox(Protocol):
+    """Набор инструментов, каким его видит цикл обращений к модели.
+
+    Наборов два: разговор ходит только по коду, ревью видит вдобавок свой
+    дифф. Цикл об этом не знает — ему нужно перечислить инструменты
+    и исполнить вызов.
+    """
+
+    @property
+    def specs(self) -> tuple[ToolSpec, ...]: ...
+
+    async def execute(self, call: ToolCall) -> ToolExecutionResult: ...
 
 
 class NavigationToolbox:
@@ -195,7 +249,7 @@ class NavigationToolbox:
 
     async def execute(self, call: ToolCall) -> ToolExecutionResult:
         try:
-            arguments = _parse_arguments(call.arguments)
+            arguments = parse_arguments(call.arguments)
         except ValueError as error:
             return ToolExecutionResult(str(error), is_error=True)
 
@@ -261,6 +315,12 @@ class NavigationToolbox:
                 str(arguments["name"]),
                 limit=int(arguments.get("limit", 8)),
             )
+        if name == FIND_REFERENCES.name:
+            return await self._navigator.find_references(
+                str(arguments["name"]),
+                relation=_relation(arguments.get("relation")),
+                limit=int(arguments.get("limit", 8)),
+            )
         if name == LIST_FILES.name:
             return await self._navigator.list_files(str(arguments["pattern"]))
         if name == GET_FILE_CONTEXT.name:
@@ -297,7 +357,22 @@ def render_for_model(answer: NavigationAnswer, *, limit: int = MAX_TOOL_RESULT_C
     return _clipped("\n".join(sections), limit)
 
 
-def _parse_arguments(raw: str) -> dict[str, Any]:
+def _relation(raw: Any) -> ReferenceRelation:
+    """Вид ссылки, названный моделью.
+
+    Неизвестное значение не ошибка: «inheritance» вместо «subclasses» стоит
+    понять как «покажи любые», а не потратить шаг цикла на препирательство
+    о написании.
+    """
+    if raw is None:
+        return ReferenceRelation.ANY
+    try:
+        return ReferenceRelation(str(raw).strip().lower())
+    except ValueError:
+        return ReferenceRelation.ANY
+
+
+def parse_arguments(raw: str) -> dict[str, Any]:
     try:
         parsed = json.loads(raw or "{}")
     except json.JSONDecodeError as error:

@@ -1,5 +1,6 @@
 from dataclasses import (
     dataclass,
+    field,
 )
 from typing import (
     Protocol,
@@ -22,6 +23,7 @@ from ducktective.core.review.drafts import (
 from ducktective.core.review.entities import (
     ReviewFile,
     ReviewRun,
+    RunDiff,
 )
 from ducktective.core.review.investigation import (
     InvestigationSink,
@@ -94,6 +96,14 @@ class ReviewSupport:
     navigator: CodeNavigator | None = None
     sink: InvestigationSink | None = None
     cancellation: CancellationCheck | None = None
+    diff: RunDiff = field(default_factory=RunDiff)
+    """Остальные файлы прогона.
+
+    Приходит сюда, а не в состояние графа: дифф один на прогон, а задач
+    в графе столько, сколько пар «файл × ревьюер», и класть в каждую копию
+    всех патчей значило бы платить памятью и чекпоинтом за то, что и так
+    живёт ровно столько же, сколько прогон.
+    """
 
     async def stop_requested(self) -> bool:
         """Просили ли прекратить.

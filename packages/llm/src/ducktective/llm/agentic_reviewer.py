@@ -52,11 +52,15 @@ from ducktective.llm.code_reviewer import (
     system_prompt,
     to_draft,
 )
+from ducktective.llm.review_tools import (
+    ReviewToolbox,
+)
 from ducktective.llm.schemas import (
     ReviewPayload,
 )
 from ducktective.llm.tools import (
     NavigationToolbox,
+    Toolbox,
 )
 
 
@@ -205,7 +209,11 @@ class AgenticCodeReviewer:
         listener: InvestigationSink,
         support: ReviewSupport,
     ) -> FileReviewResult:
-        toolbox = NavigationToolbox(navigator)
+        toolbox = ReviewToolbox(
+            NavigationToolbox(navigator),
+            support.diff,
+            path=file.path,
+        )
         tool_requirements = _with_tool_calling(requirements)
         messages = [
             LlmMessage(role=LlmRole.SYSTEM, content=system_prompt(with_tools=True)),
@@ -305,7 +313,7 @@ class AgenticCodeReviewer:
 
     async def _run_tool(
         self,
-        toolbox: NavigationToolbox,
+        toolbox: Toolbox,
         call: ToolCall,
         file: ReviewFile,
         step: int,

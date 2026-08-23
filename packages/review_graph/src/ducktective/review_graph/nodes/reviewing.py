@@ -86,6 +86,7 @@ def review_node(
                     navigator=runtime.context.navigator,
                     sink=runtime.context.sink,
                     cancellation=runtime.context.cancellation,
+                    diff=runtime.context.diff,
                 ),
             )
         except DomainError as error:

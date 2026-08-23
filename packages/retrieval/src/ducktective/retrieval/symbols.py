@@ -20,7 +20,12 @@ from sqlalchemy.orm import (
     InstrumentedAttribute,
 )
 
+from ducktective.core.indexing.value_objects import (
+    EdgeKind,
+)
 from ducktective.core.retrieval.ports import (
+    CALL_EDGES,
+    RelatedSymbol,
     SymbolContext,
 )
 from ducktective.core.types import (
@@ -167,26 +172,80 @@ class PostgresSymbolReader:
         self,
         symbol_ids: list[CodeSymbolId],
         *,
+        kinds: tuple[EdgeKind, ...] = CALL_EDGES,
         limit: int = 20,
     ) -> list[SymbolContext]:
-        return await self._neighbours(symbol_ids, incoming=False, limit=limit)
+        return await self._neighbours(symbol_ids, incoming=False, kinds=kinds, limit=limit)
 
     async def callers(
         self,
         symbol_ids: list[CodeSymbolId],
         *,
+        kinds: tuple[EdgeKind, ...] = CALL_EDGES,
         limit: int = 20,
     ) -> list[SymbolContext]:
-        return await self._neighbours(symbol_ids, incoming=True, limit=limit)
+        return await self._neighbours(symbol_ids, incoming=True, kinds=kinds, limit=limit)
+
+    async def referring(
+        self,
+        symbol_ids: list[CodeSymbolId],
+        *,
+        kinds: tuple[EdgeKind, ...] = (),
+        limit: int = 20,
+    ) -> list[RelatedSymbol]:
+        if not symbol_ids:
+            return []
+
+        related = (
+            select(
+                SymbolEdgeModel.source_symbol_id.label("symbol_id"),
+                SymbolEdgeModel.kind.label("edge_kind"),
+                SymbolEdgeModel.is_resolved.label("is_resolved"),
+                SymbolEdgeModel.confidence.label("confidence"),
+            )
+            .where(*self._edges(symbol_ids, incoming=True, kinds=kinds))
+            .subquery()
+        )
+        statement = (
+            self._base_query()
+            .add_columns(related.c.edge_kind, related.c.is_resolved)
+            .join(related, related.c.symbol_id == CodeSymbolModel.id)
+            .order_by(related.c.confidence.desc())
+            .limit(limit)
+        )
+
+        rows = (await self._session.execute(statement)).all()
+        texts = await self._texts_of([row.id for row in rows])
+        return [
+            RelatedSymbol(
+                context=_context(row, texts.get(row.id, "")),
+                kind=row.edge_kind,
+                is_resolved=row.is_resolved,
+            )
+            for row in rows
+        ]
+
+    async def edge_kinds(self, symbol_ids: list[CodeSymbolId]) -> dict[EdgeKind, int]:
+        if not symbol_ids:
+            return {}
+
+        statement = (
+            select(SymbolEdgeModel.kind, func.count().label("total"))
+            .where(*self._edges(symbol_ids, incoming=True, kinds=()))
+            .group_by(SymbolEdgeModel.kind)
+        )
+        rows = (await self._session.execute(statement)).all()
+        return {row.kind: row.total for row in rows}
 
     async def _neighbours(
         self,
         symbol_ids: list[CodeSymbolId],
         *,
         incoming: bool,
+        kinds: tuple[EdgeKind, ...],
         limit: int,
     ) -> list[SymbolContext]:
-        """Соседи по графу в одну сторону.
+        """Соседи по графу в одну сторону и по названным видам связи.
 
         Уверенные рёбра идут первыми: связь, восстановленная по совпадению
         имени, слабее той, что разрешена через импорт, и вытеснять её
@@ -195,14 +254,10 @@ class PostgresSymbolReader:
         if not symbol_ids:
             return []
 
-        anchor, neighbour = self._directions(incoming=incoming)
+        _, neighbour = self._directions(incoming=incoming)
         related = (
             select(neighbour.label("symbol_id"), SymbolEdgeModel.confidence)
-            .where(
-                anchor.in_(symbol_ids),
-                neighbour.isnot(None),
-                neighbour.notin_(symbol_ids),
-            )
+            .where(*self._edges(symbol_ids, incoming=incoming, kinds=kinds))
             .subquery()
         )
         statement = (
@@ -212,6 +267,28 @@ class PostgresSymbolReader:
             .limit(limit)
         )
         return await self._read(statement)
+
+    @staticmethod
+    def _edges(
+        symbol_ids: list[CodeSymbolId],
+        *,
+        incoming: bool,
+        kinds: tuple[EdgeKind, ...],
+    ) -> list[ColumnElement[bool]]:
+        """Условия на ребро: сторона, наличие соседа и вид связи.
+
+        Пустой перечень видов означает «любая связь» — так спрашивают,
+        когда хотят увидеть карту зависимостей символа целиком.
+        """
+        anchor, neighbour = PostgresSymbolReader._directions(incoming=incoming)
+        conditions: list[ColumnElement[bool]] = [
+            anchor.in_(symbol_ids),
+            neighbour.isnot(None),
+            neighbour.notin_(symbol_ids),
+        ]
+        if kinds:
+            conditions.append(SymbolEdgeModel.kind.in_(kinds))
+        return conditions
 
     @staticmethod
     def _directions(
@@ -238,21 +315,7 @@ class PostgresSymbolReader:
     async def _read(self, statement: Select[Any]) -> list[SymbolContext]:
         rows = (await self._session.execute(statement)).all()
         texts = await self._texts_of([row.id for row in rows])
-
-        return [
-            SymbolContext(
-                symbol_id=CodeSymbolId(row.id),
-                qualified_name=QualifiedName(row.qualified_name),
-                kind=row.kind,
-                path=row.path,
-                start_line=row.start_line,
-                end_line=row.end_line,
-                signature=row.signature,
-                docstring=row.docstring,
-                text=texts.get(row.id, ""),
-            )
-            for row in rows
-        ]
+        return [_context(row, texts.get(row.id, "")) for row in rows]
 
     async def _texts_of(self, symbol_ids: list[UUID]) -> dict[UUID, str]:
         if not symbol_ids:
@@ -269,3 +332,17 @@ class PostgresSymbolReader:
         for symbol_id, content in rows:
             texts[symbol_id] = f"{texts[symbol_id]}\n{content}" if symbol_id in texts else content
         return texts
+
+
+def _context(row: Any, text: str) -> SymbolContext:
+    return SymbolContext(
+        symbol_id=CodeSymbolId(row.id),
+        qualified_name=QualifiedName(row.qualified_name),
+        kind=row.kind,
+        path=row.path,
+        start_line=row.start_line,
+        end_line=row.end_line,
+        signature=row.signature,
+        docstring=row.docstring,
+        text=text,
+    )
