@@ -11,24 +11,18 @@ from ducktective.core.retrieval.navigation import (
 from ducktective.llm.tools import (
     NavigationToolbox,
 )
+from tests.fakes import (
+    StubNavigator,
+)
 
 
-class RecordingNavigator:
+class RecordingNavigator(StubNavigator):
     """Навигатор, запоминающий, о чём его спросили."""
 
     source = NavigationSource.INDEX
 
     def __init__(self) -> None:
         self.relations: list[ReferenceRelation] = []
-
-    async def search_code(self, query: str, *, limit: int = 10) -> NavigationAnswer:
-        return NavigationAnswer(source=self.source)
-
-    async def get_definition(self, name: str, *, limit: int = 5) -> NavigationAnswer:
-        return NavigationAnswer(source=self.source)
-
-    async def find_callers(self, name: str, *, limit: int = 20) -> NavigationAnswer:
-        return NavigationAnswer(source=self.source)
 
     async def find_references(
         self,
@@ -51,19 +45,6 @@ class RecordingNavigator:
                 ),
             ),
         )
-
-    async def get_file_context(
-        self,
-        path: str,
-        *,
-        start_line: int,
-        end_line: int,
-        limit: int = 10,
-    ) -> NavigationAnswer:
-        return NavigationAnswer(source=self.source)
-
-    async def list_files(self, pattern: str, *, limit: int = 40) -> NavigationAnswer:
-        return NavigationAnswer(source=self.source)
 
 
 def call(arguments: str) -> ToolCall:

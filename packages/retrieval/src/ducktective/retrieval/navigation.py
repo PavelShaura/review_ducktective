@@ -35,6 +35,13 @@ LISTING_SCAN = 300
 """
 
 
+OUTLINE_HINT = (
+    "Оглавление говорит, что в файле есть, но не что там написано: тело нужного "
+    "символа покажет get_definition, произвольный участок — read_file."
+)
+
+NAME_HINT = "Найдены имена и места, а не тела: нужное покажет get_definition."
+
 NEXT_STEP_HINT = (
     "Перечень говорит, что файлы есть, но не что в них написано: откройте любой "
     "через get_file_context, прежде чем делать вывод о содержимом."
@@ -203,6 +210,94 @@ class IndexedCodeNavigator:
                 *(_definition(context) for context in covering),
                 *(_contract(context, FragmentRole.CALLEE) for context in callees),
                 *(_contract(context, FragmentRole.CALLER) for context in callers),
+            ),
+        )
+
+    async def read_file(
+        self,
+        path: str,
+        *,
+        start_line: int,
+        end_line: int,
+    ) -> NavigationAnswer:
+        """Строки файла из индекса.
+
+        Путь разрешается так же, как в `get_file_context`: спрашивающий
+        называет файл так, как видит его у себя, и знать о корне
+        репозитория не обязан.
+        """
+        resolved = await self._resolve_path(path) or path
+        text = await self._symbols.read_lines(
+            self._repository_id,
+            resolved,
+            start_line=start_line,
+            end_line=end_line,
+        )
+        if text is None:
+            return NavigationAnswer(source=self.source, note=await self._missing_path_note(path))
+
+        note = f"Путь назван как {path}, в индексе он лежит как {resolved}"
+        return NavigationAnswer(
+            source=self.source,
+            note=None if resolved == path else note,
+            fragments=(
+                CodeFragment(
+                    path=resolved,
+                    start_line=start_line,
+                    end_line=end_line,
+                    text=clip_code(text),
+                    role=FragmentRole.SOURCE,
+                ),
+            ),
+        )
+
+    async def get_file_outline(self, path: str, *, limit: int = 60) -> NavigationAnswer:
+        """Оглавление файла — карта, а не содержимое."""
+        resolved = await self._resolve_path(path) or path
+        symbols = await self._symbols.symbols_in_file(self._repository_id, resolved, limit=limit)
+        if not symbols:
+            return NavigationAnswer(
+                source=self.source,
+                note=(
+                    f"В {resolved} проиндексированных символов нет. Строки файла покажет read_file."
+                ),
+            )
+
+        listed = "\n".join(
+            f"  {symbol.start_line}-{symbol.end_line}  {symbol.kind.value} "
+            f"{symbol.signature or symbol.qualified_name}"
+            for symbol in symbols
+        )
+        tail = f", показаны первые {limit}" if len(symbols) >= limit else ""
+        return NavigationAnswer(
+            source=self.source,
+            note=(
+                f"Оглавление {resolved}, символов {len(symbols)}{tail}:\n{listed}\n{OUTLINE_HINT}"
+            ),
+        )
+
+    async def find_symbol(self, query: str, *, limit: int = 10) -> NavigationAnswer:
+        """Имена, похожие на запрос, вместе с их местами."""
+        hits = await self._symbols.search_symbols(self._repository_id, query, limit=limit)
+        if not hits:
+            return NavigationAnswer(
+                source=self.source,
+                note=f"Символов, похожих на «{query}», в индексе нет",
+            )
+
+        return NavigationAnswer(
+            source=self.source,
+            note=NAME_HINT,
+            fragments=tuple(
+                CodeFragment(
+                    path=hit.path,
+                    start_line=hit.start_line,
+                    end_line=hit.end_line,
+                    text=hit.signature or str(hit.qualified_name),
+                    role=FragmentRole.NAME,
+                    title=f"{hit.qualified_name} · {hit.kind.value}",
+                )
+                for hit in hits
             ),
         )
 

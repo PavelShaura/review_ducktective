@@ -43,6 +43,8 @@ REFERENCES_NOTE = (
     "из графа, поэтому наследник через промежуточный класс сюда не попадёт"
 )
 
+NAMES_NOTE = "имена найдены по строкам определений, тела не читались"
+
 REFERENCE_PATTERNS = {
     ReferenceRelation.SUBCLASSES: "(class|extends|implements).*\\b{name}\\b",
     ReferenceRelation.IMPORTERS: "(import|from|require).*\\b{name}\\b",
@@ -211,6 +213,95 @@ class GitCodeNavigator:
         )
         return NavigationAnswer(source=self.source, fragments=(fragment,))
 
+    async def read_file(
+        self,
+        path: str,
+        *,
+        start_line: int,
+        end_line: int,
+    ) -> NavigationAnswer:
+        """Строки файла из ревизии.
+
+        Единственная операция, где режим без индекса точнее индексного:
+        git отдаёт файл как он есть, а индекс — собранный из чанков.
+        """
+        lines = await self._read(path)
+        if lines is None:
+            return NavigationAnswer(
+                source=self.source,
+                note=f"Файла {path} в ревизии {self._revision[:8]} нет",
+            )
+
+        return NavigationAnswer(
+            source=self.source,
+            fragments=(
+                _window(
+                    path,
+                    lines,
+                    start_line=start_line,
+                    end_line=end_line,
+                    role=FragmentRole.SOURCE,
+                ),
+            ),
+        )
+
+    async def get_file_outline(self, path: str, *, limit: int = 60) -> NavigationAnswer:
+        """Оглавление, собранное по строкам определений.
+
+        Без разбора языка граница определения не известна, поэтому строки
+        показываются как есть: их номер и текст. Вложенность видна отступом,
+        каким её написал автор файла.
+        """
+        lines = await self._read(path)
+        if lines is None:
+            return NavigationAnswer(
+                source=self.source,
+                note=f"Файла {path} в ревизии {self._revision[:8]} нет",
+            )
+
+        found = [
+            f"  {number}  {line.strip()}"
+            for number, line in enumerate(lines, start=1)
+            if _starts_definition(line)
+        ][:limit]
+
+        if not found:
+            return NavigationAnswer(
+                source=self.source,
+                note=self._note(f"строк с определениями в {path} не нашлось"),
+            )
+
+        listed = "\n".join(found)
+        return NavigationAnswer(
+            source=self.source,
+            note=self._note(f"оглавление {path} собрано по строкам определений:\n{listed}"),
+        )
+
+    async def find_symbol(self, query: str, *, limit: int = 10) -> NavigationAnswer:
+        """Имена, найденные грепом по строкам определений."""
+        pattern = rf"({'|'.join(DEFINITION_KEYWORDS)})[[:space:]]+[A-Za-z_]*{re.escape(query)}"
+        hits = await self._grep(pattern, limit=limit, regexp=True)
+        if not hits:
+            return NavigationAnswer(
+                source=self.source,
+                note=self._note(f"определений, похожих на «{query}», не нашлось"),
+            )
+
+        return NavigationAnswer(
+            source=self.source,
+            note=self._note(NAMES_NOTE),
+            fragments=tuple(
+                CodeFragment(
+                    path=hit.path,
+                    start_line=hit.line_number,
+                    end_line=hit.line_number,
+                    text=clip_code(hit.text.strip()),
+                    role=FragmentRole.NAME,
+                )
+                for hit in hits
+            ),
+        )
+
     async def list_files(self, pattern: str, *, limit: int = 40) -> NavigationAnswer:
         """Файлы ревизии, подходящие под образец.
 
@@ -373,3 +464,9 @@ def _is_definition(text: str, name: str) -> bool:
     """
     stripped = text.strip().removeprefix("async ")
     return any(stripped.startswith(f"{keyword} {name}") for keyword in DEFINITION_KEYWORDS)
+
+
+def _starts_definition(line: str) -> bool:
+    """Похожа ли строка на начало определения."""
+    stripped = line.strip().removeprefix("async ")
+    return any(stripped.startswith(f"{keyword} ") for keyword in DEFINITION_KEYWORDS)

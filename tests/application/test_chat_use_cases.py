@@ -46,9 +46,6 @@ from ducktective.core.indexing.entities import (
 )
 from ducktective.core.retrieval.navigation import (
     CodeNavigator,
-    NavigationAnswer,
-    NavigationSource,
-    ReferenceRelation,
 )
 from ducktective.core.types import (
     CommitSha,
@@ -59,6 +56,7 @@ from ducktective.core.types import (
 from tests.fakes import (
     FakeEventPublisher,
     FakeUnitOfWork,
+    StubNavigator,
 )
 
 
@@ -90,43 +88,6 @@ class FailingAgent:
         raise RuntimeError("модель отвалилась")
 
 
-class SilentNavigator:
-    """Навигатор, которому в этих тестах отвечать нечем."""
-
-    source = NavigationSource.INDEX
-
-    async def search_code(self, query: str, *, limit: int = 10) -> NavigationAnswer:
-        return NavigationAnswer(source=NavigationSource.INDEX)
-
-    async def get_definition(self, name: str, *, limit: int = 5) -> NavigationAnswer:
-        return NavigationAnswer(source=NavigationSource.INDEX)
-
-    async def find_callers(self, name: str, *, limit: int = 20) -> NavigationAnswer:
-        return NavigationAnswer(source=NavigationSource.INDEX)
-
-    async def find_references(
-        self,
-        name: str,
-        *,
-        relation: ReferenceRelation = ReferenceRelation.ANY,
-        limit: int = 20,
-    ) -> NavigationAnswer:
-        return NavigationAnswer(source=NavigationSource.INDEX)
-
-    async def get_file_context(
-        self,
-        path: str,
-        *,
-        start_line: int,
-        end_line: int,
-        limit: int = 10,
-    ) -> NavigationAnswer:
-        return NavigationAnswer(source=NavigationSource.INDEX)
-
-    async def list_files(self, pattern: str, *, limit: int = 40) -> NavigationAnswer:
-        return NavigationAnswer(source=NavigationSource.INDEX)
-
-
 class SilentNavigators:
     """Фабрика навигаторов: помнит, о каком репозитории спрашивали."""
 
@@ -135,7 +96,7 @@ class SilentNavigators:
 
     def for_repository(self, repository_id: RepositoryId) -> CodeNavigator:
         self.asked_for.append(repository_id)
-        return SilentNavigator()
+        return StubNavigator()
 
 
 def prepare(

@@ -8,11 +8,6 @@ from ducktective.core.diff.value_objects import (
 from ducktective.core.llm.value_objects import (
     ToolCall,
 )
-from ducktective.core.retrieval.navigation import (
-    NavigationAnswer,
-    NavigationSource,
-    ReferenceRelation,
-)
 from ducktective.core.review.entities import (
     ReviewFile,
     ReviewHunk,
@@ -28,43 +23,9 @@ from ducktective.llm.review_tools import (
 from ducktective.llm.tools import (
     NavigationToolbox,
 )
-
-
-class SilentNavigator:
-    """Навигатор, которому в этих тестах отвечать нечем."""
-
-    source = NavigationSource.INDEX
-
-    async def search_code(self, query: str, *, limit: int = 10) -> NavigationAnswer:
-        return NavigationAnswer(source=self.source)
-
-    async def get_definition(self, name: str, *, limit: int = 5) -> NavigationAnswer:
-        return NavigationAnswer(source=self.source)
-
-    async def find_callers(self, name: str, *, limit: int = 20) -> NavigationAnswer:
-        return NavigationAnswer(source=self.source)
-
-    async def find_references(
-        self,
-        name: str,
-        *,
-        relation: ReferenceRelation = ReferenceRelation.ANY,
-        limit: int = 20,
-    ) -> NavigationAnswer:
-        return NavigationAnswer(source=self.source)
-
-    async def get_file_context(
-        self,
-        path: str,
-        *,
-        start_line: int,
-        end_line: int,
-        limit: int = 10,
-    ) -> NavigationAnswer:
-        return NavigationAnswer(source=self.source)
-
-    async def list_files(self, pattern: str, *, limit: int = 40) -> NavigationAnswer:
-        return NavigationAnswer(source=self.source)
+from tests.fakes import (
+    StubNavigator,
+)
 
 
 def review_file(
@@ -98,7 +59,7 @@ def review_file(
 
 def toolbox(*paths: str, current: str = "manifest.txt") -> ReviewToolbox:
     diff = RunDiff(tuple(review_file(path) for path in paths))
-    return ReviewToolbox(NavigationToolbox(SilentNavigator()), diff, path=current)
+    return ReviewToolbox(NavigationToolbox(StubNavigator()), diff, path=current)
 
 
 def call(name: str, arguments: str = "{}") -> ToolCall:

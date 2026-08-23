@@ -51,6 +51,9 @@ from ducktective.llm.chat_agent import (
     AgenticChatAgent,
     PresetChatAgent,
 )
+from tests.fakes import (
+    StubNavigator,
+)
 
 
 REPOSITORY_ID = RepositoryId(uuid4())
@@ -97,7 +100,7 @@ class StreamingLlmClient:
         )
 
 
-class FakeNavigator:
+class FakeNavigator(StubNavigator):
     """Навигатор, отвечающий одним и тем же фрагментом."""
 
     source = NavigationSource.INDEX

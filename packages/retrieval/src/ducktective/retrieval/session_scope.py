@@ -17,6 +17,7 @@ from ducktective.core.retrieval.ports import (
     ChunkHit,
     RelatedSymbol,
     SymbolContext,
+    SymbolHit,
 )
 from ducktective.core.review.entities import (
     ReviewFile,
@@ -125,6 +126,50 @@ class SessionScopedSymbolReader:
             return await PostgresSymbolReader(session).find_paths(
                 repository_id,
                 needle,
+                limit=limit,
+            )
+
+    async def symbols_in_file(
+        self,
+        repository_id: RepositoryId,
+        path: str,
+        *,
+        limit: int = 200,
+    ) -> list[SymbolContext]:
+        async with self._session_factory() as session:
+            return await PostgresSymbolReader(session).symbols_in_file(
+                repository_id,
+                path,
+                limit=limit,
+            )
+
+    async def read_lines(
+        self,
+        repository_id: RepositoryId,
+        path: str,
+        *,
+        start_line: int,
+        end_line: int,
+    ) -> str | None:
+        async with self._session_factory() as session:
+            return await PostgresSymbolReader(session).read_lines(
+                repository_id,
+                path,
+                start_line=start_line,
+                end_line=end_line,
+            )
+
+    async def search_symbols(
+        self,
+        repository_id: RepositoryId,
+        query: str,
+        *,
+        limit: int = 10,
+    ) -> list[SymbolHit]:
+        async with self._session_factory() as session:
+            return await PostgresSymbolReader(session).search_symbols(
+                repository_id,
+                query,
                 limit=limit,
             )
 

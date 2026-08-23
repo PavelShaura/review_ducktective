@@ -59,6 +59,8 @@ class FragmentRole(StrEnum):
     RAISER = "raiser"
     DECORATED = "decorated"
     RELATED = "related"
+    SOURCE = "source"
+    NAME = "name"
 
 
 class ReferenceRelation(StrEnum):
@@ -194,6 +196,39 @@ class CodeNavigator(Protocol):
         limit: int = 10,
     ) -> NavigationAnswer:
         """Показывает окружение участка файла."""
+        ...
+
+    async def read_file(
+        self,
+        path: str,
+        *,
+        start_line: int,
+        end_line: int,
+    ) -> NavigationAnswer:
+        """Показывает строки файла как строки.
+
+        Отвечает там, где `get_file_context` отвечать нечем: у миграции,
+        файла настроек и шаблона проиндексированных символов нет, и обход
+        по графу возвращает пустоту, из которой читается «здесь ничего нет».
+        """
+        ...
+
+    async def get_file_outline(self, path: str, *, limit: int = 60) -> NavigationAnswer:
+        """Перечисляет символы файла с их местами, без тел.
+
+        Карта крупного файла: на тысяче строк оглавление занимает два
+        десятка строк, а `get_file_context` вернёт обрезанное тело одного
+        класса и место в окне, которого хватило бы на весь ответ.
+        """
+        ...
+
+    async def find_symbol(self, query: str, *, limit: int = 10) -> NavigationAnswer:
+        """Ищет символы по имени, а не по смыслу.
+
+        Между «найти похожее по содержанию» и «разрешить полное имя» лежит
+        частый случай: спрашивающий помнит слово из имени, но не помнит
+        ни файла, ни полного пути к символу.
+        """
         ...
 
     async def list_files(self, pattern: str, *, limit: int = 40) -> NavigationAnswer:

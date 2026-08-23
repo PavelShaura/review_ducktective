@@ -36,15 +36,19 @@ from ducktective.core.llm.value_objects import (
 from ducktective.core.retrieval.context import (
     DiffContext,
 )
-from ducktective.core.retrieval.navigation import (  # noqa: TC001
+from ducktective.core.retrieval.navigation import (
     CodeFragment,
     CodeNavigator,
+    NavigationAnswer,
+    NavigationSource,
+    ReferenceRelation,
 )
 from ducktective.core.retrieval.ports import (
     CALL_EDGES,
     ChunkHit,
     RelatedSymbol,
     SymbolContext,
+    SymbolHit,
 )
 from ducktective.core.review.drafts import (
     FindingDraft,
@@ -329,6 +333,63 @@ class FakeVcsProvider:
         return dict(self.tree)
 
 
+class StubNavigator:
+    """Навигатор, отвечающий пустотой на любую операцию.
+
+    Существует, чтобы двойники в тестах переопределяли то, что проверяют,
+    а не переписывали весь перечень операций каждый раз, когда в порт
+    добавляется ещё одна.
+    """
+
+    source = NavigationSource.INDEX
+
+    async def search_code(self, query: str, *, limit: int = 10) -> NavigationAnswer:
+        return NavigationAnswer(source=self.source)
+
+    async def find_symbol(self, query: str, *, limit: int = 10) -> NavigationAnswer:
+        return NavigationAnswer(source=self.source)
+
+    async def get_definition(self, name: str, *, limit: int = 5) -> NavigationAnswer:
+        return NavigationAnswer(source=self.source)
+
+    async def find_callers(self, name: str, *, limit: int = 20) -> NavigationAnswer:
+        return NavigationAnswer(source=self.source)
+
+    async def find_references(
+        self,
+        name: str,
+        *,
+        relation: ReferenceRelation = ReferenceRelation.ANY,
+        limit: int = 20,
+    ) -> NavigationAnswer:
+        return NavigationAnswer(source=self.source)
+
+    async def get_file_context(
+        self,
+        path: str,
+        *,
+        start_line: int,
+        end_line: int,
+        limit: int = 10,
+    ) -> NavigationAnswer:
+        return NavigationAnswer(source=self.source)
+
+    async def get_file_outline(self, path: str, *, limit: int = 60) -> NavigationAnswer:
+        return NavigationAnswer(source=self.source)
+
+    async def read_file(
+        self,
+        path: str,
+        *,
+        start_line: int,
+        end_line: int,
+    ) -> NavigationAnswer:
+        return NavigationAnswer(source=self.source)
+
+    async def list_files(self, pattern: str, *, limit: int = 40) -> NavigationAnswer:
+        return NavigationAnswer(source=self.source)
+
+
 class FakeSymbolReader:
     """Читатель символов на заранее заданных ответах."""
 
@@ -342,6 +403,9 @@ class FakeSymbolReader:
         kind_counts: dict[EdgeKind, int] | None = None,
         by_name: dict[str, list[SymbolContext]] | None = None,
         paths: list[str] | None = None,
+        in_file: list[SymbolContext] | None = None,
+        lines: dict[str, str] | None = None,
+        by_query: list[SymbolHit] | None = None,
     ) -> None:
         self._covering = covering or []
         self._callees = callees or []
@@ -350,6 +414,9 @@ class FakeSymbolReader:
         self._kind_counts = kind_counts or {}
         self._by_name = by_name or {}
         self._paths = paths or []
+        self._in_file = in_file or []
+        self._lines = lines or {}
+        self._by_query = by_query or []
         self.asked_lines: list[tuple[int, int]] = []
         self.asked_names: list[str] = []
         self.asked_paths: list[str] = []
@@ -390,6 +457,37 @@ class FakeSymbolReader:
         return [path for path in self._paths if path == pattern or path.endswith(f"/{pattern}")][
             :limit
         ]
+
+    async def symbols_in_file(
+        self,
+        repository_id: RepositoryId,
+        path: str,
+        *,
+        limit: int = 200,
+    ) -> list[SymbolContext]:
+        self.asked_paths.append(path)
+        return self._in_file[:limit]
+
+    async def read_lines(
+        self,
+        repository_id: RepositoryId,
+        path: str,
+        *,
+        start_line: int,
+        end_line: int,
+    ) -> str | None:
+        self.asked_lines.append((start_line, end_line))
+        return self._lines.get(path)
+
+    async def search_symbols(
+        self,
+        repository_id: RepositoryId,
+        query: str,
+        *,
+        limit: int = 10,
+    ) -> list[SymbolHit]:
+        self.asked_names.append(query)
+        return self._by_query[:limit]
 
     async def callees(
         self,

@@ -27,11 +27,15 @@ from ducktective.core.retrieval.ports import (
     CALL_EDGES,
     RelatedSymbol,
     SymbolContext,
+    SymbolHit,
 )
 from ducktective.core.types import (
     CodeSymbolId,
     QualifiedName,
     RepositoryId,
+)
+from ducktective.retrieval.lexical import (
+    PostgresLexicalSearch,
 )
 from ducktective.storage.models.indexing import (
     CodeChunkModel,
@@ -167,6 +171,91 @@ class PostgresSymbolReader:
             .limit(limit)
         )
         return await self._read(statement)
+
+    async def symbols_in_file(
+        self,
+        repository_id: RepositoryId,
+        path: str,
+        *,
+        limit: int = 200,
+    ) -> list[SymbolContext]:
+        """Символы файла по порядку. Тела не читаются — только карта."""
+        statement = (
+            self._base_query()
+            .where(
+                CodeSymbolModel.repository_id == repository_id,
+                SourceFileModel.path == path,
+                SourceFileModel.is_deleted.is_(False),
+            )
+            .order_by(CodeSymbolModel.start_line, CodeSymbolModel.end_line)
+            .limit(limit)
+        )
+        rows = (await self._session.execute(statement)).all()
+        return [_context(row, "") for row in rows]
+
+    async def read_lines(
+        self,
+        repository_id: RepositoryId,
+        path: str,
+        *,
+        start_line: int,
+        end_line: int,
+    ) -> str | None:
+        """Строки файла, собранные из его чанков.
+
+        Читается индекс, а не диск: индекс описывает зафиксированную
+        ревизию, рабочая копия — нет, и расходиться им нельзя (D-021).
+        Чанки могут перекрываться, поэтому строки собираются в словарь
+        по номеру, а не склеиваются подряд.
+        """
+        statement = (
+            select(
+                CodeChunkModel.content,
+                CodeChunkModel.start_line,
+                CodeChunkModel.end_line,
+            )
+            .join(SourceFileModel, SourceFileModel.id == CodeChunkModel.file_id)
+            .where(
+                CodeChunkModel.repository_id == repository_id,
+                SourceFileModel.path == path,
+                SourceFileModel.is_deleted.is_(False),
+                CodeChunkModel.start_line <= end_line,
+                CodeChunkModel.end_line >= start_line,
+            )
+            .order_by(CodeChunkModel.start_line)
+        )
+        rows = (await self._session.execute(statement)).all()
+        if not rows:
+            return None
+
+        lines: dict[int, str] = {}
+        for content, chunk_start, _ in rows:
+            for offset, line in enumerate(content.splitlines()):
+                number = chunk_start + offset
+                if start_line <= number <= end_line:
+                    lines.setdefault(number, line)
+
+        if not lines:
+            return None
+        return "\n".join(lines[number] for number in sorted(lines))
+
+    async def search_symbols(
+        self,
+        repository_id: RepositoryId,
+        query: str,
+        *,
+        limit: int = 10,
+    ) -> list[SymbolHit]:
+        """Поиск по именам символов.
+
+        Делегируется лексическому поиску: имена лежат в том же `tsvector`,
+        и второй запрос ради того же индекса писать незачем.
+        """
+        return await PostgresLexicalSearch(self._session).search_symbols(
+            repository_id,
+            query,
+            limit=limit,
+        )
 
     async def callees(
         self,

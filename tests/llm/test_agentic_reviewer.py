@@ -59,6 +59,7 @@ from ducktective.llm.code_reviewer import (
 )
 from tests.fakes import (
     FakeLlmClient,
+    StubNavigator,
 )
 
 
@@ -172,7 +173,7 @@ def call(name: str = "find_callers", arguments: str = '{"name": "build"}') -> To
     return ToolCall(id="call_1", name=name, arguments=arguments)
 
 
-class FakeNavigator:
+class FakeNavigator(StubNavigator):
     source = NavigationSource.INDEX
 
     def __init__(self, *, empty: bool = False) -> None:
@@ -308,10 +309,13 @@ async def test_tools_are_offered_while_investigating_and_dropped_at_the_end() ->
 
     assert client.offered_tools[0] == (
         "search_code",
+        "find_symbol",
         "get_definition",
         "find_callers",
         "find_references",
         "get_file_context",
+        "get_file_outline",
+        "read_file",
         "list_files",
     )
     assert client.offered_tools[-1] == ()
@@ -356,7 +360,7 @@ async def test_broken_arguments_come_back_as_an_error_not_an_exception() -> None
 
 
 async def test_unknown_tool_is_answered_with_the_list_of_real_ones() -> None:
-    client = ScriptedLlmClient([answer(calls=(call(name="read_file"),)), answer(EMPTY_JSON)])
+    client = ScriptedLlmClient([answer(calls=(call(name="run_tests"),)), answer(EMPTY_JSON)])
     sink = RecordingSink()
 
     await review(build_reviewer(client, sink=sink), FakeNavigator())

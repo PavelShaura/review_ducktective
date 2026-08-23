@@ -50,6 +50,8 @@ ROLE_TITLES = {
     FragmentRole.RAISER: "Возбуждает",
     FragmentRole.DECORATED: "Декорирован им",
     FragmentRole.RELATED: "Ссылается",
+    FragmentRole.SOURCE: "Строки",
+    FragmentRole.NAME: "Имя",
 }
 
 SEARCH_CODE = ToolSpec(
@@ -140,6 +142,58 @@ FIND_REFERENCES = ToolSpec(
     },
 )
 
+READ_FILE = ToolSpec(
+    name="read_file",
+    description=(
+        "Read a range of lines of a file as plain lines. Use it for files that have no "
+        "symbols to walk - a migration, a settings file, a template, a lock file - where "
+        "get_file_context has nothing to answer with, and for reading a place you already "
+        "found by its line numbers."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Path inside the repository"},
+            "start_line": {"type": "integer"},
+            "end_line": {"type": "integer"},
+        },
+        "required": ["path", "start_line", "end_line"],
+    },
+)
+
+GET_FILE_OUTLINE = ToolSpec(
+    name="get_file_outline",
+    description=(
+        "List what a file defines - classes, functions, methods - with their line ranges "
+        "and no bodies. Use it to see the shape of a large file before deciding what to "
+        "read: the outline of a thousand-line file is twenty lines long."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Path inside the repository"},
+        },
+        "required": ["path"],
+    },
+)
+
+FIND_SYMBOL = ToolSpec(
+    name="find_symbol",
+    description=(
+        "Find symbols whose names look like the query. Use it when you remember a word "
+        "from the name but not the file or the full name - 'permission', 'archived', "
+        "'report builder'. This searches names, while search_code searches content."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "A word or part of a name"},
+            "limit": {"type": "integer", "description": "How many symbols, default 8"},
+        },
+        "required": ["query"],
+    },
+)
+
 LIST_FILES = ToolSpec(
     name="list_files",
     description=(
@@ -175,10 +229,13 @@ SEARCH_DOCUMENT = ToolSpec(
 
 NAVIGATION_TOOLS = (
     SEARCH_CODE,
+    FIND_SYMBOL,
     GET_DEFINITION,
     FIND_CALLERS,
     FIND_REFERENCES,
     GET_FILE_CONTEXT,
+    GET_FILE_OUTLINE,
+    READ_FILE,
     LIST_FILES,
 )
 
@@ -315,6 +372,19 @@ class NavigationToolbox:
                 str(arguments["name"]),
                 limit=int(arguments.get("limit", 8)),
             )
+        if name == FIND_SYMBOL.name:
+            return await self._navigator.find_symbol(
+                str(arguments["query"]),
+                limit=int(arguments.get("limit", 8)),
+            )
+        if name == READ_FILE.name:
+            return await self._navigator.read_file(
+                str(arguments["path"]),
+                start_line=int(arguments["start_line"]),
+                end_line=int(arguments["end_line"]),
+            )
+        if name == GET_FILE_OUTLINE.name:
+            return await self._navigator.get_file_outline(str(arguments["path"]))
         if name == FIND_REFERENCES.name:
             return await self._navigator.find_references(
                 str(arguments["name"]),

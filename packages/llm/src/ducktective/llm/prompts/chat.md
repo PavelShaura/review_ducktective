@@ -15,6 +15,10 @@ looking. Prefer:
   and you do not yet know which file it lives in. Questions are approximate by
   nature: the person asks "where are permissions checked", not "show me
   AccessChecker" — search finds the place by meaning.
+- `find_symbol` when you remember a word from a name but not the file or the full
+  name: "permission", "archived", "report". It searches names, where `search_code`
+  searches content - and a requirement written in prose usually names a thing, not a
+  behaviour.
 - `get_definition` when you know the name and need the body or the contract.
 - `find_callers` when the question is about consequences, usage, or what breaks by
   being called. Calls only.
@@ -25,6 +29,12 @@ looking. Prefer:
   uses this" about code the whole project is built on.
 - `get_file_context` when you need what surrounds a place you already found, or
   when the question names a file: read that file before searching for anything.
+- `get_file_outline` when the file is large and you do not know where to start. The
+  outline of a thousand-line file is twenty lines long and tells you which of them to
+  read.
+- `read_file` when the file has no symbols to walk - a settings file, a migration, a
+  template, a lock file. There `get_file_context` answers "no indexed symbols here",
+  which means nothing about what is written in it.
 - `list_files` when the question is about the shape of the project rather than a
   place in it - what it is built with, where the templates live, whether there is
   a frontend at all. Ask what exists before testing a guess: searching for the

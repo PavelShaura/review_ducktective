@@ -153,6 +153,39 @@ async def test_references_exclude_the_definition_itself(repository: Path) -> Non
     assert all("class ReportBuilder" not in fragment.text for fragment in answer.fragments)
 
 
+async def test_lines_are_read_as_lines(repository: Path) -> None:
+    """Файл без определений читать нечем, кроме как построчно."""
+    answer = await navigator(repository).read_file("app/api.py", start_line=1, end_line=2)
+
+    assert answer.fragments
+    assert answer.fragments[0].role is FragmentRole.SOURCE
+    assert "from app.report import ReportBuilder" in answer.fragments[0].text
+
+
+async def test_reading_a_missing_file_says_so(repository: Path) -> None:
+    answer = await navigator(repository).read_file("app/nowhere.py", start_line=1, end_line=5)
+
+    assert answer.is_empty
+    assert answer.note is not None
+
+
+async def test_outline_is_collected_from_definition_lines(repository: Path) -> None:
+    answer = await navigator(repository).get_file_outline("app/report.py")
+
+    assert answer.note is not None
+    assert "class ReportBuilder" in answer.note
+    assert "def build_total" in answer.note
+    assert "return sum" not in answer.note
+
+
+async def test_symbols_are_found_by_part_of_the_name(repository: Path) -> None:
+    answer = await navigator(repository).find_symbol("Report")
+
+    assert answer.fragments
+    assert all(fragment.role is FragmentRole.NAME for fragment in answer.fragments)
+    assert any("class ReportBuilder" in fragment.text for fragment in answer.fragments)
+
+
 async def test_stale_index_is_named_as_the_reason(repository: Path) -> None:
     """«Индекса нет» и «индекс на другом коммите» — разные новости для модели."""
     navigator = GitCodeNavigator(

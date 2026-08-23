@@ -11,6 +11,8 @@ The questions worth a tool call:
   modules importing a changed one, code raising a changed exception
 - `get_definition` — what does the thing being called actually promise
 - `get_file_context` — what surrounds these lines in their own file
+- `read_file` — the plain lines of a file that has no symbols: a settings file, a
+  migration, a lock file, a template
 - `search_code` — how is this done elsewhere in the project
 - `get_diff_summary` — which other files this same change touches
 - `get_file_diff` — what was changed in one of them
