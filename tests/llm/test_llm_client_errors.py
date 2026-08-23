@@ -66,7 +66,7 @@ def _completion(finish_reason: str) -> SimpleNamespace:
 
 
 def test_response_hitting_the_output_limit_is_marked_truncated() -> None:
-    choice = ModelChoice(model="lm_studio/qwen", provider="lm_studio")
+    choice = ModelChoice(name="local", model="lm_studio/qwen", provider="lm_studio")
 
     assert _build_response(_completion("length"), choice, 10).is_truncated
     assert not _build_response(_completion("stop"), choice, 10).is_truncated
@@ -81,7 +81,9 @@ def test_truncated_answer_names_the_limit_instead_of_the_schema() -> None:
 
 
 def _client(timeout_seconds: float = 180.0) -> LiteLlmClient:
-    router = ModelRouter(local_choice=ModelChoice(model="lm_studio/qwen", provider="lm_studio"))
+    router = ModelRouter(
+        local_choice=ModelChoice(name="local", model="lm_studio/qwen", provider="lm_studio")
+    )
     return LiteLlmClient(router, timeout_seconds=timeout_seconds)
 
 

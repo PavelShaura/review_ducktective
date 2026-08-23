@@ -50,11 +50,13 @@ from ducktective.core.review.value_objects import (
 
 
 class StartReviewRequest(BaseModel):
-    tenant_id: UUID
+    """Запуск дела. Модель — пожелание: политика репозитория старше выбора."""
+
     base: str = Field(min_length=1, max_length=255)
     head: str = Field(default="HEAD", min_length=1, max_length=255)
     source: ReviewSource = ReviewSource.LOCAL_DIFF
     external_pull_request_id: str | None = None
+    model: str | None = Field(default=None, max_length=64)
 
 
 class HunkResponse(BaseModel):
@@ -154,7 +156,6 @@ class FileContextResponse(BaseModel):
 
 
 class SubmitFeedbackRequest(BaseModel):
-    tenant_id: UUID
     verdict: FeedbackVerdict
     comment: str | None = Field(default=None, max_length=2000)
 

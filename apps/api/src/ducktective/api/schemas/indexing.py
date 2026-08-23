@@ -101,7 +101,6 @@ class IndexStateResponse(BaseModel):
 
 
 class StartIndexingRequest(BaseModel):
-    tenant_id: UUID
     revision: str = "HEAD"
 
 

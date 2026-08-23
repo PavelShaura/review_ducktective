@@ -8,6 +8,7 @@ from uuid import (
 
 TenantId = NewType("TenantId", UUID)
 UserId = NewType("UserId", UUID)
+InvitationId = NewType("InvitationId", UUID)
 RepositoryId = NewType("RepositoryId", UUID)
 IndexSnapshotId = NewType("IndexSnapshotId", UUID)
 SourceFileId = NewType("SourceFileId", UUID)

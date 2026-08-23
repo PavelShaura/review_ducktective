@@ -27,8 +27,20 @@ from ducktective.core.indexing.ports import (
 from ducktective.core.indexing.value_objects import (
     SnapshotStatus,
 )
+from ducktective.core.llm.model_profile import (
+    ModelProfile,
+    ModelProfileId,
+)
 from ducktective.core.review.entities import (
     ReviewRun,
+)
+from ducktective.core.tenancy.entities import (
+    Invitation,
+    Tenant,
+    UserAccount,
+)
+from ducktective.core.tenancy.value_objects import (
+    InvitationStatus,
 )
 from ducktective.core.types import (
     CodeChunkId,
@@ -37,10 +49,12 @@ from ducktective.core.types import (
     ConversationId,
     EmbeddingModelId,
     IndexSnapshotId,
+    InvitationId,
     QualifiedName,
     RepositoryId,
     ReviewRunId,
     TenantId,
+    UserId,
 )
 
 
@@ -497,3 +511,183 @@ class InMemoryEmbeddingStore:
             for source_file in self._source_files.live_files(repository_id)
             for chunk in source_file.chunks
         ]
+
+
+class InMemoryTenantRepository:
+    """Репозиторий организаций в памяти процесса."""
+
+    def __init__(self) -> None:
+        self._committed: dict[TenantId, Tenant] = {}
+        self._pending: dict[TenantId, Tenant] = {}
+
+    def add(self, tenant: Tenant) -> None:
+        self._pending[tenant.id] = tenant
+
+    async def get(self, tenant_id: TenantId) -> Tenant:
+        tenant = self._pending.get(tenant_id) or self._committed.get(tenant_id)
+        if tenant is None:
+            raise EntityNotFoundError("Tenant", tenant_id)
+        return tenant
+
+    async def find_by_slug(self, slug: str) -> Tenant | None:
+        for tenant in self._tracked():
+            if tenant.slug == slug:
+                return tenant
+        return None
+
+    def commit(self) -> None:
+        self._committed.update(self._pending)
+        self._pending.clear()
+
+    def rollback(self) -> None:
+        self._pending.clear()
+
+    def collect_events(self) -> list[DomainEvent]:
+        collected: list[DomainEvent] = []
+        for tenant in self._tracked():
+            collected.extend(tenant.pull_events())
+        return collected
+
+    def _tracked(self) -> list[Tenant]:
+        return [*self._committed.values(), *self._pending.values()]
+
+
+class InMemoryUserAccountRepository:
+    """Репозиторий участников в памяти процесса."""
+
+    def __init__(self) -> None:
+        self._committed: dict[UserId, UserAccount] = {}
+        self._pending: dict[UserId, UserAccount] = {}
+        self._removed_events: list[DomainEvent] = []
+
+    def add(self, account: UserAccount) -> None:
+        self._pending[account.id] = account
+
+    async def get(self, user_id: UserId) -> UserAccount:
+        account = self._pending.get(user_id) or self._committed.get(user_id)
+        if account is None:
+            raise EntityNotFoundError("UserAccount", user_id)
+        return account
+
+    async def find_by_identity(self, *, issuer: str, subject: str) -> UserAccount | None:
+        for account in self._tracked():
+            if account.external_issuer == issuer and account.external_subject == subject:
+                return account
+        return None
+
+    async def list_for_tenant(self, tenant_id: TenantId) -> list[UserAccount]:
+        return [account for account in self._tracked() if account.tenant_id == tenant_id]
+
+    async def remove(self, account: UserAccount) -> None:
+        self._pending.pop(account.id, None)
+        self._committed.pop(account.id, None)
+        self._removed_events.extend(account.pull_events())
+
+    def commit(self) -> None:
+        self._committed.update(self._pending)
+        self._pending.clear()
+
+    def rollback(self) -> None:
+        self._pending.clear()
+
+    def collect_events(self) -> list[DomainEvent]:
+        collected = self._removed_events
+        self._removed_events = []
+        for account in self._tracked():
+            collected.extend(account.pull_events())
+        return collected
+
+    def _tracked(self) -> list[UserAccount]:
+        return [*self._committed.values(), *self._pending.values()]
+
+
+class InMemoryInvitationRepository:
+    """Репозиторий приглашений в памяти процесса."""
+
+    def __init__(self) -> None:
+        self._committed: dict[InvitationId, Invitation] = {}
+        self._pending: dict[InvitationId, Invitation] = {}
+
+    def add(self, invitation: Invitation) -> None:
+        self._pending[invitation.id] = invitation
+
+    async def get(self, invitation_id: InvitationId) -> Invitation:
+        invitation = self._pending.get(invitation_id) or self._committed.get(invitation_id)
+        if invitation is None:
+            raise EntityNotFoundError("Invitation", invitation_id)
+        return invitation
+
+    async def find_by_token_digest(self, digest: str) -> Invitation | None:
+        for invitation in self._tracked():
+            if invitation.token_digest == digest:
+                return invitation
+        return None
+
+    async def list_pending(self, tenant_id: TenantId) -> list[Invitation]:
+        return [
+            invitation
+            for invitation in self._tracked()
+            if invitation.tenant_id == tenant_id and invitation.status is InvitationStatus.PENDING
+        ]
+
+    def commit(self) -> None:
+        self._committed.update(self._pending)
+        self._pending.clear()
+
+    def rollback(self) -> None:
+        self._pending.clear()
+
+    def collect_events(self) -> list[DomainEvent]:
+        collected: list[DomainEvent] = []
+        for invitation in self._tracked():
+            collected.extend(invitation.pull_events())
+        return collected
+
+    def _tracked(self) -> list[Invitation]:
+        return [*self._committed.values(), *self._pending.values()]
+
+
+class InMemoryModelProfileRepository:
+    """Модели организации в памяти процесса."""
+
+    def __init__(self) -> None:
+        self._committed: dict[ModelProfileId, ModelProfile] = {}
+        self._pending: dict[ModelProfileId, ModelProfile] = {}
+
+    def add(self, profile: ModelProfile) -> None:
+        self._pending[profile.id] = profile
+
+    async def get(self, profile_id: ModelProfileId) -> ModelProfile:
+        profile = self._pending.get(profile_id) or self._committed.get(profile_id)
+        if profile is None:
+            raise EntityNotFoundError("ModelProfile", profile_id)
+        return profile
+
+    async def list_for_tenant(self, tenant_id: TenantId) -> list[ModelProfile]:
+        return [profile for profile in self._tracked() if profile.tenant_id == tenant_id]
+
+    async def find_by_name(self, tenant_id: TenantId, name: str) -> ModelProfile | None:
+        for profile in self._tracked():
+            if profile.tenant_id == tenant_id and profile.name == name:
+                return profile
+        return None
+
+    async def remove(self, profile: ModelProfile) -> None:
+        self._pending.pop(profile.id, None)
+        self._committed.pop(profile.id, None)
+
+    def commit(self) -> None:
+        self._committed.update(self._pending)
+        self._pending.clear()
+
+    def rollback(self) -> None:
+        self._pending.clear()
+
+    def collect_events(self) -> list[DomainEvent]:
+        collected: list[DomainEvent] = []
+        for profile in self._tracked():
+            collected.extend(profile.pull_events())
+        return collected
+
+    def _tracked(self) -> list[ModelProfile]:
+        return [*self._committed.values(), *self._pending.values()]

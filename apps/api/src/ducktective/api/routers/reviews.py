@@ -14,7 +14,6 @@ from ducktective.api.dependencies import (
     EventPublisherDependency,
     InvestigationLogDependency,
     TaskQueueDependency,
-    UnitOfWorkDependency,
     VcsProviderDependency,
 )
 from ducktective.api.schemas.review import (
@@ -28,6 +27,10 @@ from ducktective.api.schemas.review import (
     ReviewRunSummary,
     StartReviewRequest,
     SubmitFeedbackRequest,
+)
+from ducktective.api.security import (
+    MemberDependency,
+    TenantUnitOfWorkDependency,
 )
 from ducktective.application.exceptions import (
     PermissionDeniedError,
@@ -90,7 +93,6 @@ from ducktective.core.types import (
     RepositoryId,
     ReviewFileId,
     ReviewRunId,
-    TenantId,
 )
 
 
@@ -107,19 +109,21 @@ NO_STORE = "no-store"
 async def start_review(
     repository_id: UUID,
     payload: StartReviewRequest,
-    unit_of_work: UnitOfWorkDependency,
+    member: MemberDependency,
+    unit_of_work: TenantUnitOfWorkDependency,
     event_publisher: EventPublisherDependency,
     vcs_provider: VcsProviderDependency,
     diff_parser: DiffParserDependency,
 ) -> ReviewRunResponse:
     use_case = PrepareReviewRun(unit_of_work, event_publisher, vcs_provider, diff_parser)
     command = PrepareReviewRunCommand(
-        tenant_id=TenantId(payload.tenant_id),
+        tenant_id=member.tenant_id,
         repository_id=RepositoryId(repository_id),
         base=payload.base,
         head=payload.head,
         source=payload.source,
         external_pull_request_id=payload.external_pull_request_id,
+        preferred_model=payload.model,
     )
 
     try:
@@ -139,13 +143,13 @@ async def start_review(
 @router.get("/reviews/{run_id}", response_model=ReviewRunResponse)
 async def get_review(
     run_id: UUID,
-    tenant_id: UUID,
-    unit_of_work: UnitOfWorkDependency,
+    member: MemberDependency,
+    unit_of_work: TenantUnitOfWorkDependency,
 ) -> ReviewRunResponse:
     use_case = GetReviewRun(unit_of_work)
 
     try:
-        run = await use_case.execute(TenantId(tenant_id), ReviewRunId(run_id))
+        run = await use_case.execute(member.tenant_id, ReviewRunId(run_id))
     except EntityNotFoundError as error:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
     except PermissionDeniedError as error:
@@ -161,8 +165,8 @@ async def get_review(
 )
 async def enqueue_review(
     run_id: UUID,
-    tenant_id: UUID,
-    unit_of_work: UnitOfWorkDependency,
+    member: MemberDependency,
+    unit_of_work: TenantUnitOfWorkDependency,
     task_queue: TaskQueueDependency,
 ) -> ReviewRunResponse:
     """Ставит прогон в очередь.
@@ -171,7 +175,7 @@ async def enqueue_review(
     опрашивает статус через GET.
     """
     try:
-        run = await GetReviewRun(unit_of_work).execute(TenantId(tenant_id), ReviewRunId(run_id))
+        run = await GetReviewRun(unit_of_work).execute(member.tenant_id, ReviewRunId(run_id))
     except EntityNotFoundError as error:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
     except PermissionDeniedError as error:
@@ -186,7 +190,7 @@ async def enqueue_review(
     await task_queue.enqueue_job(
         REVIEW_TASK_NAME,
         str(run_id),
-        str(tenant_id),
+        str(member.tenant_id),
         _queue_name=REVIEW_QUEUE,
     )
     return ReviewRunResponse.from_domain(run)
@@ -199,8 +203,8 @@ async def enqueue_review(
 )
 async def restart_review(
     run_id: UUID,
-    tenant_id: UUID,
-    unit_of_work: UnitOfWorkDependency,
+    member: MemberDependency,
+    unit_of_work: TenantUnitOfWorkDependency,
     event_publisher: EventPublisherDependency,
     task_queue: TaskQueueDependency,
 ) -> ReviewRunResponse:
@@ -213,7 +217,7 @@ async def restart_review(
     use_case = RestartReviewRun(unit_of_work, event_publisher)
 
     try:
-        run = await use_case.execute(TenantId(tenant_id), ReviewRunId(run_id))
+        run = await use_case.execute(member.tenant_id, ReviewRunId(run_id))
     except EntityNotFoundError as error:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
     except PermissionDeniedError as error:
@@ -224,7 +228,7 @@ async def restart_review(
     await task_queue.enqueue_job(
         REVIEW_TASK_NAME,
         str(run_id),
-        str(tenant_id),
+        str(member.tenant_id),
         _queue_name=REVIEW_QUEUE,
     )
     return ReviewRunResponse.from_domain(run)
@@ -237,8 +241,8 @@ async def restart_review(
 )
 async def resume_review(
     run_id: UUID,
-    tenant_id: UUID,
-    unit_of_work: UnitOfWorkDependency,
+    member: MemberDependency,
+    unit_of_work: TenantUnitOfWorkDependency,
     event_publisher: EventPublisherDependency,
     task_queue: TaskQueueDependency,
 ) -> ReviewRunResponse:
@@ -251,7 +255,7 @@ async def resume_review(
     use_case = ResumeReviewRun(unit_of_work, event_publisher)
 
     try:
-        run = await use_case.execute(TenantId(tenant_id), ReviewRunId(run_id))
+        run = await use_case.execute(member.tenant_id, ReviewRunId(run_id))
     except EntityNotFoundError as error:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
     except PermissionDeniedError as error:
@@ -262,7 +266,7 @@ async def resume_review(
     await task_queue.enqueue_job(
         REVIEW_TASK_NAME,
         str(run_id),
-        str(tenant_id),
+        str(member.tenant_id),
         True,
         _queue_name=REVIEW_QUEUE,
     )
@@ -272,8 +276,8 @@ async def resume_review(
 @router.post("/reviews/{run_id}/cancel", response_model=CancelRunResponse)
 async def cancel_review(
     run_id: UUID,
-    tenant_id: UUID,
-    unit_of_work: UnitOfWorkDependency,
+    member: MemberDependency,
+    unit_of_work: TenantUnitOfWorkDependency,
     event_publisher: EventPublisherDependency,
 ) -> CancelRunResponse:
     """Просит прекратить идущее расследование.
@@ -285,7 +289,7 @@ async def cancel_review(
     use_case = CancelReviewRun(unit_of_work, event_publisher)
 
     try:
-        cancelled = await use_case.execute(TenantId(tenant_id), ReviewRunId(run_id))
+        cancelled = await use_case.execute(member.tenant_id, ReviewRunId(run_id))
     except EntityNotFoundError as error:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
     except PermissionDeniedError as error:
@@ -297,8 +301,8 @@ async def cancel_review(
 @router.delete("/reviews/{run_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_review(
     run_id: UUID,
-    tenant_id: UUID,
-    unit_of_work: UnitOfWorkDependency,
+    member: MemberDependency,
+    unit_of_work: TenantUnitOfWorkDependency,
     event_publisher: EventPublisherDependency,
     task_queue: TaskQueueDependency,
 ) -> None:
@@ -311,7 +315,7 @@ async def delete_review(
     use_case = DeleteReviewRun(unit_of_work, event_publisher)
 
     try:
-        await use_case.execute(TenantId(tenant_id), ReviewRunId(run_id))
+        await use_case.execute(member.tenant_id, ReviewRunId(run_id))
     except EntityNotFoundError as error:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
     except PermissionDeniedError as error:
@@ -320,6 +324,7 @@ async def delete_review(
     await task_queue.enqueue_job(
         FORGET_CHECKPOINT_TASK_NAME,
         str(run_id),
+        str(member.tenant_id),
         _queue_name=REVIEW_QUEUE,
     )
 
@@ -333,7 +338,8 @@ async def submit_feedback(
     run_id: UUID,
     finding_id: UUID,
     payload: SubmitFeedbackRequest,
-    unit_of_work: UnitOfWorkDependency,
+    member: MemberDependency,
+    unit_of_work: TenantUnitOfWorkDependency,
     event_publisher: EventPublisherDependency,
 ) -> FeedbackResponse:
     """Фиксирует оценку находки.
@@ -342,7 +348,7 @@ async def submit_feedback(
     """
     use_case = SubmitFindingFeedback(unit_of_work, event_publisher)
     command = SubmitFindingFeedbackCommand(
-        tenant_id=TenantId(payload.tenant_id),
+        tenant_id=member.tenant_id,
         run_id=ReviewRunId(run_id),
         finding_id=FindingId(finding_id),
         verdict=payload.verdict,
@@ -363,16 +369,16 @@ async def submit_feedback(
 async def get_file_patch(
     run_id: UUID,
     file_id: UUID,
-    tenant_id: UUID,
+    member: MemberDependency,
     response: Response,
-    unit_of_work: UnitOfWorkDependency,
+    unit_of_work: TenantUnitOfWorkDependency,
     vcs_provider: VcsProviderDependency,
 ) -> FilePatchResponse:
     use_case = GetFilePatch(unit_of_work, vcs_provider)
 
     try:
         view = await use_case.execute(
-            TenantId(tenant_id),
+            member.tenant_id,
             ReviewRunId(run_id),
             ReviewFileId(file_id),
         )
@@ -389,11 +395,11 @@ async def get_file_patch(
 async def get_file_context(
     run_id: UUID,
     file_id: UUID,
-    tenant_id: UUID,
+    member: MemberDependency,
     start_line: int,
     end_line: int,
     response: Response,
-    unit_of_work: UnitOfWorkDependency,
+    unit_of_work: TenantUnitOfWorkDependency,
     vcs_provider: VcsProviderDependency,
     side: DiffSide = DiffSide.NEW,
 ) -> FileContextResponse:
@@ -401,7 +407,7 @@ async def get_file_context(
 
     try:
         view = await use_case.execute(
-            TenantId(tenant_id),
+            member.tenant_id,
             ReviewRunId(run_id),
             ReviewFileId(file_id),
             side=side,
@@ -424,9 +430,9 @@ async def get_file_context(
 @router.get("/reviews/{run_id}/investigation", response_model=InvestigationResponse)
 async def get_investigation(
     run_id: UUID,
-    tenant_id: UUID,
+    member: MemberDependency,
     response: Response,
-    unit_of_work: UnitOfWorkDependency,
+    unit_of_work: TenantUnitOfWorkDependency,
     investigation_log: InvestigationLogDependency,
     after: int = 0,
 ) -> InvestigationResponse:
@@ -438,7 +444,7 @@ async def get_investigation(
     use_case = ReadInvestigation(unit_of_work, investigation_log)
 
     try:
-        view = await use_case.execute(TenantId(tenant_id), ReviewRunId(run_id), after=after)
+        view = await use_case.execute(member.tenant_id, ReviewRunId(run_id), after=after)
     except EntityNotFoundError as error:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
     except PermissionDeniedError as error:
@@ -451,13 +457,13 @@ async def get_investigation(
 @router.get("/repositories/{repository_id}/reviews", response_model=list[ReviewRunSummary])
 async def list_reviews(
     repository_id: UUID,
-    tenant_id: UUID,
-    unit_of_work: UnitOfWorkDependency,
+    member: MemberDependency,
+    unit_of_work: TenantUnitOfWorkDependency,
     limit: int = 50,
 ) -> list[ReviewRunSummary]:
     use_case = ListReviewRuns(unit_of_work)
     runs = await use_case.execute(
-        TenantId(tenant_id),
+        member.tenant_id,
         RepositoryId(repository_id),
         limit=limit,
     )
@@ -467,14 +473,14 @@ async def list_reviews(
 @router.get("/repositories/{repository_id}/feedback", response_model=FeedbackDigestResponse)
 async def get_feedback_digest(
     repository_id: UUID,
-    tenant_id: UUID,
-    unit_of_work: UnitOfWorkDependency,
+    member: MemberDependency,
+    unit_of_work: TenantUnitOfWorkDependency,
     response: Response,
     runs_limit: int = 50,
 ) -> FeedbackDigestResponse:
     use_case = CollectFeedback(unit_of_work)
     view = await use_case.execute(
-        TenantId(tenant_id),
+        member.tenant_id,
         RepositoryId(repository_id),
         runs_limit=runs_limit,
     )

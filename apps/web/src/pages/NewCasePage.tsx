@@ -5,11 +5,12 @@ import { useNavigate } from "react-router";
 import { api, ApiError } from "@/api/client";
 import type { IndexState as IndexStateData } from "@/api/types";
 import type { NewRepositoryDraft } from "@/components/RepositoryPicker";
+import { ModelPicker } from "@/components/ModelPicker";
 import { IndexState } from "@/components/IndexState";
 import { RepositoryPicker } from "@/components/RepositoryPicker";
 import { shortSha } from "@/lib/format";
 
-const EMPTY_DRAFT: NewRepositoryDraft = { localPath: "", name: "", allowCloud: false };
+const EMPTY_DRAFT: NewRepositoryDraft = { localPath: "", name: "", egressPolicy: "local_only" };
 
 export default function NewCasePage() {
   const navigate = useNavigate();
@@ -17,6 +18,7 @@ export default function NewCasePage() {
   const repositories = useQuery({ queryKey: ["repositories"], queryFn: api.listRepositories });
 
   const [selectedId, setSelectedId] = useState("");
+  const [model, setModel] = useState("");
   const [draft, setDraft] = useState(EMPTY_DRAFT);
   const [isAdding, setIsAdding] = useState(false);
   const [mode, setMode] = useState<DiffMode>("commit");
@@ -54,7 +56,7 @@ export default function NewCasePage() {
     mutationFn: async () => {
       const repositoryId = isDraftMode ? await registerDraft(draft) : selectedId;
       const range = revisionRange(mode, { commit, base, head });
-      const run = await api.startReview(repositoryId, range.base, range.head);
+      const run = await api.startReview(repositoryId, range.base, range.head, model || undefined);
       await api.enqueueReview(run.id);
       return run;
     },
@@ -98,6 +100,10 @@ export default function NewCasePage() {
         ) : null}
 
         {indexedId ? <IndexState repositoryId={indexedId} /> : null}
+
+        {indexedId ? (
+          <ModelPicker repositoryId={indexedId} value={model} onChange={setModel} />
+        ) : null}
 
         <ModePicker mode={mode} onChange={setMode} />
 
@@ -158,7 +164,7 @@ async function registerDraft(draft: NewRepositoryDraft): Promise<string> {
   const repository = await api.registerRepository(
     draft.localPath.trim(),
     draft.name.trim(),
-    draft.allowCloud,
+    draft.egressPolicy,
   );
   return repository.id;
 }

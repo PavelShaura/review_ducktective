@@ -20,6 +20,9 @@ from starlette.websockets import (
 from ducktective.api.schemas.review import (
     InvestigationStepResponse,
 )
+from ducktective.api.security import (
+    authenticate_websocket,
+)
 from ducktective.application.exceptions import (
     PermissionDeniedError,
 )
@@ -31,7 +34,6 @@ from ducktective.core.exceptions import (
 )
 from ducktective.core.types import (
     ReviewRunId,
-    TenantId,
 )
 from ducktective.observability.logging import (
     get_logger,
@@ -55,7 +57,7 @@ WS_NOT_FOUND = 4404
 
 
 @router.websocket("/reviews/{run_id}/investigation/stream")
-async def stream_investigation(websocket: WebSocket, run_id: UUID, tenant_id: UUID) -> None:
+async def stream_investigation(websocket: WebSocket, run_id: UUID) -> None:
     """Ход расследования по мере появления шагов.
 
     Подписка открывается до чтения уже записанного: шаг, появившийся между
@@ -64,17 +66,28 @@ async def stream_investigation(websocket: WebSocket, run_id: UUID, tenant_id: UU
     что уже видел.
 
     Права проверяются здесь же и один раз: у сокета нет повторного запроса,
-    в котором это можно было бы сделать позже.
+    в котором это можно было бы сделать позже. Первым сообщением приходит
+    токен — в адресе ему не место, адрес целиком пишется в логи.
     """
     await websocket.accept()
 
-    unit_of_work = SqlAlchemyUnitOfWork(websocket.app.state.session_factory)
-    log = SqlAlchemyInvestigationLog(websocket.app.state.session_factory)
+    member = await authenticate_websocket(websocket)
+    if member is None:
+        return
+
+    unit_of_work = SqlAlchemyUnitOfWork(
+        websocket.app.state.session_factory,
+        tenant_id=member.tenant_id,
+    )
+    log = SqlAlchemyInvestigationLog(
+        websocket.app.state.session_factory,
+        tenant_id=member.tenant_id,
+    )
     use_case = ReadInvestigation(unit_of_work, log)
 
     try:
         async with subscribe_to_steps(websocket.app.state.redis, ReviewRunId(run_id)) as stream:
-            recorded = await use_case.execute(TenantId(tenant_id), ReviewRunId(run_id))
+            recorded = await use_case.execute(member.tenant_id, ReviewRunId(run_id))
             for step in recorded.steps:
                 payload = InvestigationStepResponse.from_view(step).model_dump()
                 if not await _send(websocket, payload):

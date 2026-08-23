@@ -5,16 +5,19 @@ from uuid import (
 from fastapi import (
     APIRouter,
     HTTPException,
+    Request,
     status,
 )
 
 from ducktective.api.dependencies import (
     EventPublisherDependency,
+    SettingsDependency,
     TaskQueueDependency,
-    UnitOfWorkDependency,
     VcsProviderDependency,
+    tenant_model_choices,
 )
 from ducktective.api.schemas.code_repository import (
+    AvailableModelResponse,
     RegisterRepositoryRequest,
     RepositoryResponse,
     ResolvedRevisionResponse,
@@ -25,6 +28,10 @@ from ducktective.api.schemas.indexing import (
     IndexStateResponse,
     StartIndexingRequest,
     StartIndexingResponse,
+)
+from ducktective.api.security import (
+    MemberDependency,
+    TenantUnitOfWorkDependency,
 )
 from ducktective.application.code_repository.delete import (
     DeleteCodeRepository,
@@ -69,7 +76,9 @@ from ducktective.core.exceptions import (
 )
 from ducktective.core.types import (
     RepositoryId,
-    TenantId,
+)
+from ducktective.llm.factory import (
+    build_model_router,
 )
 
 
@@ -79,12 +88,13 @@ router = APIRouter(prefix="/repositories", tags=["repositories"])
 @router.post("", response_model=RepositoryResponse, status_code=status.HTTP_201_CREATED)
 async def register_repository(
     payload: RegisterRepositoryRequest,
-    unit_of_work: UnitOfWorkDependency,
+    member: MemberDependency,
+    unit_of_work: TenantUnitOfWorkDependency,
     event_publisher: EventPublisherDependency,
 ) -> RepositoryResponse:
     use_case = RegisterCodeRepository(unit_of_work, event_publisher)
     command = RegisterCodeRepositoryCommand(
-        tenant_id=TenantId(payload.tenant_id),
+        tenant_id=member.tenant_id,
         name=payload.name,
         vcs_provider=payload.vcs_provider,
         local_path=payload.local_path,
@@ -105,26 +115,26 @@ async def register_repository(
 
 @router.get("", response_model=list[RepositoryResponse])
 async def list_repositories(
-    tenant_id: UUID,
-    unit_of_work: UnitOfWorkDependency,
+    member: MemberDependency,
+    unit_of_work: TenantUnitOfWorkDependency,
 ) -> list[RepositoryResponse]:
     use_case = ListCodeRepositories(unit_of_work)
-    repositories = await use_case.execute(TenantId(tenant_id))
+    repositories = await use_case.execute(member.tenant_id)
     return [RepositoryResponse.from_domain(repository) for repository in repositories]
 
 
 @router.delete("/{repository_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_repository(
     repository_id: UUID,
-    tenant_id: UUID,
-    unit_of_work: UnitOfWorkDependency,
+    member: MemberDependency,
+    unit_of_work: TenantUnitOfWorkDependency,
     event_publisher: EventPublisherDependency,
 ) -> None:
     """Убирает репозиторий вместе с индексом и делами."""
     use_case = DeleteCodeRepository(unit_of_work, event_publisher)
 
     try:
-        await use_case.execute(TenantId(tenant_id), RepositoryId(repository_id))
+        await use_case.execute(member.tenant_id, RepositoryId(repository_id))
     except EntityNotFoundError as error:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
     except PermissionDeniedError as error:
@@ -134,8 +144,8 @@ async def delete_repository(
 @router.post("/{repository_id}/index/cancel", response_model=CancelIndexingResponse)
 async def cancel_indexing(
     repository_id: UUID,
-    tenant_id: UUID,
-    unit_of_work: UnitOfWorkDependency,
+    member: MemberDependency,
+    unit_of_work: TenantUnitOfWorkDependency,
     event_publisher: EventPublisherDependency,
 ) -> CancelIndexingResponse:
     """Просит прекратить идущую индексацию.
@@ -146,7 +156,7 @@ async def cancel_indexing(
     use_case = CancelIndexing(unit_of_work, event_publisher)
 
     try:
-        cancelled = await use_case.execute(TenantId(tenant_id), RepositoryId(repository_id))
+        cancelled = await use_case.execute(member.tenant_id, RepositoryId(repository_id))
     except EntityNotFoundError as error:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
     except PermissionDeniedError as error:
@@ -158,13 +168,13 @@ async def cancel_indexing(
 @router.get("/{repository_id}/index", response_model=IndexStateResponse)
 async def get_index_state(
     repository_id: UUID,
-    tenant_id: UUID,
-    unit_of_work: UnitOfWorkDependency,
+    member: MemberDependency,
+    unit_of_work: TenantUnitOfWorkDependency,
 ) -> IndexStateResponse:
     use_case = GetIndexState(unit_of_work)
 
     try:
-        view = await use_case.execute(TenantId(tenant_id), RepositoryId(repository_id))
+        view = await use_case.execute(member.tenant_id, RepositoryId(repository_id))
     except EntityNotFoundError as error:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
     except PermissionDeniedError as error:
@@ -176,9 +186,9 @@ async def get_index_state(
 @router.get("/{repository_id}/revision", response_model=ResolvedRevisionResponse)
 async def resolve_revision(
     repository_id: UUID,
-    tenant_id: UUID,
+    member: MemberDependency,
     revision: str,
-    unit_of_work: UnitOfWorkDependency,
+    unit_of_work: TenantUnitOfWorkDependency,
     vcs_provider: VcsProviderDependency,
 ) -> ResolvedRevisionResponse:
     """Разрешает ссылку на ревизию в коммит.
@@ -190,7 +200,7 @@ async def resolve_revision(
     use_case = ResolveRepositoryRevision(unit_of_work, vcs_provider)
 
     try:
-        view = await use_case.execute(TenantId(tenant_id), RepositoryId(repository_id), revision)
+        view = await use_case.execute(member.tenant_id, RepositoryId(repository_id), revision)
     except EntityNotFoundError as error:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
     except PermissionDeniedError as error:
@@ -209,7 +219,8 @@ async def resolve_revision(
 async def start_indexing(
     repository_id: UUID,
     payload: StartIndexingRequest,
-    unit_of_work: UnitOfWorkDependency,
+    member: MemberDependency,
+    unit_of_work: TenantUnitOfWorkDependency,
     event_publisher: EventPublisherDependency,
     vcs_provider: VcsProviderDependency,
     task_queue: TaskQueueDependency,
@@ -223,7 +234,7 @@ async def start_indexing(
 
     try:
         snapshot_id = await use_case.execute(
-            TenantId(payload.tenant_id),
+            member.tenant_id,
             RepositoryId(repository_id),
             payload.revision,
         )
@@ -239,7 +250,7 @@ async def start_indexing(
     await task_queue.enqueue_job(
         INDEX_TASK_NAME,
         str(repository_id),
-        str(payload.tenant_id),
+        str(member.tenant_id),
         payload.revision,
         str(snapshot_id),
         _queue_name=INDEX_QUEUE,
@@ -250,8 +261,8 @@ async def start_indexing(
 @router.delete("/{repository_id}/index", response_model=DeleteIndexResponse)
 async def delete_index(
     repository_id: UUID,
-    tenant_id: UUID,
-    unit_of_work: UnitOfWorkDependency,
+    member: MemberDependency,
+    unit_of_work: TenantUnitOfWorkDependency,
     event_publisher: EventPublisherDependency,
 ) -> DeleteIndexResponse:
     """Стирает индекс, оставляя репозиторий и заведённые по нему дела.
@@ -262,7 +273,7 @@ async def delete_index(
     use_case = DeleteIndex(unit_of_work, event_publisher)
 
     try:
-        removed = await use_case.execute(TenantId(tenant_id), RepositoryId(repository_id))
+        removed = await use_case.execute(member.tenant_id, RepositoryId(repository_id))
     except EntityNotFoundError as error:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
     except PermissionDeniedError as error:
@@ -271,3 +282,49 @@ async def delete_index(
         raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
 
     return DeleteIndexResponse(removed_snapshots=removed)
+
+
+@router.get("/{repository_id}/models", response_model=list[AvailableModelResponse])
+async def list_available_models(
+    repository_id: UUID,
+    request: Request,
+    member: MemberDependency,
+    settings: SettingsDependency,
+    unit_of_work: TenantUnitOfWorkDependency,
+) -> list[AvailableModelResponse]:
+    """Модели, разрешённые политикой этого репозитория.
+
+    Список считается от политики, а не от установки целиком: предложить
+    модель, а потом отказать при запуске — худший способ объяснить правило.
+    """
+    async with unit_of_work:
+        repository = await unit_of_work.code_repositories.get(RepositoryId(repository_id))
+        if repository.tenant_id != member.tenant_id:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Репозиторий не найден")
+
+    router_for_policy = build_model_router(
+        local_provider=settings.local_llm_provider,
+        local_model=settings.local_review_model,
+        local_base_url=settings.local_llm_base_url,
+        local_api_key=settings.local_llm_api_key,
+        cloud_enabled=settings.cloud_providers_allowed,
+        remote_choices=await tenant_model_choices(
+            settings,
+            request.app.state.session_factory,
+            member.tenant_id,
+        ),
+        local_supports_tools=settings.local_review_model_supports_tools,
+        local_context_window=settings.local_review_model_context_window,
+    )
+    catalogue = router_for_policy.catalogue(allowed_trust=repository.egress_policy.max_trust)
+
+    return [
+        AvailableModelResponse(
+            name=choice.name,
+            model=choice.model,
+            trust=choice.trust,
+            supports_tools=choice.supports_tools,
+            context_window=choice.context_window,
+        )
+        for choice in catalogue
+    ]

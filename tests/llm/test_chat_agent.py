@@ -168,7 +168,7 @@ def build_request(
     return ChatRequest(
         repository_id=REPOSITORY_ID,
         question="где проверяются права на пак?",
-        requirements=ModelRequirements(cloud_allowed=False),
+        requirements=ModelRequirements(),
         navigator=navigator,
         index_revision=CommitSha(revision) if revision else None,
     )

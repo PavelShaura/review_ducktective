@@ -18,10 +18,10 @@ from time import (
     perf_counter,
 )
 from uuid import (
-    UUID,
     uuid4,
 )
 
+import httpx
 import uvicorn
 from redis.asyncio import (
     Redis,
@@ -34,6 +34,9 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
 )
 
+from ducktective.api.dependencies import (
+    remote_model_choices,
+)
 from ducktective.api.dev import (
     plan,
     supervise,
@@ -61,6 +64,19 @@ from ducktective.application.review.prepare_run import (
 from ducktective.application.review.run_review import (
     RunReview,
 )
+from ducktective.application.tenancy.sign_in import (
+    ResolveSignedInUser,
+)
+from ducktective.auth.device_flow import (
+    DeviceAuthorization,
+)
+from ducktective.auth.oidc import (
+    OidcIdentityVerifier,
+    OidcSettings,
+)
+from ducktective.auth.session import (
+    TerminalSession,
+)
 from ducktective.config.settings import (
     Settings,
 )
@@ -74,6 +90,7 @@ from ducktective.core.code_repository.value_objects import (
 from ducktective.core.exceptions import (
     DomainError,
     LlmInvocationError,
+    NotAuthenticatedError,
 )
 from ducktective.core.ports import (
     EventPublisher,
@@ -97,6 +114,9 @@ from ducktective.core.review.reviewers import (
 from ducktective.core.review.value_objects import (
     FindingStatus,
     Severity,
+)
+from ducktective.core.tenancy.entities import (
+    UserAccount,
 )
 from ducktective.core.types import (
     CommitSha,
@@ -145,6 +165,9 @@ from ducktective.review_graph import (
 )
 from ducktective.review_graph.navigators import (
     RequestNavigators,
+)
+from ducktective.storage.cipher import (
+    generate_secret_key,
 )
 from ducktective.storage.database import (
     build_engine,
@@ -228,7 +251,6 @@ def main() -> None:
         action="store_true",
         help="Не использовать базу и Redis: прогон целиком в памяти процесса",
     )
-    review_parser.add_argument("--tenant", help="Идентификатор тенанта; не нужен с --no-store")
     review_parser.add_argument(
         "--include",
         action="append",
@@ -260,7 +282,6 @@ def main() -> None:
         action="store_true",
         help="Не использовать базу и Redis: индекс живёт в памяти процесса",
     )
-    index_parser.add_argument("--tenant", help="Идентификатор тенанта; не нужен с --no-store")
     index_parser.add_argument(
         "--skip-embeddings",
         action="store_true",
@@ -275,7 +296,6 @@ def main() -> None:
         type=Path,
         help="Проиндексированный репозиторий: включает контекст из индекса",
     )
-    eval_parser.add_argument("--tenant", help="Тенант владельца репозитория")
     eval_parser.add_argument(
         "--mode",
         choices=[mode.value for mode in ReviewMode],
@@ -299,7 +319,31 @@ def main() -> None:
         help="Записать прогон в базу, чтобы было с чем сравнивать дальше",
     )
 
+    subcommands.add_parser(
+        "login",
+        help="Войти через провайдера личности: код подтверждается в браузере",
+    )
+    subcommands.add_parser("logout", help="Забыть сохранённый вход")
+    subcommands.add_parser(
+        "secret",
+        help="Напечатать новый секрет шифрования ключей моделей (MODELS_SECRET_KEY)",
+    )
+    subcommands.add_parser("whoami", help="Показать, кто вошёл и в какой организации")
+
     arguments = parser.parse_args()
+
+    if arguments.command == "login":
+        raise SystemExit(asyncio.run(_login(arguments)))
+
+    if arguments.command == "secret":
+        console.print(generate_secret_key())
+        return
+
+    if arguments.command == "logout":
+        raise SystemExit(asyncio.run(_logout(arguments)))
+
+    if arguments.command == "whoami":
+        raise SystemExit(asyncio.run(_whoami(arguments)))
 
     if arguments.command == "eval":
         raise SystemExit(asyncio.run(_evaluate(arguments)))
@@ -340,11 +384,15 @@ async def _dev(arguments: argparse.Namespace) -> int:
 async def _review(arguments: argparse.Namespace) -> int:
     settings = Settings()
     repository_path = arguments.path.resolve()
-    tenant_id = _resolve_tenant(arguments)
+    tenant_id = await _resolve_tenant(settings, arguments)
     egress_policy = EgressPolicy.ALLOW_CLOUD if arguments.allow_cloud else EgressPolicy.LOCAL_ONLY
 
     try:
-        async with _build_context(settings, no_store=arguments.no_store) as context:
+        async with _build_context(
+            settings,
+            no_store=arguments.no_store,
+            tenant_id=tenant_id,
+        ) as context:
             repository_id = await _ensure_repository(
                 context.unit_of_work,
                 tenant_id=tenant_id,
@@ -413,10 +461,15 @@ async def _evaluate(arguments: argparse.Namespace) -> int:
     if with_index:
         engine = build_engine(settings.require_database_url())
         session_factory = build_session_factory(engine)
-        context_builder = _build_context_builder(settings, session_factory)
+        eval_tenant = await _resolve_tenant(settings, arguments)
+        context_builder = _build_context_builder(
+            settings,
+            session_factory,
+            tenant_id=eval_tenant,
+        )
         indexed_repository_id = await _find_indexed_repository(
             session_factory,
-            _resolve_tenant(arguments),
+            eval_tenant,
             arguments.repository.resolve().name,
         )
 
@@ -515,10 +568,14 @@ async def _save_evaluation(
 async def _index(arguments: argparse.Namespace) -> int:
     settings = Settings()
     repository_path = arguments.path.resolve()
-    tenant_id = _resolve_tenant(arguments)
+    tenant_id = await _resolve_tenant(settings, arguments)
 
     try:
-        async with _build_context(settings, no_store=arguments.no_store) as context:
+        async with _build_context(
+            settings,
+            no_store=arguments.no_store,
+            tenant_id=tenant_id,
+        ) as context:
             repository_id = await _ensure_repository(
                 context.unit_of_work,
                 tenant_id=tenant_id,
@@ -579,7 +636,12 @@ async def _embed(
 
 
 @asynccontextmanager
-async def _build_context(settings: Settings, *, no_store: bool) -> AsyncIterator[ReviewContext]:
+async def _build_context(
+    settings: Settings,
+    *,
+    no_store: bool,
+    tenant_id: TenantId,
+) -> AsyncIterator[ReviewContext]:
     """Собирает зависимости под выбранный режим.
 
     В автономном режиме внешних сервисов нет вообще: те же use cases получают
@@ -598,13 +660,18 @@ async def _build_context(settings: Settings, *, no_store: bool) -> AsyncIterator
     redis_client = Redis.from_url(settings.require_redis_url(), decode_responses=True)
     try:
         yield ReviewContext(
-            unit_of_work=SqlAlchemyUnitOfWork(session_factory),
+            unit_of_work=SqlAlchemyUnitOfWork(session_factory, tenant_id=tenant_id),
             event_publisher=RedisEventPublisher(redis_client),
             pipeline=_build_pipeline(
                 _build_reviewers(settings, redis_client=redis_client),
-                context_builder=_build_context_builder(settings, session_factory),
+                context_builder=_build_context_builder(
+                    settings,
+                    session_factory,
+                    tenant_id=tenant_id,
+                ),
                 session_factory=session_factory,
                 settings=settings,
+                tenant_id=tenant_id,
             ),
         )
     finally:
@@ -615,6 +682,8 @@ async def _build_context(settings: Settings, *, no_store: bool) -> AsyncIterator
 def _build_context_builder(
     settings: Settings,
     session_factory: async_sessionmaker[AsyncSession],
+    *,
+    tenant_id: TenantId,
 ) -> ContextBuilder:
     """Собирает ретривал поверх собственной сессии.
 
@@ -631,6 +700,7 @@ def _build_context_builder(
     return SessionScopedContextBuilder(
         session_factory,
         embedder,
+        tenant_id=tenant_id,
         token_budget=settings.context_token_budget,
     )
 
@@ -656,6 +726,7 @@ def _build_pipeline(
     context_builder: ContextBuilder | None = None,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
     settings: Settings | None = None,
+    tenant_id: TenantId | None = None,
     navigators_for_eval: _EvalNavigation | None = None,
 ) -> ReviewPipeline:
     """Собирает конвейер вместе с тем, чем он будет ходить по коду.
@@ -665,7 +736,7 @@ def _build_pipeline(
     (D-021). Индексная добавляется там, где база вообще открыта.
     """
     navigators: ReviewNavigators = RequestNavigators(
-        indexed=_build_indexed_navigators(settings, session_factory),
+        indexed=_build_indexed_navigators(settings, session_factory, tenant_id=tenant_id),
         git=GitNavigators(git=LocalGitProvider()),
     )
     if navigators_for_eval is not None:
@@ -681,7 +752,11 @@ def _build_pipeline(
         reviewers,
         context_builder=context_builder,
         navigators=navigators,
-        history=PostgresFindingHistory(session_factory) if session_factory else None,
+        history=(
+            PostgresFindingHistory(session_factory, tenant_id=tenant_id)
+            if session_factory
+            else None
+        ),
     )
 
 
@@ -710,12 +785,14 @@ def _eval_navigation(
 def _build_indexed_navigators(
     settings: Settings | None,
     session_factory: async_sessionmaker[AsyncSession] | None,
+    *,
+    tenant_id: TenantId | None = None,
 ) -> IndexedNavigators | None:
     if settings is None or session_factory is None:
         return None
 
     return IndexedNavigators(
-        symbols=SessionScopedSymbolReader(session_factory),
+        symbols=SessionScopedSymbolReader(session_factory, tenant_id=tenant_id),
         search=SessionScopedHybridSearch(
             session_factory,
             LiteLlmEmbedder(
@@ -724,6 +801,7 @@ def _build_indexed_navigators(
                 base_url=settings.local_embedding_base_url or None,
                 api_key=settings.local_llm_api_key,
             ),
+            tenant_id=tenant_id,
         ),
     )
 
@@ -741,23 +819,112 @@ def _build_reviewers(
         local_model=settings.local_review_model,
         local_base_url=settings.local_llm_base_url,
         local_api_key=settings.local_llm_api_key,
-        cloud_model=settings.cloud_review_model,
-        cloud_api_key=settings.anthropic_api_key,
         cloud_enabled=settings.cloud_providers_allowed,
+        remote_choices=remote_model_choices(settings),
         cache_ttl_seconds=settings.llm_cache_ttl_seconds,
         timeout_seconds=settings.llm_timeout_seconds,
         local_supports_tools=settings.local_review_model_supports_tools,
         local_context_window=settings.local_review_model_context_window,
-        cloud_context_window=settings.cloud_review_model_context_window,
     )
 
 
-def _resolve_tenant(arguments: argparse.Namespace) -> TenantId:
-    if arguments.tenant:
-        return TenantId(UUID(arguments.tenant))
-    if arguments.no_store:
+def _terminal_session(settings: Settings) -> TerminalSession:
+    if not settings.authentication_required:
+        raise SystemExit(
+            "Не задан OIDC_ISSUER: без провайдера личности терминал работает "
+            "только в режиме --no-store"
+        )
+    return TerminalSession(
+        issuer=settings.oidc_issuer,
+        client_id=settings.oidc_device_client_id,
+    )
+
+
+async def _resolve_tenant(settings: Settings, arguments: argparse.Namespace) -> TenantId:
+    """Организация берётся из членства вошедшего, а не из аргумента.
+
+    Автономный режим тенанта не спрашивает вовсе: прогон живёт в памяти
+    процесса, никуда не пишется и делить ему не с кем.
+    """
+    if getattr(arguments, "no_store", False):
         return TenantId(uuid4())
-    raise SystemExit("Укажите --tenant или используйте --no-store")
+
+    account = await _resolve_membership(settings)
+    return account.tenant_id
+
+
+async def _resolve_membership(settings: Settings) -> UserAccount:
+    session = _terminal_session(settings)
+    try:
+        token = await session.access_token()
+    except NotAuthenticatedError as error:
+        raise SystemExit(str(error)) from error
+
+    engine = build_engine(settings.require_database_url())
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            verifier = OidcIdentityVerifier(
+                OidcSettings(issuer=settings.oidc_issuer, audience=settings.oidc_audience),
+                client,
+            )
+            try:
+                identity = await verifier.verify(token)
+            except NotAuthenticatedError as error:
+                raise SystemExit(str(error)) from error
+
+        resolved = await ResolveSignedInUser(
+            SqlAlchemyUnitOfWork(build_session_factory(engine)),
+            NullEventPublisher(),
+        ).execute(identity)
+    finally:
+        await engine.dispose()
+
+    if resolved.account is None:
+        raise SystemExit(
+            "Учётная запись не состоит в организации: создайте её в интерфейсе "
+            "или примите приглашение"
+        )
+    return resolved.account
+
+
+async def _login(arguments: argparse.Namespace) -> int:
+    """Вход по device flow: код показывается здесь, подтверждение — в браузере."""
+    settings = Settings()
+    session = _terminal_session(settings)
+
+    def announce(authorization: DeviceAuthorization) -> None:
+        target = authorization.verification_uri_complete or authorization.verification_uri
+        console.print(
+            f"Откройте [bold]{target}[/] и введите код [bold]{authorization.user_code}[/]"
+        )
+        console.print("[dim]Жду подтверждения…[/]")
+
+    try:
+        await session.login(announce)
+    except NotAuthenticatedError as error:
+        error_console.print(f"[red]Вход не выполнен:[/] {error}")
+        return 1
+
+    account = await _resolve_membership(settings)
+    console.print(f"[green]Вход выполнен:[/] {account.email} · роль {account.role}")
+    return 0
+
+
+async def _logout(arguments: argparse.Namespace) -> int:
+    settings = Settings()
+    if _terminal_session(settings).logout():
+        console.print("Сохранённый вход удалён")
+        return 0
+
+    console.print("Сохранённого входа не было")
+    return 0
+
+
+async def _whoami(arguments: argparse.Namespace) -> int:
+    settings = Settings()
+    account = await _resolve_membership(settings)
+    console.print(f"{account.email} · организация {account.tenant_id} · роль {account.role}")
+    return 0
 
 
 async def _ensure_repository(

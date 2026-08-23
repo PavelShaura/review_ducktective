@@ -243,9 +243,27 @@ function StoredMessage({ message }: { message: ChatMessage }) {
   );
 }
 
+/**
+ * Пометка о том, чем ответ ограничен: смена модели, урезанная история,
+ * упёршийся в предел шагов агент.
+ *
+ * Заметнее обычной подписи, потому что молча подменять исполнителя нельзя:
+ * человек выбирал модель сам и вправе знать, чей ответ он читает.
+ */
+function Note({ text }: { text: string }) {
+  return (
+    <p className="flex items-start gap-2 border-l-2 border-major bg-major/5 px-3 py-2 text-[13px] text-paper-dim">
+      <span aria-hidden className="mt-[2px] text-major">
+        ⚑
+      </span>
+      <span>{text}</span>
+    </p>
+  );
+}
+
 function LiveBubble({ piece }: { piece: LivePiece }) {
   if (piece.kind === "note") {
-    return <p className="case-label">{piece.text}</p>;
+    return <Note text={piece.text} />;
   }
   if (piece.kind === "failure") {
     return (

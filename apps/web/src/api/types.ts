@@ -24,7 +24,19 @@ export type ChangeType = "added" | "modified" | "deleted" | "renamed";
 
 export type DiffSide = "old" | "new";
 
-export type EgressPolicy = "local_only" | "allow_cloud";
+export type EgressPolicy = "local_only" | "allow_cloud" | "allow_training_cloud";
+
+/** Насколько далеко уезжает код ради ответа модели. */
+export type ModelTrust = "local" | "private_remote" | "training_remote";
+
+export interface AvailableModel {
+  name: string;
+  model: string;
+  trust: ModelTrust;
+  supports_tools: boolean;
+  context_window: number;
+  note: string;
+}
 
 export interface Repository {
   id: string;
@@ -306,4 +318,85 @@ export interface ChatEvent {
   model: string | null;
   tokens_input: number;
   tokens_output: number;
+}
+
+
+export type TenantRole = "owner" | "member";
+
+export interface Organization {
+  id: string;
+  slug: string;
+  name: string;
+  created_at: string;
+}
+
+export interface Member {
+  id: string;
+  email: string;
+  role: TenantRole;
+  created_at: string;
+  last_seen_at: string | null;
+}
+
+/** Кто вошёл. Организации может не быть — это состояние, а не ошибка. */
+export interface CurrentUser {
+  email: string;
+  subject: string;
+  organization: Organization | null;
+  member: Member | null;
+}
+
+export interface Invitation {
+  id: string;
+  email: string;
+  role: TenantRole;
+  created_at: string;
+  expires_at: string;
+}
+
+/** Приглашение вместе с секретом: он показывается ровно один раз. */
+export interface IssuedInvitation extends Invitation {
+  token: string;
+}
+
+
+export interface ModelProfile {
+  id: string;
+  name: string;
+  model: string;
+  provider: string;
+  base_url: string;
+  trust: ModelTrust;
+  supports_tools: boolean;
+  context_window: number;
+  note: string;
+  is_enabled: boolean;
+  has_api_key: boolean;
+  created_at: string;
+}
+
+/** Известный провайдер с заполненными полями и адресом, где выдают ключ. */
+export interface ModelPreset {
+  key: string;
+  title: string;
+  model: string;
+  provider: string;
+  base_url: string;
+  trust: ModelTrust;
+  supports_tools: boolean;
+  context_window: number;
+  signup_url: string;
+  note: string;
+}
+
+export interface AddModelPayload {
+  name: string;
+  model: string;
+  api_key: string;
+  provider: string;
+  base_url: string;
+  trust: ModelTrust;
+  supports_tools: boolean;
+  context_window: number;
+  note: string;
 }

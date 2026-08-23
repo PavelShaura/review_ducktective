@@ -5,6 +5,7 @@ import { api } from "@/api/client";
 import type { Repository } from "@/api/types";
 import { ConversationList } from "@/components/ConversationList";
 import { ConversationView } from "@/components/ConversationView";
+import { ModelPicker } from "@/components/ModelPicker";
 import { IndexState } from "@/components/IndexState";
 
 /**
@@ -17,6 +18,7 @@ import { IndexState } from "@/components/IndexState";
 export default function ChatPage() {
   const queryClient = useQueryClient();
   const [repositoryId, setRepositoryId] = useState<string>("");
+  const [model, setModel] = useState("");
   const [conversationId, setConversationId] = useState<string>("");
   const [isReused, setIsReused] = useState(false);
 
@@ -34,7 +36,7 @@ export default function ChatPage() {
   const chosen = repositories.data?.find((item) => item.id === repositoryId);
 
   const start = useMutation({
-    mutationFn: () => api.startConversation(repositoryId),
+    mutationFn: () => api.startConversation(repositoryId, model || undefined),
     onSuccess: (started) => {
       setConversationId(started.conversation.id);
       setIsReused(!started.isNew);
@@ -79,6 +81,10 @@ export default function ChatPage() {
       />
 
       {repositoryId ? <IndexState repositoryId={repositoryId} /> : null}
+
+      {repositoryId ? (
+        <ModelPicker repositoryId={repositoryId} value={model} onChange={setModel} />
+      ) : null}
 
       {repositoryId ? (
         <div className="grid h-[68vh] min-h-[30rem] gap-6 lg:grid-cols-[minmax(0,18rem)_minmax(0,1fr)]">

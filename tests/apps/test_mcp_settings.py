@@ -13,7 +13,7 @@ from ducktective.mcp_server.__main__ import (
 
 ENV_CONTENTS = """
 DATABASE_URL=postgresql+asyncpg://user:secret@elsewhere:5432/ducktective
-MCP_TENANT_ID=11111111-1111-1111-1111-111111111111
+OIDC_ISSUER=http://identity.local/realms/ducktective
 LOCAL_EMBEDDING_BASE_URL=http://models.local:1234/v1
 """
 
@@ -40,7 +40,7 @@ def test_settings_are_read_from_the_named_file(env_file: Path) -> None:
     settings = load_settings(str(env_file))
 
     assert settings.require_database_url().endswith("@elsewhere:5432/ducktective")
-    assert settings.mcp_tenant_id == "11111111-1111-1111-1111-111111111111"
+    assert settings.oidc_issuer == "http://identity.local/realms/ducktective"
     assert settings.local_embedding_base_url == "http://models.local:1234/v1"
 
 
@@ -56,15 +56,15 @@ def test_named_file_wins_over_the_environment(env_file: Path) -> None:
 def test_variable_is_used_when_the_flag_is_absent(env_file: Path) -> None:
     os.environ[ENV_FILE_VARIABLE] = str(env_file)
 
-    assert load_settings(None).mcp_tenant_id == "11111111-1111-1111-1111-111111111111"
+    assert load_settings(None).oidc_issuer == "http://identity.local/realms/ducktective"
 
 
 def test_flag_wins_over_the_variable(env_file: Path) -> None:
     other = env_file.parent / "other.env"
-    other.write_text("MCP_TENANT_ID=22222222-2222-2222-2222-222222222222\n", encoding="utf-8")
+    other.write_text("OIDC_ISSUER=http://other.local/realms/ducktective\n", encoding="utf-8")
     os.environ[ENV_FILE_VARIABLE] = str(env_file)
 
-    assert load_settings(str(other)).mcp_tenant_id == "22222222-2222-2222-2222-222222222222"
+    assert load_settings(str(other)).oidc_issuer == "http://other.local/realms/ducktective"
 
 
 def test_missing_file_stops_the_server_with_the_reason(tmp_path: Path) -> None:

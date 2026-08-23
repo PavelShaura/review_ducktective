@@ -493,7 +493,8 @@ def _with_tool_calling(requirements: ModelRequirements) -> ModelRequirements:
         needs_deep_reasoning=requirements.needs_deep_reasoning,
         needs_tool_calling=True,
         min_context_tokens=max(requirements.min_context_tokens, AGENTIC_MIN_CONTEXT_TOKENS),
-        cloud_allowed=requirements.cloud_allowed,
+        allowed_trust=requirements.allowed_trust,
+        preferred_model=requirements.preferred_model,
         max_output_tokens=requirements.max_output_tokens,
         temperature=requirements.temperature,
     )

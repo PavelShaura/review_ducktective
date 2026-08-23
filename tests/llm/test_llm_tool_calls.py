@@ -54,7 +54,7 @@ def _raw_call(
 
 
 def test_tool_calls_reach_the_response() -> None:
-    choice = ModelChoice(model="lm_studio/qwen", provider="lm_studio")
+    choice = ModelChoice(name="local", model="lm_studio/qwen", provider="lm_studio")
 
     response = _build_response(_completion([_raw_call()]), choice, 10)
 
@@ -64,7 +64,7 @@ def test_tool_calls_reach_the_response() -> None:
 
 
 def test_answer_without_calls_has_none() -> None:
-    choice = ModelChoice(model="lm_studio/qwen", provider="lm_studio")
+    choice = ModelChoice(name="local", model="lm_studio/qwen", provider="lm_studio")
 
     assert not _build_response(_completion(None), choice, 10).has_tool_calls
 

@@ -87,7 +87,10 @@ async def prepare_repository(
         vcs_provider=VcsProvider.LOCAL,
         local_path=Path("/repos/sample"),
     )
-    async with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:
+    async with SqlAlchemyUnitOfWork(
+        session_factory,
+        tenant_id=TenantId(tenant_id),
+    ) as unit_of_work:
         unit_of_work.code_repositories.add(repository)
         await unit_of_work.commit()
 
@@ -146,11 +149,11 @@ async def test_run_with_files_and_hunks_survives_commit(
     tenant_id, repository_id = await prepare_repository(session_factory)
     run = build_run(tenant_id, repository_id)
 
-    async with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:
+    async with SqlAlchemyUnitOfWork(session_factory, tenant_id=tenant_id) as unit_of_work:
         unit_of_work.review_runs.add(run)
         await unit_of_work.commit()
 
-    async with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:
+    async with SqlAlchemyUnitOfWork(session_factory, tenant_id=tenant_id) as unit_of_work:
         stored = await unit_of_work.review_runs.get(run.id)
 
     assert stored.status is ReviewStatus.QUEUED
@@ -166,11 +169,11 @@ async def test_findings_and_status_are_persisted(
     tenant_id, repository_id = await prepare_repository(session_factory)
     run = build_run(tenant_id, repository_id)
 
-    async with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:
+    async with SqlAlchemyUnitOfWork(session_factory, tenant_id=tenant_id) as unit_of_work:
         unit_of_work.review_runs.add(run)
         await unit_of_work.commit()
 
-    async with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:
+    async with SqlAlchemyUnitOfWork(session_factory, tenant_id=tenant_id) as unit_of_work:
         stored = await unit_of_work.review_runs.get(run.id)
         stored.mark_running()
         finding = build_finding()
@@ -180,7 +183,7 @@ async def test_findings_and_status_are_persisted(
         await unit_of_work.commit()
         events = unit_of_work.collect_events()
 
-    async with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:
+    async with SqlAlchemyUnitOfWork(session_factory, tenant_id=tenant_id) as unit_of_work:
         reloaded = await unit_of_work.review_runs.get(run.id)
 
     assert len(events) == 3
@@ -200,7 +203,7 @@ async def test_duplicate_dedup_key_within_run_is_rejected_by_database(
     second_finding = build_finding()
     second_finding.evidence.clear()
 
-    async with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:
+    async with SqlAlchemyUnitOfWork(session_factory, tenant_id=tenant_id) as unit_of_work:
         unit_of_work.review_runs.add(run)
         run.findings.append(first_finding)
         run.findings.append(second_finding)
@@ -216,17 +219,17 @@ async def test_context_usage_survives_reload(
     tenant_id, repository_id = await prepare_repository(session_factory)
     run = build_run(tenant_id, repository_id)
 
-    async with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:
+    async with SqlAlchemyUnitOfWork(session_factory, tenant_id=tenant_id) as unit_of_work:
         unit_of_work.review_runs.add(run)
         await unit_of_work.commit()
 
-    async with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:
+    async with SqlAlchemyUnitOfWork(session_factory, tenant_id=tenant_id) as unit_of_work:
         stored = await unit_of_work.review_runs.get(run.id)
         stored.mark_running()
         stored.record_context_usage(2)
         await unit_of_work.commit()
 
-    async with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:
+    async with SqlAlchemyUnitOfWork(session_factory, tenant_id=tenant_id) as unit_of_work:
         reloaded = await unit_of_work.review_runs.get(run.id)
 
     assert reloaded.files_with_context == 2

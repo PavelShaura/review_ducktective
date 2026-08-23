@@ -37,6 +37,7 @@ def to_domain(model: ConversationModel) -> Conversation:
         updated_at=model.updated_at,
         messages=[_message_to_domain(message) for message in model.messages],
         document=_document_to_domain(model.attachment),
+        preferred_model=model.preferred_model,
     )
 
 
@@ -50,6 +51,7 @@ def to_model(conversation: Conversation) -> ConversationModel:
         updated_at=conversation.updated_at,
         messages=[_message_to_model(message) for message in conversation.messages],
         attachment=_document_to_model(conversation.document),
+        preferred_model=conversation.preferred_model,
     )
 
 

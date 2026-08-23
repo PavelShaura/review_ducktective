@@ -22,8 +22,16 @@ from ducktective.core.indexing.ports import (
     SourceFileRepository,
     SymbolEdgeRepository,
 )
+from ducktective.core.llm.model_profile import (
+    ModelProfileRepository,
+)
 from ducktective.core.review.ports import (
     ReviewRunRepository,
+)
+from ducktective.core.tenancy.ports import (
+    InvitationRepository,
+    TenantRepository,
+    UserAccountRepository,
 )
 
 
@@ -56,6 +64,18 @@ class UnitOfWork(Protocol):
 
     @property
     def conversations(self) -> ConversationRepository: ...
+
+    @property
+    def tenants(self) -> TenantRepository: ...
+
+    @property
+    def user_accounts(self) -> UserAccountRepository: ...
+
+    @property
+    def invitations(self) -> InvitationRepository: ...
+
+    @property
+    def model_profiles(self) -> ModelProfileRepository: ...
 
     async def __aenter__(self) -> Self: ...
 

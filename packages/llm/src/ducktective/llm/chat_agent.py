@@ -272,6 +272,10 @@ class AgenticChatAgent:
                     response = piece.response
                     break
 
+                if piece.notice:
+                    yield ChatEvent(kind=ChatEventKind.NOTE, text=piece.notice)
+                    continue
+
                 said.append(piece.text)
                 yield ChatEvent(kind=ChatEventKind.TOKEN, text=piece.text)
 
@@ -379,6 +383,10 @@ class PresetChatAgent:
                 if piece.response is not None:
                     response = piece.response
                     break
+
+                if piece.notice:
+                    yield ChatEvent(kind=ChatEventKind.NOTE, text=piece.notice)
+                    continue
 
                 said.append(piece.text)
                 yield ChatEvent(kind=ChatEventKind.TOKEN, text=piece.text)
@@ -508,7 +516,8 @@ def _with_tool_calling(requirements: ModelRequirements) -> ModelRequirements:
         needs_deep_reasoning=requirements.needs_deep_reasoning,
         needs_tool_calling=True,
         min_context_tokens=max(requirements.min_context_tokens, 16384),
-        cloud_allowed=requirements.cloud_allowed,
+        allowed_trust=requirements.allowed_trust,
+        preferred_model=requirements.preferred_model,
         max_output_tokens=requirements.max_output_tokens,
         temperature=requirements.temperature,
     )

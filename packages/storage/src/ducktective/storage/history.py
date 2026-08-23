@@ -18,11 +18,15 @@ from ducktective.core.review.ports import (
 )
 from ducktective.core.types import (
     RepositoryId,
+    TenantId,
 )
 from ducktective.storage.models.review import (
     FindingFeedbackModel,
     FindingModel,
     ReviewRunModel,
+)
+from ducktective.storage.tenant_scope import (
+    bind_tenant,
 )
 
 
@@ -34,8 +38,14 @@ class PostgresFindingHistory:
     ревью, и держать ради этого чужую сессию открытой незачем.
     """
 
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+    def __init__(
+        self,
+        session_factory: async_sessionmaker[AsyncSession],
+        *,
+        tenant_id: TenantId | None = None,
+    ) -> None:
         self._session_factory = session_factory
+        self._tenant_id = tenant_id
 
     async def for_file(
         self,
@@ -82,6 +92,7 @@ class PostgresFindingHistory:
         )
 
         async with self._session_factory() as session:
+            await bind_tenant(session, self._tenant_id)
             rows = (await session.execute(statement)).all()
 
         return [

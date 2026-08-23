@@ -67,11 +67,11 @@ async def test_repository_survives_commit(
     tenant_id = await create_tenant(session_factory)
     repository = build_repository(tenant_id)
 
-    async with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:
+    async with SqlAlchemyUnitOfWork(session_factory, tenant_id=tenant_id) as unit_of_work:
         unit_of_work.code_repositories.add(repository)
         await unit_of_work.commit()
 
-    async with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:
+    async with SqlAlchemyUnitOfWork(session_factory, tenant_id=tenant_id) as unit_of_work:
         stored = await unit_of_work.code_repositories.get(repository.id)
 
     assert stored.name == repository.name
@@ -86,10 +86,10 @@ async def test_changes_without_commit_are_rolled_back(
     tenant_id = await create_tenant(session_factory)
     repository = build_repository(tenant_id, name="rolled-back")
 
-    async with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:
+    async with SqlAlchemyUnitOfWork(session_factory, tenant_id=tenant_id) as unit_of_work:
         unit_of_work.code_repositories.add(repository)
 
-    async with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:
+    async with SqlAlchemyUnitOfWork(session_factory, tenant_id=tenant_id) as unit_of_work:
         found = await unit_of_work.code_repositories.find_by_name(tenant_id, "rolled-back")
 
     assert found is None
@@ -101,12 +101,12 @@ async def test_policy_change_is_persisted_and_produces_event(
     tenant_id = await create_tenant(session_factory)
     repository = build_repository(tenant_id, name="policy-change")
 
-    async with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:
+    async with SqlAlchemyUnitOfWork(session_factory, tenant_id=tenant_id) as unit_of_work:
         unit_of_work.code_repositories.add(repository)
         await unit_of_work.commit()
         unit_of_work.collect_events()
 
-    async with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:
+    async with SqlAlchemyUnitOfWork(session_factory, tenant_id=tenant_id) as unit_of_work:
         stored = await unit_of_work.code_repositories.get(repository.id)
         stored.change_egress_policy(EgressPolicy.ALLOW_CLOUD)
         await unit_of_work.commit()
@@ -114,7 +114,7 @@ async def test_policy_change_is_persisted_and_produces_event(
 
     assert len(events) == 1
 
-    async with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:
+    async with SqlAlchemyUnitOfWork(session_factory, tenant_id=tenant_id) as unit_of_work:
         reloaded = await unit_of_work.code_repositories.get(repository.id)
 
     assert reloaded.egress_policy is EgressPolicy.ALLOW_CLOUD
@@ -125,11 +125,11 @@ async def test_duplicate_name_within_tenant_is_rejected(
 ) -> None:
     tenant_id = await create_tenant(session_factory)
 
-    async with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:
+    async with SqlAlchemyUnitOfWork(session_factory, tenant_id=tenant_id) as unit_of_work:
         unit_of_work.code_repositories.add(build_repository(tenant_id, name="duplicate"))
         await unit_of_work.commit()
 
     with pytest.raises(Exception, match="uq_repository_tenant_id_name"):
-        async with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:
+        async with SqlAlchemyUnitOfWork(session_factory, tenant_id=tenant_id) as unit_of_work:
             unit_of_work.code_repositories.add(build_repository(tenant_id, name="duplicate"))
             await unit_of_work.commit()

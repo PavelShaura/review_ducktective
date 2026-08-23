@@ -11,9 +11,13 @@ from ducktective.core.review.investigation import (
 )
 from ducktective.core.types import (
     ReviewRunId,
+    TenantId,
 )
 from ducktective.storage.models.review import (
     InvestigationStepModel,
+)
+from ducktective.storage.tenant_scope import (
+    bind_tenant,
 )
 
 
@@ -26,8 +30,14 @@ class SqlAlchemyInvestigationLog:
     короткая транзакция на шаг; их десятки на прогон, а не тысячи.
     """
 
-    def __init__(self, session_factory: async_sessionmaker) -> None:  # type: ignore[type-arg]
+    def __init__(
+        self,
+        session_factory: async_sessionmaker,  # type: ignore[type-arg]
+        *,
+        tenant_id: TenantId | None = None,
+    ) -> None:
         self._session_factory = session_factory
+        self._tenant_id = tenant_id
 
     async def append(self, run_id: ReviewRunId, step: InvestigationStep) -> RecordedStep:
         model = InvestigationStepModel(
@@ -42,6 +52,7 @@ class SqlAlchemyInvestigationLog:
             is_error=step.is_error,
         )
         async with self._session_factory() as session, session.begin():
+            await bind_tenant(session, self._tenant_id)
             session.add(model)
             await session.flush()
             cursor = model.id
@@ -63,6 +74,7 @@ class SqlAlchemyInvestigationLog:
             .limit(limit)
         )
         async with self._session_factory() as session:
+            await bind_tenant(session, self._tenant_id)
             models = (await session.scalars(statement)).all()
 
         return [_to_recorded(model) for model in models]

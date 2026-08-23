@@ -98,7 +98,7 @@ export function DocumentAttachment({ conversationId, document }: Props) {
       >
         {attach.isPending ? "прикладываю…" : "+ приложить документ"}
       </button>
-      <span className="case-label">требование или выгрузка из вики · md, txt, html</span>
+      <span className="case-label"> - md, txt, html</span>
       {problem ? <span className="text-[13px] text-critical">{problem}</span> : null}
     </div>
   );

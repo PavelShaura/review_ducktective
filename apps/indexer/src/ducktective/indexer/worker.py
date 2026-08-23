@@ -120,9 +120,10 @@ async def build_index_task(
     векторы досчитаются при следующем запуске.
     """
     settings: Settings = ctx["settings"]
-    unit_of_work = SqlAlchemyUnitOfWork(ctx["session_factory"])
+    tenant = TenantId(UUID(tenant_id))
+    unit_of_work = SqlAlchemyUnitOfWork(ctx["session_factory"], tenant_id=tenant)
     command = BuildIndexCommand(
-        tenant_id=TenantId(UUID(tenant_id)),
+        tenant_id=tenant,
         repository_id=RepositoryId(UUID(repository_id)),
         revision=revision,
         snapshot_id=IndexSnapshotId(UUID(snapshot_id)) if snapshot_id else None,

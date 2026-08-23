@@ -1,3 +1,10 @@
+from collections.abc import (
+    AsyncIterator,
+)
+from contextlib import (
+    asynccontextmanager,
+)
+
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -26,6 +33,7 @@ from ducktective.core.review.entities import (
 from ducktective.core.types import (
     CodeSymbolId,
     RepositoryId,
+    TenantId,
 )
 from ducktective.retrieval.diff_context import (
     DEFAULT_TOKEN_BUDGET,
@@ -43,6 +51,26 @@ from ducktective.retrieval.symbols import (
 from ducktective.retrieval.vector import (
     VectorSearch,
 )
+from ducktective.storage.tenant_scope import (
+    bind_tenant,
+)
+
+
+@asynccontextmanager
+async def _tenant_session(
+    session_factory: async_sessionmaker[AsyncSession],
+    tenant_id: TenantId | None,
+) -> AsyncIterator[AsyncSession]:
+    """Сессия чтения, назвавшая своего тенанта.
+
+    Индекс закрыт политикой базы наравне с находками, и сессия без
+    названного тенанта не увидит ни одного символа. Читающие классы живут
+    вне транзакции прогона (D-016), поэтому называть тенанта приходится
+    каждой из них, а не одному Unit of Work.
+    """
+    async with session_factory() as session:
+        await bind_tenant(session, tenant_id)
+        yield session
 
 
 class SessionScopedContextBuilder:
@@ -58,14 +86,16 @@ class SessionScopedContextBuilder:
         session_factory: async_sessionmaker[AsyncSession],
         embedder: Embedder,
         *,
+        tenant_id: TenantId | None = None,
         token_budget: int = DEFAULT_TOKEN_BUDGET,
     ) -> None:
         self._session_factory = session_factory
         self._embedder = embedder
+        self._tenant_id = tenant_id
         self._token_budget = token_budget
 
     async def build(self, repository_id: RepositoryId, file: ReviewFile) -> DiffContext:
-        async with self._session_factory() as session:
+        async with _tenant_session(self._session_factory, self._tenant_id) as session:
             builder = DiffContextBuilder(
                 PostgresSymbolReader(session),
                 HybridSearch(
@@ -84,8 +114,14 @@ class SessionScopedSymbolReader:
     каждый запрос внешнего клиента самодостаточен и открывает сессию на себя.
     """
 
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+    def __init__(
+        self,
+        session_factory: async_sessionmaker[AsyncSession],
+        *,
+        tenant_id: TenantId | None = None,
+    ) -> None:
         self._session_factory = session_factory
+        self._tenant_id = tenant_id
 
     async def symbols_covering(
         self,
@@ -94,7 +130,7 @@ class SessionScopedSymbolReader:
         start_line: int,
         end_line: int,
     ) -> list[SymbolContext]:
-        async with self._session_factory() as session:
+        async with _tenant_session(self._session_factory, self._tenant_id) as session:
             return await PostgresSymbolReader(session).symbols_covering(
                 repository_id,
                 path,
@@ -109,7 +145,7 @@ class SessionScopedSymbolReader:
         *,
         limit: int = 10,
     ) -> list[SymbolContext]:
-        async with self._session_factory() as session:
+        async with _tenant_session(self._session_factory, self._tenant_id) as session:
             return await PostgresSymbolReader(session).find_by_name(
                 repository_id,
                 name,
@@ -123,7 +159,7 @@ class SessionScopedSymbolReader:
         *,
         limit: int = 5,
     ) -> list[str]:
-        async with self._session_factory() as session:
+        async with _tenant_session(self._session_factory, self._tenant_id) as session:
             return await PostgresSymbolReader(session).find_paths(
                 repository_id,
                 needle,
@@ -131,7 +167,7 @@ class SessionScopedSymbolReader:
             )
 
     async def describe(self, repository_id: RepositoryId) -> RepositoryDigest:
-        async with self._session_factory() as session:
+        async with _tenant_session(self._session_factory, self._tenant_id) as session:
             return await PostgresSymbolReader(session).describe(repository_id)
 
     async def symbols_in_file(
@@ -141,7 +177,7 @@ class SessionScopedSymbolReader:
         *,
         limit: int = 200,
     ) -> list[SymbolContext]:
-        async with self._session_factory() as session:
+        async with _tenant_session(self._session_factory, self._tenant_id) as session:
             return await PostgresSymbolReader(session).symbols_in_file(
                 repository_id,
                 path,
@@ -156,7 +192,7 @@ class SessionScopedSymbolReader:
         start_line: int,
         end_line: int,
     ) -> str | None:
-        async with self._session_factory() as session:
+        async with _tenant_session(self._session_factory, self._tenant_id) as session:
             return await PostgresSymbolReader(session).read_lines(
                 repository_id,
                 path,
@@ -171,7 +207,7 @@ class SessionScopedSymbolReader:
         *,
         limit: int = 10,
     ) -> list[SymbolHit]:
-        async with self._session_factory() as session:
+        async with _tenant_session(self._session_factory, self._tenant_id) as session:
             return await PostgresSymbolReader(session).search_symbols(
                 repository_id,
                 query,
@@ -185,7 +221,7 @@ class SessionScopedSymbolReader:
         kinds: tuple[EdgeKind, ...] = CALL_EDGES,
         limit: int = 20,
     ) -> list[SymbolContext]:
-        async with self._session_factory() as session:
+        async with _tenant_session(self._session_factory, self._tenant_id) as session:
             return await PostgresSymbolReader(session).callees(
                 symbol_ids,
                 kinds=kinds,
@@ -199,7 +235,7 @@ class SessionScopedSymbolReader:
         kinds: tuple[EdgeKind, ...] = CALL_EDGES,
         limit: int = 20,
     ) -> list[SymbolContext]:
-        async with self._session_factory() as session:
+        async with _tenant_session(self._session_factory, self._tenant_id) as session:
             return await PostgresSymbolReader(session).callers(
                 symbol_ids,
                 kinds=kinds,
@@ -213,7 +249,7 @@ class SessionScopedSymbolReader:
         kinds: tuple[EdgeKind, ...] = (),
         limit: int = 20,
     ) -> list[RelatedSymbol]:
-        async with self._session_factory() as session:
+        async with _tenant_session(self._session_factory, self._tenant_id) as session:
             return await PostgresSymbolReader(session).referring(
                 symbol_ids,
                 kinds=kinds,
@@ -221,7 +257,7 @@ class SessionScopedSymbolReader:
             )
 
     async def edge_kinds(self, symbol_ids: list[CodeSymbolId]) -> dict[EdgeKind, int]:
-        async with self._session_factory() as session:
+        async with _tenant_session(self._session_factory, self._tenant_id) as session:
             return await PostgresSymbolReader(session).edge_kinds(symbol_ids)
 
 
@@ -232,9 +268,12 @@ class SessionScopedHybridSearch:
         self,
         session_factory: async_sessionmaker[AsyncSession],
         embedder: Embedder,
+        *,
+        tenant_id: TenantId | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._embedder = embedder
+        self._tenant_id = tenant_id
 
     async def search_chunks(
         self,
@@ -244,7 +283,7 @@ class SessionScopedHybridSearch:
         languages: tuple[str, ...] = (),
         limit: int = 20,
     ) -> list[ChunkHit]:
-        async with self._session_factory() as session:
+        async with _tenant_session(self._session_factory, self._tenant_id) as session:
             search = HybridSearch(
                 PostgresLexicalSearch(session),
                 VectorSearch(session, self._embedder),

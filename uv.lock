@@ -11,6 +11,7 @@ resolution-markers = [
 members = [
     "ducktective-api",
     "ducktective-application",
+    "ducktective-auth",
     "ducktective-config",
     "ducktective-core",
     "ducktective-evals",
@@ -735,6 +736,23 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [{ name = "ducktective-core", editable = "packages/core" }]
+
+[[package]]
+name = "ducktective-auth"
+version = "0.1.0"
+source = { editable = "packages/auth" }
+dependencies = [
+    { name = "ducktective-core" },
+    { name = "httpx" },
+    { name = "pyjwt", extra = ["crypto"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "ducktective-core", editable = "packages/core" },
+    { name = "httpx", specifier = ">=0.28" },
+    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.10" },
+]
 
 [[package]]
 name = "ducktective-config"
@@ -3006,6 +3024,7 @@ source = { editable = "." }
 dependencies = [
     { name = "ducktective-api" },
     { name = "ducktective-application" },
+    { name = "ducktective-auth" },
     { name = "ducktective-config" },
     { name = "ducktective-core" },
     { name = "ducktective-evals" },
@@ -3040,6 +3059,7 @@ dev = [
 requires-dist = [
     { name = "ducktective-api", editable = "apps/api" },
     { name = "ducktective-application", editable = "packages/application" },
+    { name = "ducktective-auth", editable = "packages/auth" },
     { name = "ducktective-config", editable = "packages/config" },
     { name = "ducktective-core", editable = "packages/core" },
     { name = "ducktective-evals", editable = "packages/evals" },

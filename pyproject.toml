@@ -11,6 +11,7 @@ dependencies = [
     "ducktective-config",
     "ducktective-application",
     "ducktective-storage",
+    "ducktective-auth",
     "ducktective-vcs",
     "ducktective-llm",
     "ducktective-indexing",
@@ -51,6 +52,7 @@ ducktective-core = { workspace = true }
 ducktective-config = { workspace = true }
 ducktective-application = { workspace = true }
 ducktective-storage = { workspace = true }
+ducktective-auth = { workspace = true }
 ducktective-vcs = { workspace = true }
 ducktective-llm = { workspace = true }
 ducktective-indexing = { workspace = true }
@@ -143,7 +145,7 @@ strict = true
 warn_unreachable = true
 disallow_any_explicit = false
 plugins = ["pydantic.mypy"]
-mypy_path = "packages/core/src:packages/config/src:packages/application/src:packages/storage/src:packages/vcs/src:packages/llm/src:packages/indexing/src:packages/retrieval/src:packages/review_graph/src:packages/evals/src:packages/observability/src:apps/api/src:apps/reviewer/src:apps/indexer/src:apps/mcp_server/src"
+mypy_path = "packages/core/src:packages/config/src:packages/application/src:packages/storage/src:packages/auth/src:packages/vcs/src:packages/llm/src:packages/indexing/src:packages/retrieval/src:packages/review_graph/src:packages/evals/src:packages/observability/src:apps/api/src:apps/reviewer/src:apps/indexer/src:apps/mcp_server/src"
 namespace_packages = true
 explicit_package_bases = true
 
@@ -220,6 +222,17 @@ forbidden_modules = [
     "ducktective.api",
     "ducktective.mcp_server",
     "ducktective.application",
+]
+
+[[tool.importlinter.contracts]]
+name = "Auth не зависит от интерфейсов, use cases и хранилища"
+type = "forbidden"
+source_modules = ["ducktective.auth"]
+forbidden_modules = [
+    "ducktective.api",
+    "ducktective.mcp_server",
+    "ducktective.application",
+    "ducktective.storage",
 ]
 
 [[tool.importlinter.contracts]]

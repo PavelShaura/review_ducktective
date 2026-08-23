@@ -1,0 +1,48 @@
+[
+  {
+    "name": "sonnet",
+    "model": "anthropic/claude-sonnet-5",
+    "api_key_env": "ANTHROPIC_API_KEY",
+    "trust": "private_remote",
+    "supports_tools": true,
+    "context_window": 200000,
+    "note": "Платный провайдер: запросы не используются для обучения"
+  },
+  {
+    "name": "gemini-flash",
+    "model": "gemini/gemini-2.5-flash",
+    "api_key_env": "GEMINI_API_KEY",
+    "trust": "training_remote",
+    "supports_tools": true,
+    "context_window": 1000000,
+    "note": "Бесплатный тир AI Studio: лимиты в минуту и в сутки, данные используются для улучшения моделей"
+  },
+  {
+    "name": "openrouter-free",
+    "model": "openrouter/openai/gpt-oss-120b:free",
+    "api_key_env": "OPENROUTER_API_KEY",
+    "trust": "training_remote",
+    "supports_tools": true,
+    "context_window": 131072,
+    "note": "Бесплатный маршрут OpenRouter: около 50 запросов в сутки, запросы логируются"
+  },
+  {
+    "name": "groq",
+    "model": "groq/llama-3.3-70b-versatile",
+    "api_key_env": "GROQ_API_KEY",
+    "trust": "training_remote",
+    "supports_tools": true,
+    "context_window": 131072,
+    "note": "Бесплатный тир Groq: быстрый, лимиты по токенам в сутки"
+  },
+  {
+    "name": "compatible",
+    "model": "openai/my-model",
+    "base_url": "https://gateway.example.com/v1",
+    "api_key_env": "COMPATIBLE_API_KEY",
+    "trust": "private_remote",
+    "supports_tools": false,
+    "context_window": 32768,
+    "note": "Любой OpenAI-совместимый сервер: адрес задаётся base_url"
+  }
+]

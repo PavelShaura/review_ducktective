@@ -1,11 +1,11 @@
 import { useState } from "react";
 
-import type { Repository } from "@/api/types";
+import type { EgressPolicy, Repository } from "@/api/types";
 
 export interface NewRepositoryDraft {
   localPath: string;
   name: string;
-  allowCloud: boolean;
+  egressPolicy: EgressPolicy;
 }
 
 interface Props {
@@ -117,23 +117,58 @@ function NewRepositoryFields({ draft, onChange }: FieldsProps) {
         />
       </label>
 
-      <label className="flex items-start gap-2.5">
-        <input
-          type="checkbox"
-          checked={draft.allowCloud}
-          onChange={(event) => onChange({ ...draft, allowCloud: event.target.checked })}
-          className="mt-1 accent-brass"
-        />
-        <span className="text-[14px] text-paper-dim">
-          Разрешить облачные модели.
-          <span className="block text-[13px]">
-            По умолчанию код этого репозитория обрабатывается только локальной моделью.
-          </span>
-        </span>
-      </label>
+      <fieldset className="space-y-2">
+        <legend className="case-label mb-1">куда разрешено уезжать коду</legend>
+        {EGRESS_CHOICES.map((choice) => (
+          <label key={choice.value} className="flex items-start gap-2.5">
+            <input
+              type="radio"
+              name="egress-policy"
+              checked={draft.egressPolicy === choice.value}
+              onChange={() => onChange({ ...draft, egressPolicy: choice.value })}
+              className="mt-1 accent-brass"
+            />
+            <span className="text-[14px] text-paper-dim">
+              {choice.title}
+              <span className="block text-[13px]">{choice.explanation}</span>
+            </span>
+          </label>
+        ))}
+      </fieldset>
     </div>
   );
 }
+
+/**
+ * Три уровня вместо галочки «можно облако».
+ *
+ * Разница между провайдером, обещавшим не учиться на запросах, и бесплатным
+ * маршрутом, который такого не обещает, — это в точности та разница, ради
+ * которой политика заведена. Стереть её галочкой значит стереть весь смысл.
+ */
+const EGRESS_CHOICES: {
+  value: EgressPolicy;
+  title: string;
+  explanation: string;
+}[] = [
+  {
+    value: "local_only",
+    title: "Только локальная модель",
+    explanation: "Код не покидает машину. Подходит для кода под NDA.",
+  },
+  {
+    value: "allow_cloud",
+    title: "Удалённые модели с обязательством не обучаться",
+    explanation:
+      "Платные провайдеры, обещающие не хранить и не использовать запросы для обучения.",
+  },
+  {
+    value: "allow_training_cloud",
+    title: "Любые удалённые, включая бесплатные",
+    explanation:
+      "Бесплатные тиры логируют запросы и учатся на них. Годится для открытого кода и проб.",
+  },
+];
 
 function basename(path: string): string {
   const parts = path.replace(/\/+$/, "").split("/");

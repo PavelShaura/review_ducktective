@@ -14,6 +14,9 @@ from sqlalchemy.ext.asyncio import (
 from ducktective.core.events import (
     DomainEvent,
 )
+from ducktective.core.types import (
+    TenantId,
+)
 from ducktective.storage.repositories.chat import (
     SqlAlchemyConversationRepository,
 )
@@ -28,8 +31,19 @@ from ducktective.storage.repositories.indexing import (
     SqlAlchemySourceFileRepository,
     SqlAlchemySymbolEdgeRepository,
 )
+from ducktective.storage.repositories.model_profile import (
+    SqlAlchemyModelProfileRepository,
+)
 from ducktective.storage.repositories.review_run import (
     SqlAlchemyReviewRunRepository,
+)
+from ducktective.storage.repositories.tenancy import (
+    SqlAlchemyInvitationRepository,
+    SqlAlchemyTenantRepository,
+    SqlAlchemyUserAccountRepository,
+)
+from ducktective.storage.tenant_scope import (
+    bind_tenant,
 )
 
 
@@ -49,8 +63,22 @@ class SqlAlchemyUnitOfWork:
     переносятся в ORM-модели, а их события накапливаются для публикации.
     """
 
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+    def __init__(
+        self,
+        session_factory: async_sessionmaker[AsyncSession],
+        *,
+        tenant_id: TenantId | None = None,
+    ) -> None:
+        """Единица работы, знающая, от чьего имени она открыта.
+
+        Тенант нужен не use case'ам — они и так фильтруют, — а политикам
+        базы: без него транзакция не увидит ни одной строки с кодом.
+        Отсутствие тенанта поэтому не «полный доступ», а «доступ только
+        к контуру входа»: тенанту, приглашениям и учётным записям, которые
+        читаются до того, как членство выяснено.
+        """
         self._session_factory = session_factory
+        self._tenant_id = tenant_id
         self._session: AsyncSession | None = None
         self._code_repositories: SqlAlchemyCodeRepositoryRepository | None = None
         self._review_runs: SqlAlchemyReviewRunRepository | None = None
@@ -59,6 +87,10 @@ class SqlAlchemyUnitOfWork:
         self._symbol_edges: SqlAlchemySymbolEdgeRepository | None = None
         self._embeddings: SqlAlchemyEmbeddingStore | None = None
         self._conversations: SqlAlchemyConversationRepository | None = None
+        self._tenants: SqlAlchemyTenantRepository | None = None
+        self._user_accounts: SqlAlchemyUserAccountRepository | None = None
+        self._invitations: SqlAlchemyInvitationRepository | None = None
+        self._model_profiles: SqlAlchemyModelProfileRepository | None = None
         self._collected_events: list[DomainEvent] = []
 
     @property
@@ -109,12 +141,37 @@ class SqlAlchemyUnitOfWork:
             self._conversations = SqlAlchemyConversationRepository(self.session)
         return self._conversations
 
+    @property
+    def tenants(self) -> SqlAlchemyTenantRepository:
+        if self._tenants is None:
+            self._tenants = SqlAlchemyTenantRepository(self.session)
+        return self._tenants
+
+    @property
+    def user_accounts(self) -> SqlAlchemyUserAccountRepository:
+        if self._user_accounts is None:
+            self._user_accounts = SqlAlchemyUserAccountRepository(self.session)
+        return self._user_accounts
+
+    @property
+    def invitations(self) -> SqlAlchemyInvitationRepository:
+        if self._invitations is None:
+            self._invitations = SqlAlchemyInvitationRepository(self.session)
+        return self._invitations
+
+    @property
+    def model_profiles(self) -> SqlAlchemyModelProfileRepository:
+        if self._model_profiles is None:
+            self._model_profiles = SqlAlchemyModelProfileRepository(self.session)
+        return self._model_profiles
+
     async def __aenter__(self) -> Self:
         if self._session is not None:
             raise RuntimeError("Вложенные Unit of Work запрещены")
         self._session = self._session_factory()
         self._reset_repositories()
         self._collected_events = []
+        await bind_tenant(self._session, self._tenant_id)
         return self
 
     async def __aexit__(
@@ -134,10 +191,12 @@ class SqlAlchemyUnitOfWork:
     async def commit(self) -> None:
         self._absorb_aggregate_changes()
         await self.session.commit()
+        await bind_tenant(self.session, self._tenant_id)
 
     async def rollback(self) -> None:
         self._collected_events = []
         await self.session.rollback()
+        await bind_tenant(self.session, self._tenant_id)
 
     def collect_events(self) -> list[DomainEvent]:
         collected = self._collected_events
@@ -155,6 +214,10 @@ class SqlAlchemyUnitOfWork:
             self._source_files,
             self._symbol_edges,
             self._conversations,
+            self._tenants,
+            self._user_accounts,
+            self._invitations,
+            self._model_profiles,
         ]
         return [repository for repository in candidates if repository is not None]
 
@@ -171,3 +234,7 @@ class SqlAlchemyUnitOfWork:
         self._symbol_edges = None
         self._embeddings = None
         self._conversations = None
+        self._tenants = None
+        self._user_accounts = None
+        self._invitations = None
+        self._model_profiles = None

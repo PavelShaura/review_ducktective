@@ -112,6 +112,13 @@ class Conversation(AggregateRoot):
     updated_at: datetime
     messages: list[ChatMessage] = field(default_factory=list)
     document: AttachedDocument | None = None
+    preferred_model: str | None = None
+    """Модель, выбранная для этого разговора.
+
+    Пожелание, а не приказ: приложенный документ всё равно оставляет
+    разговор локальным (D-025), и удалённая модель в этом случае молча
+    уступает место локальной.
+    """
 
     @classmethod
     def start(
@@ -120,6 +127,7 @@ class Conversation(AggregateRoot):
         tenant_id: TenantId,
         repository_id: RepositoryId,
         title: str = "",
+        preferred_model: str | None = None,
     ) -> Self:
         now = datetime.now(UTC)
         conversation = cls(
@@ -129,6 +137,7 @@ class Conversation(AggregateRoot):
             title=title[:MAX_TITLE_LENGTH],
             created_at=now,
             updated_at=now,
+            preferred_model=preferred_model,
         )
         conversation.record_event(
             ConversationStarted(

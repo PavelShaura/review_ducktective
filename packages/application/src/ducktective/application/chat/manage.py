@@ -59,6 +59,8 @@ class StartConversation(TransactionalUseCase):
         self,
         tenant_id: TenantId,
         repository_id: RepositoryId,
+        *,
+        preferred_model: str | None = None,
     ) -> StartedConversation:
         async with self._unit_of_work:
             repository = await self._unit_of_work.code_repositories.get(repository_id)
@@ -76,6 +78,7 @@ class StartConversation(TransactionalUseCase):
             conversation = Conversation.start(
                 tenant_id=tenant_id,
                 repository_id=repository_id,
+                preferred_model=preferred_model,
             )
             self._unit_of_work.conversations.add(conversation)
             await self._commit_and_publish()

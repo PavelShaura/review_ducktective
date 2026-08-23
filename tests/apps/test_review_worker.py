@@ -78,11 +78,15 @@ def build_context(
         "ducktective.reviewer.worker.RedisEventPublisher",
         lambda redis_client: _NullPublisher(),
     )
+    pipeline = LangGraphReviewPipeline([reviewer])
+
+    async def build(ctx: dict[str, Any], tenant_id: Any) -> LangGraphReviewPipeline:
+        return pipeline
+
+    monkeypatch.setattr("ducktective.reviewer.worker.build_pipeline", build)
     return {
         "session_factory": None,
         "redis": None,
-        "pipeline": LangGraphReviewPipeline([reviewer]),
-        "context_builder": None,
         "max_output_tokens": 4096,
         "run_lock": FreeRunLock(),
     }
@@ -223,20 +227,29 @@ class RecordingPipeline:
         self.forgotten.append(str(run_id))
 
 
-async def test_deleted_run_loses_its_saved_progress() -> None:
+async def test_deleted_run_loses_its_saved_progress(monkeypatch: Any) -> None:
     pipeline = RecordingPipeline()
+
+    async def build(ctx: dict[str, Any], tenant_id: Any) -> RecordingPipeline:
+        return pipeline
+
+    monkeypatch.setattr("ducktective.reviewer.worker.build_pipeline", build)
     run_id = uuid4()
 
-    result = await forget_checkpoint_task({"pipeline": pipeline}, str(run_id))
+    result = await forget_checkpoint_task({}, str(run_id), str(uuid4()))
 
     assert pipeline.forgotten == [str(run_id)]
     assert result["status"] == "forgotten"
 
 
-async def test_unreachable_checkpointer_does_not_fail_the_task() -> None:
+async def test_unreachable_checkpointer_does_not_fail_the_task(monkeypatch: Any) -> None:
     """Дело уже удалено, и повторять уборку не за чем: причина та же."""
-    result = await forget_checkpoint_task(
-        {"pipeline": RecordingPipeline(failing=True)}, str(uuid4())
-    )
+
+    async def build(ctx: dict[str, Any], tenant_id: Any) -> RecordingPipeline:
+        return RecordingPipeline(failing=True)
+
+    monkeypatch.setattr("ducktective.reviewer.worker.build_pipeline", build)
+
+    result = await forget_checkpoint_task({}, str(uuid4()), str(uuid4()))
 
     assert result["status"] == "failed"

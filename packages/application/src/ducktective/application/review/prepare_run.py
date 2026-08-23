@@ -45,6 +45,7 @@ class PrepareReviewRunCommand:
     source: ReviewSource = ReviewSource.LOCAL_DIFF
     external_pull_request_id: str | None = None
     created_by: UserId | None = None
+    preferred_model: str | None = None
 
 
 class EmptyDiffError(ApplicationError):
@@ -121,6 +122,7 @@ class PrepareReviewRun(TransactionalUseCase):
                 source=command.source,
                 diff=diff,
                 head_subject=head_subject,
+                preferred_model=command.preferred_model,
                 created_by=command.created_by,
                 external_pull_request_id=command.external_pull_request_id,
             )

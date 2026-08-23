@@ -29,7 +29,8 @@ from ducktective.core.chat.value_objects import (
 
 class StartConversationRequest(BaseModel):
     repository_id: UUID
-    tenant_id: UUID
+    model: str | None = Field(default=None, max_length=64)
+    """Модель разговора. Пожелание: приложенный документ всё равно держит его локальным."""
 
 
 class AttachDocumentRequest(BaseModel):

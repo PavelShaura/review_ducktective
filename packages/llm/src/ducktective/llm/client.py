@@ -47,6 +47,16 @@ from ducktective.llm.router import (
 
 RETRYABLE_ERRORS = (RateLimitError, Timeout, APIError)
 RETRY_BACKOFF_SECONDS = 1.0
+RATE_LIMIT_COOLDOWN_SECONDS = 300.0
+"""Сколько исчерпавшая лимит модель не спрашивается снова.
+
+Пять минут — компромисс: минутные лимиты за это время восстанавливаются,
+суточные нет, и пробовать их повторно каждые несколько секунд бессмысленно.
+Слишком долгий срок держал бы разговор на запасной модели дольше нужного.
+"""
+
+FAILURE_COOLDOWN_SECONDS = 60.0
+"""Отказавший провайдер отдыхает меньше: сеть чинится быстрее лимита."""
 PROMPT_TOKENS_PATTERN = re.compile(r'"n_prompt_tokens"\s*:\s*(\d+)')
 CONTEXT_SIZE_PATTERN = re.compile(r'"n_ctx"\s*:\s*(\d+)')
 CONTEXT_OVERFLOW_MARKERS = (
@@ -80,6 +90,7 @@ class LiteLlmClient:
         self._prompt_version = prompt_version
         self._timeout_seconds = timeout_seconds
         self._max_attempts = max_attempts
+        self._cooling: dict[str, float] = {}
 
     async def complete(
         self,
@@ -124,35 +135,129 @@ class LiteLlmClient:
     ) -> AsyncIterator[LlmStreamPiece]:
         """Ответ по мере появления; итог приходит последним куском.
 
-        Повторов здесь нет, в отличие от `complete`: часть ответа уже
-        показана человеку, и вторая попытка начала бы писать другой текст
-        поверх начатого. Сбой посреди потока честнее прервать.
+        Отказ до первого куска и отказ посреди текста — разные события.
+        В первом случае человеку ещё ничего не показано, и повторить можно
+        безнаказанно: сперва той же моделью с паузой, затем — следующей
+        по политике репозитория. Во втором повтор начал бы писать другой
+        текст поверх начатого, поэтому поток честно обрывается.
+
+        Замена модели здесь не роскошь: бесплатные тиры считают запросы,
+        а цикл с инструментами тратит по обращению на шаг — вторая модель
+        рядом заведена ровно для этой минуты (D-029).
         """
-        choice = self._router.select(requirements)
+        first_choice = self._router.select(requirements)
+        candidates = self._live_first(
+            (
+                first_choice,
+                *self._router.alternatives(requirements, besides=first_choice),
+            )
+        )
+
+        last_error: Exception | None = None
+        last_refused = first_choice
+        for position, choice in enumerate(candidates):
+            if position:
+                yield LlmStreamPiece(
+                    notice=(
+                        f"Модель {last_refused.name} не ответила "
+                        f"({_short_reason(last_error)}). Дальше в этом ответе "
+                        f"отвечает {choice.name}"
+                    )
+                )
+
+            started_at = time.monotonic()
+            collected = _StreamCollector()
+            has_text = False
+
+            try:
+                async for piece in self._stream_once(
+                    choice, messages, requirements, tools, collected
+                ):
+                    has_text = True
+                    yield piece
+            except ContextWindowExceededError as error:
+                raise _context_overflow_error(choice.model, error) from error
+            except Exception as error:
+                if _mentions_context_overflow(str(error)):
+                    raise _context_overflow_error(choice.model, error) from error
+                if has_text:
+                    raise self._stream_error(choice.model, error) from error
+
+                last_error = error
+                last_refused = choice
+                self._start_cooldown(choice.name, error)
+                continue
+
+            latency_ms = int((time.monotonic() - started_at) * 1000)
+            yield LlmStreamPiece(response=collected.finish(choice, latency_ms))
+            return
+
+        raise self._stream_error(last_refused.model, last_error)
+
+    async def _stream_once(
+        self,
+        choice: Any,
+        messages: list[LlmMessage],
+        requirements: ModelRequirements,
+        tools: Sequence[ToolSpec] | None,
+        collected: "_StreamCollector",
+    ) -> AsyncIterator[LlmStreamPiece]:
+        """Одна попытка одной модели.
+
+        Собственные повторы библиотеки выключены: они молча тратят секунды
+        на модель, которую мы и так готовы заменить следующей, и в журнале
+        выглядят как зависание.
+        """
         payload = self._payload(choice, messages, requirements, None, tools)
         payload["stream"] = True
         payload["stream_options"] = {"include_usage": True}
+        payload["num_retries"] = 0
 
-        started_at = time.monotonic()
-        collected = _StreamCollector()
+        async for chunk in await litellm.acompletion(**payload):
+            text = collected.absorb(chunk)
+            if text:
+                yield LlmStreamPiece(text=text)
 
-        try:
-            async for chunk in await litellm.acompletion(**payload):
-                text = collected.absorb(chunk)
-                if text:
-                    yield LlmStreamPiece(text=text)
-        except ContextWindowExceededError as error:
-            raise _context_overflow_error(choice.model, error) from error
-        except Exception as error:
-            if _mentions_context_overflow(str(error)):
-                raise _context_overflow_error(choice.model, error) from error
-            raise LlmUnavailableError(
-                f"Модель {choice.model} прервала ответ: {error}",
-                model=choice.model,
-            ) from error
+    def _live_first(self, candidates: Sequence[Any]) -> tuple[Any, ...]:
+        """Ставит вперёд тех, кто не отдыхает после недавнего отказа.
 
-        latency_ms = int((time.monotonic() - started_at) * 1000)
-        yield LlmStreamPiece(response=collected.finish(choice, latency_ms))
+        Цикл с инструментами тратит по обращению на шаг, и без этого каждый
+        шаг заново стучался бы в исчерпанную модель, дожидаясь её отказа.
+        Отдыхающие не выбрасываются совсем: если живых не осталось, попытка
+        всё равно лучше отказа.
+        """
+        now = time.monotonic()
+        live = [choice for choice in candidates if self._cooling.get(choice.name, 0.0) <= now]
+        resting = [choice for choice in candidates if self._cooling.get(choice.name, 0.0) > now]
+        return (*live, *resting)
+
+    def _start_cooldown(self, name: str, error: Exception) -> None:
+        seconds = (
+            RATE_LIMIT_COOLDOWN_SECONDS
+            if isinstance(error, RateLimitError)
+            else FAILURE_COOLDOWN_SECONDS
+        )
+        self._cooling[name] = time.monotonic() + seconds
+
+    @staticmethod
+    def _stream_error(model: str, error: Exception | None) -> LlmInvocationError:
+        """Называет причину так, чтобы по ней было понятно, что делать.
+
+        Исчерпанный лимит — не поломка модели: он проходит сам или лечится
+        другой моделью, и сказать об этом надо человеку, а не показывать
+        ему исключение библиотеки.
+        """
+        if isinstance(error, RateLimitError):
+            return LlmRateLimitError(
+                f"Модель {model} исчерпала лимит запросов. Бесплатные тиры считают "
+                "обращения, а разговор тратит по одному на каждый шаг поиска: "
+                "выберите другую модель в списке или повторите позже",
+                model=model,
+            )
+        return LlmUnavailableError(
+            f"Модель {model} прервала ответ: {error}",
+            model=model,
+        )
 
     def _payload(
         self,
@@ -242,6 +347,15 @@ class LiteLlmClient:
             f"Модель {model} недоступна после {self._max_attempts} попыток: {last_error}",
             model=model,
         )
+
+
+def _short_reason(error: Exception | None) -> str:
+    """Причина отказа в двух словах — она едет человеку, а не в журнал."""
+    if isinstance(error, RateLimitError):
+        return "исчерпан лимит запросов"
+    if isinstance(error, Timeout):
+        return "не дождались ответа"
+    return "провайдер отказал"
 
 
 def _to_wire(message: LlmMessage) -> dict[str, Any]:

@@ -30,7 +30,11 @@ from ducktective.api.schemas.chat import (
     AskRequest,
     ChatEventResponse,
 )
+from ducktective.api.security import (
+    authenticate_websocket,
+)
 from ducktective.application.chat.ask import (
+    AskQuestion,
     IndexNotReadyError,
 )
 from ducktective.application.exceptions import (
@@ -57,7 +61,7 @@ WS_BAD_QUESTION = 4400
 
 
 @router.websocket("/chat/conversations/{conversation_id}/stream")
-async def stream_chat(websocket: WebSocket, conversation_id: UUID, tenant_id: UUID) -> None:
+async def stream_chat(websocket: WebSocket, conversation_id: UUID) -> None:
     """Разговор о коде: вопрос в сокет, ответ по мере появления.
 
     Сокет живёт весь разговор, а не один вопрос: держать соединение дешевле,
@@ -68,8 +72,17 @@ async def stream_chat(websocket: WebSocket, conversation_id: UUID, tenant_id: UU
     воркером — там задача живёт минутами и переживает перезапуск, — а в
     разговоре очередь между токеном и экраном добавила бы задержку без
     пользы (`02-architecture.md`).
+
+    Первым сообщением приходит токен, дальше идут вопросы: класть ключ
+    доступа в адрес нельзя, а заголовков у браузерного сокета нет.
     """
     await websocket.accept()
+
+    member = await authenticate_websocket(websocket)
+    if member is None:
+        return
+
+    use_case = await build_chat_use_case(websocket.app, member.tenant_id)
 
     try:
         while True:
@@ -77,7 +90,7 @@ async def stream_chat(websocket: WebSocket, conversation_id: UUID, tenant_id: UU
             if question is None:
                 return
 
-            await _answer(websocket, conversation_id, tenant_id, question)
+            await _answer(use_case, websocket, conversation_id, member.tenant_id, question)
     except WebSocketDisconnect:
         logger.debug("chat.stream_closed", conversation_id=str(conversation_id))
 
@@ -100,20 +113,24 @@ async def _receive_question(websocket: WebSocket) -> str | None:
 
 
 async def _answer(
+    use_case: AskQuestion,
     websocket: WebSocket,
     conversation_id: UUID,
-    tenant_id: UUID,
+    tenant_id: TenantId,
     question: str,
 ) -> None:
-    """Проводит один вопрос через агента, отправляя события по мере появления."""
+    """Проводит один вопрос через агента, отправляя события по мере появления.
+
+    Агент один на весь сокет, а не на вопрос: вместе с ним живёт память
+    о том, кто из моделей только что отказал, — иначе каждый следующий
+    вопрос заново стучался бы в исчерпанную модель и ждал её отказа.
+    """
     if not question:
         return
 
-    use_case = build_chat_use_case(websocket.app)
-
     try:
         events = await use_case.execute(
-            TenantId(tenant_id),
+            tenant_id,
             ConversationId(conversation_id),
             question,
         )

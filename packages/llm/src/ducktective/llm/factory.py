@@ -1,9 +1,16 @@
+from collections.abc import (
+    Sequence,
+)
+
 from redis.asyncio import (
     Redis,
 )
 
 from ducktective.core.chat.ports import (
     ChatAgent,
+)
+from ducktective.core.code_repository.value_objects import (
+    ModelTrust,
 )
 from ducktective.core.review.investigation import (
     InvestigationSink,
@@ -40,41 +47,34 @@ def build_model_router(
     local_model: str,
     local_base_url: str,
     local_api_key: str,
-    cloud_model: str,
-    cloud_api_key: str,
     cloud_enabled: bool,
+    remote_choices: Sequence[ModelChoice] = (),
     local_supports_tools: bool = True,
     local_context_window: int = 0,
-    cloud_context_window: int = 0,
 ) -> ModelRouter:
     """Собирает роутер.
 
     Локальный инференс может обслуживаться разными серверами: Ollama на этой же
     машине или OpenAI-совместимый сервер вроде LM Studio на соседнем хосте.
     Для LiteLLM это разные префиксы модели, поэтому провайдер задаётся явно.
+
+    Удалённые модели приходят готовым списком: их описывает реестр установки,
+    и знать про файл настроек пакету моделей незачем.
     """
     local_choice = ModelChoice(
+        name="local",
         model=f"{local_provider}/{local_model}",
         provider=local_provider,
         api_base=local_base_url,
         api_key=local_api_key or None,
+        trust=ModelTrust.LOCAL,
         supports_tools=local_supports_tools,
         context_window=local_context_window,
     )
-    cloud_choice = (
-        ModelChoice(
-            model=cloud_model,
-            provider="anthropic",
-            api_key=cloud_api_key,
-            context_window=cloud_context_window,
-        )
-        if cloud_api_key
-        else None
-    )
     return ModelRouter(
         local_choice=local_choice,
-        cloud_choice=cloud_choice,
-        cloud_enabled=cloud_enabled and cloud_choice is not None,
+        remote_choices=remote_choices,
+        remote_enabled=cloud_enabled,
     )
 
 
@@ -84,13 +84,11 @@ def build_chat_agent(
     local_model: str,
     local_base_url: str,
     local_api_key: str,
-    cloud_model: str,
-    cloud_api_key: str,
     cloud_enabled: bool,
     timeout_seconds: float,
+    remote_choices: Sequence[ModelChoice] = (),
     local_supports_tools: bool = True,
     local_context_window: int = 0,
-    cloud_context_window: int = 0,
 ) -> ChatAgent:
     """Собирает агента разговора.
 
@@ -106,17 +104,15 @@ def build_chat_agent(
         local_model=local_model,
         local_base_url=local_base_url,
         local_api_key=local_api_key,
-        cloud_model=cloud_model,
-        cloud_api_key=cloud_api_key,
         cloud_enabled=cloud_enabled,
+        remote_choices=remote_choices,
         local_supports_tools=local_supports_tools,
         local_context_window=local_context_window,
-        cloud_context_window=cloud_context_window,
     )
     client = LiteLlmClient(router, timeout_seconds=timeout_seconds)
     preset = PresetChatAgent(client)
 
-    if not router.supports_tool_calling(cloud_allowed=cloud_enabled):
+    if not router.supports_tool_calling(allowed_trust=ModelTrust.TRAINING_REMOTE):
         return preset
 
     return AgenticChatAgent(client, fallback=preset)
@@ -129,14 +125,12 @@ def build_code_reviewers(
     local_model: str,
     local_base_url: str,
     local_api_key: str,
-    cloud_model: str,
-    cloud_api_key: str,
     cloud_enabled: bool,
     cache_ttl_seconds: int,
     timeout_seconds: float,
+    remote_choices: Sequence[ModelChoice] = (),
     local_supports_tools: bool = True,
     local_context_window: int = 0,
-    cloud_context_window: int = 0,
     agentic_enabled: bool = True,
     max_agent_steps: int = DEFAULT_MAX_STEPS,
     sink: InvestigationSink | None = None,
@@ -163,12 +157,10 @@ def build_code_reviewers(
         local_model=local_model,
         local_base_url=local_base_url,
         local_api_key=local_api_key,
-        cloud_model=cloud_model,
-        cloud_api_key=cloud_api_key,
         cloud_enabled=cloud_enabled,
+        remote_choices=remote_choices,
         local_supports_tools=local_supports_tools,
         local_context_window=local_context_window,
-        cloud_context_window=cloud_context_window,
     )
     cache = (
         RedisResponseCache(redis_client, ttl_seconds=cache_ttl_seconds)
@@ -178,7 +170,9 @@ def build_code_reviewers(
     client = LiteLlmClient(router, cache=cache, timeout_seconds=timeout_seconds)
     single_pass = LlmCodeReviewer(client)
 
-    if not agentic_enabled or not router.supports_tool_calling(cloud_allowed=cloud_enabled):
+    if not agentic_enabled or not router.supports_tool_calling(
+        allowed_trust=ModelTrust.TRAINING_REMOTE
+    ):
         return (single_pass,)
 
     return (

@@ -26,6 +26,9 @@ from ducktective.core.chat.value_objects import (
 from ducktective.core.code_repository.entities import (
     CodeRepository,
 )
+from ducktective.core.code_repository.value_objects import (
+    ModelTrust,
+)
 from ducktective.core.llm.value_objects import (
     ModelRequirements,
 )
@@ -112,7 +115,8 @@ class AskQuestion(TransactionalUseCase):
             history=history,
             requirements=ModelRequirements(
                 needs_deep_reasoning=True,
-                cloud_allowed=_cloud_allowed(repository, conversation),
+                allowed_trust=_allowed_trust(repository, conversation),
+                preferred_model=conversation.preferred_model,
                 max_output_tokens=self._max_output_tokens,
             ),
             navigator=self._navigators.for_repository(conversation.repository_id),
@@ -176,15 +180,17 @@ class AskQuestion(TransactionalUseCase):
         events.clear()
 
 
-def _cloud_allowed(repository: CodeRepository, conversation: Conversation) -> bool:
-    """Разрешено ли этому разговору уходить в облако.
+def _allowed_trust(repository: CodeRepository, conversation: Conversation) -> ModelTrust:
+    """Как далеко разрешено уезжать этому разговору.
 
     Приложенный документ ужесточает политику независимо от репозитория
     (D-025): `egress_policy` описывает код, а документ аналитика — не код,
     там сроки, фамилии и договорённости, и он часто чувствительнее того,
     к чему приложен.
     """
-    return repository.cloud_processing_allowed and not conversation.has_document
+    if conversation.has_document:
+        return ModelTrust.LOCAL
+    return repository.egress_policy.max_trust
 
 
 def _replay(conversation: Conversation, events: list[ChatEvent]) -> None:

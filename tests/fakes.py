@@ -78,8 +78,12 @@ from ducktective.storage.memory.repositories import (
     InMemoryConversationRepository,
     InMemoryEmbeddingStore,
     InMemoryIndexSnapshotRepository,
+    InMemoryInvitationRepository,
+    InMemoryModelProfileRepository,
     InMemorySourceFileRepository,
     InMemorySymbolEdgeRepository,
+    InMemoryTenantRepository,
+    InMemoryUserAccountRepository,
 )
 
 
@@ -157,6 +161,10 @@ class FakeUnitOfWork:
         self.symbol_edges = InMemorySymbolEdgeRepository(self.source_files)
         self.embeddings = InMemoryEmbeddingStore(self.source_files)
         self.conversations = InMemoryConversationRepository()
+        self.tenants = InMemoryTenantRepository()
+        self.user_accounts = InMemoryUserAccountRepository()
+        self.invitations = InMemoryInvitationRepository()
+        self.model_profiles = InMemoryModelProfileRepository()
         self.commit_calls = 0
         self.rollback_calls = 0
         self.is_active = False
@@ -178,6 +186,10 @@ class FakeUnitOfWork:
         self.index_snapshots.commit()
         self.source_files.commit()
         self.conversations.commit()
+        self.tenants.commit()
+        self.user_accounts.commit()
+        self.invitations.commit()
+        self.model_profiles.commit()
 
     async def rollback(self) -> None:
         self.rollback_calls += 1
@@ -193,6 +205,10 @@ class FakeUnitOfWork:
         collected.extend(self.index_snapshots.collect_events())
         collected.extend(self.source_files.collect_events())
         collected.extend(self.conversations.collect_events())
+        collected.extend(self.tenants.collect_events())
+        collected.extend(self.user_accounts.collect_events())
+        collected.extend(self.invitations.collect_events())
+        collected.extend(self.model_profiles.collect_events())
         return collected
 
 

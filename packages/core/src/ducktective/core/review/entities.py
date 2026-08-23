@@ -345,6 +345,14 @@ class ReviewRun(AggregateRoot):
     tokens_output: int = 0
     cost_usd: float = 0.0
     files_with_context: int = 0
+    preferred_model: str | None = None
+    """Модель, выбранная при запуске дела.
+
+    Пожелание, а не приказ: роутер возьмёт её, если она проходит по политике
+    репозитория и по требованиям узла. Хранится на прогоне, потому что
+    сравнивать находки между собой имеет смысл только зная, кто их сделал.
+    """
+
     files: list[ReviewFile] = field(default_factory=list)
     findings: list[Finding] = field(default_factory=list)
     degradations: list[NodeDegradation] = field(default_factory=list)
@@ -358,6 +366,7 @@ class ReviewRun(AggregateRoot):
         source: ReviewSource,
         diff: Diff,
         head_subject: str | None = None,
+        preferred_model: str | None = None,
         created_by: UserId | None = None,
         external_pull_request_id: str | None = None,
     ) -> Self:
@@ -374,6 +383,7 @@ class ReviewRun(AggregateRoot):
             status=ReviewStatus.QUEUED,
             created_at=datetime.now(UTC),
             head_subject=head_subject,
+            preferred_model=preferred_model,
             created_by=created_by,
             external_pull_request_id=external_pull_request_id,
             files=[_build_file(diff_file) for diff_file in diff.files],

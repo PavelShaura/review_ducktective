@@ -37,6 +37,9 @@ from ducktective.retrieval.lexical import (
 from ducktective.storage.models.tenancy import (
     TenantModel,
 )
+from ducktective.storage.tenant_scope import (
+    bind_tenant,
+)
 from ducktective.storage.unit_of_work import (
     SqlAlchemyUnitOfWork,
 )
@@ -67,13 +70,13 @@ class PaymentGateway:
 
 async def seed(
     session_factory: async_sessionmaker[AsyncSession],
-) -> RepositoryId:
+) -> tuple[TenantId, RepositoryId]:
     tenant_id = TenantId(uuid4())
     async with session_factory() as session:
         session.add(TenantModel(id=tenant_id, slug=f"t-{tenant_id.hex[:8]}", name="Тест"))
         await session.commit()
 
-    unit_of_work = SqlAlchemyUnitOfWork(session_factory)
+    unit_of_work = SqlAlchemyUnitOfWork(session_factory, tenant_id=tenant_id)
     parser = PythonParser()
 
     async with unit_of_work:
@@ -111,16 +114,17 @@ async def seed(
             unit_of_work.source_files.add(source_file)
 
         await unit_of_work.commit()
-        return repository.id
+        return tenant_id, repository.id
 
 
 async def test_symbol_is_found_by_part_of_its_name(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """`build_total` находится по слову «total» — ради этого имена и разбиваются."""
-    repository_id = await seed(session_factory)
+    tenant_id, repository_id = await seed(session_factory)
 
     async with session_factory() as session:
+        await bind_tenant(session, tenant_id)
         hits = await PostgresLexicalSearch(session).search_symbols(repository_id, "total")
 
     assert any(hit.qualified_name.endswith("build_total") for hit in hits)
@@ -129,9 +133,10 @@ async def test_symbol_is_found_by_part_of_its_name(
 async def test_camel_case_class_is_found_by_one_word(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    repository_id = await seed(session_factory)
+    tenant_id, repository_id = await seed(session_factory)
 
     async with session_factory() as session:
+        await bind_tenant(session, tenant_id)
         hits = await PostgresLexicalSearch(session).search_symbols(repository_id, "Report")
 
     assert any(hit.qualified_name.endswith("ReportBuilder") for hit in hits)
@@ -140,9 +145,10 @@ async def test_camel_case_class_is_found_by_one_word(
 async def test_docstring_words_reach_the_index(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    repository_id = await seed(session_factory)
+    tenant_id, repository_id = await seed(session_factory)
 
     async with session_factory() as session:
+        await bind_tenant(session, tenant_id)
         hits = await PostgresLexicalSearch(session).search_chunks(repository_id, "успеваемости")
 
     assert any("report" in hit.path for hit in hits)
@@ -151,9 +157,10 @@ async def test_docstring_words_reach_the_index(
 async def test_results_carry_their_location(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    repository_id = await seed(session_factory)
+    tenant_id, repository_id = await seed(session_factory)
 
     async with session_factory() as session:
+        await bind_tenant(session, tenant_id)
         hits = await PostgresLexicalSearch(session).search_chunks(repository_id, "Decimal")
 
     assert hits
@@ -164,9 +171,10 @@ async def test_results_carry_their_location(
 async def test_unrelated_query_returns_nothing(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    repository_id = await seed(session_factory)
+    tenant_id, repository_id = await seed(session_factory)
 
     async with session_factory() as session:
+        await bind_tenant(session, tenant_id)
         hits = await PostgresLexicalSearch(session).search_symbols(repository_id, "kubernetes")
 
     assert hits == []
@@ -175,9 +183,10 @@ async def test_unrelated_query_returns_nothing(
 async def test_ranking_puts_the_relevant_file_first(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    repository_id = await seed(session_factory)
+    tenant_id, repository_id = await seed(session_factory)
 
     async with session_factory() as session:
+        await bind_tenant(session, tenant_id)
         hits = await PostgresLexicalSearch(session).search_chunks(repository_id, "charge amount")
 
     assert hits

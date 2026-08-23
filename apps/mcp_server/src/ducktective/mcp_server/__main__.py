@@ -81,7 +81,7 @@ async def _serve(settings: Settings, arguments: argparse.Namespace) -> None:
     Асинхронные варианты запуска нужны именно поэтому: синхронный `run` завёл бы
     собственный цикл, и пул соединений оказался бы привязан к чужому.
     """
-    tenant_id = resolve_tenant(settings, arguments.tenant)
+    tenant_id = await resolve_tenant(settings)
 
     async with build_runtime(settings, tenant_id) as runtime:
         server = build_server(runtime)
@@ -113,7 +113,6 @@ def _parse_arguments() -> argparse.Namespace:
             "Без него настройки ищутся в каталоге, из которого запущен клиент"
         ),
     )
-    parser.add_argument("--tenant", help="Идентификатор тенанта, иначе MCP_TENANT_ID")
     parser.add_argument("--host", help="Адрес для http-транспорта")
     parser.add_argument("--port", type=int, help="Порт для http-транспорта")
     return parser.parse_args()

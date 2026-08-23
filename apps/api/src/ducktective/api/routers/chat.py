@@ -11,12 +11,15 @@ from fastapi import (
 
 from ducktective.api.dependencies import (
     EventPublisherDependency,
-    UnitOfWorkDependency,
 )
 from ducktective.api.schemas.chat import (
     AttachDocumentRequest,
     ConversationResponse,
     StartConversationRequest,
+)
+from ducktective.api.security import (
+    MemberDependency,
+    TenantUnitOfWorkDependency,
 )
 from ducktective.application.chat.manage import (
     AttachDocument,
@@ -36,7 +39,6 @@ from ducktective.core.exceptions import (
 from ducktective.core.types import (
     ConversationId,
     RepositoryId,
-    TenantId,
 )
 
 
@@ -51,7 +53,8 @@ router = APIRouter(tags=["chat"])
 async def start_conversation(
     payload: StartConversationRequest,
     response: Response,
-    unit_of_work: UnitOfWorkDependency,
+    member: MemberDependency,
+    unit_of_work: TenantUnitOfWorkDependency,
     event_publisher: EventPublisherDependency,
 ) -> ConversationResponse:
     """Заводит разговор или возвращает уже начатый пустой.
@@ -64,8 +67,9 @@ async def start_conversation(
 
     try:
         started = await use_case.execute(
-            TenantId(payload.tenant_id),
+            member.tenant_id,
             RepositoryId(payload.repository_id),
+            preferred_model=payload.model,
         )
     except EntityNotFoundError as error:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
@@ -79,11 +83,11 @@ async def start_conversation(
 @router.get("/chat/conversations", response_model=list[ConversationResponse])
 async def list_conversations(
     repository_id: UUID,
-    tenant_id: UUID,
-    unit_of_work: UnitOfWorkDependency,
+    member: MemberDependency,
+    unit_of_work: TenantUnitOfWorkDependency,
 ) -> list[ConversationResponse]:
     views = await ListConversations(unit_of_work).execute(
-        TenantId(tenant_id),
+        member.tenant_id,
         RepositoryId(repository_id),
     )
     return [ConversationResponse.from_view(view) for view in views]
@@ -92,12 +96,12 @@ async def list_conversations(
 @router.get("/chat/conversations/{conversation_id}", response_model=ConversationResponse)
 async def read_conversation(
     conversation_id: UUID,
-    tenant_id: UUID,
-    unit_of_work: UnitOfWorkDependency,
+    member: MemberDependency,
+    unit_of_work: TenantUnitOfWorkDependency,
 ) -> ConversationResponse:
     try:
         view = await ReadConversation(unit_of_work).execute(
-            TenantId(tenant_id),
+            member.tenant_id,
             ConversationId(conversation_id),
         )
     except EntityNotFoundError as error:
@@ -114,9 +118,9 @@ async def read_conversation(
 )
 async def attach_document(
     conversation_id: UUID,
-    tenant_id: UUID,
+    member: MemberDependency,
     payload: AttachDocumentRequest,
-    unit_of_work: UnitOfWorkDependency,
+    unit_of_work: TenantUnitOfWorkDependency,
     event_publisher: EventPublisherDependency,
 ) -> ConversationResponse:
     """Прикладывает документ к разговору.
@@ -127,7 +131,7 @@ async def attach_document(
     """
     try:
         view = await AttachDocument(unit_of_work, event_publisher).execute(
-            TenantId(tenant_id),
+            member.tenant_id,
             ConversationId(conversation_id),
             payload.name,
             payload.text,
@@ -148,13 +152,13 @@ async def attach_document(
 )
 async def detach_document(
     conversation_id: UUID,
-    tenant_id: UUID,
-    unit_of_work: UnitOfWorkDependency,
+    member: MemberDependency,
+    unit_of_work: TenantUnitOfWorkDependency,
     event_publisher: EventPublisherDependency,
 ) -> ConversationResponse:
     try:
         view = await DetachDocument(unit_of_work, event_publisher).execute(
-            TenantId(tenant_id),
+            member.tenant_id,
             ConversationId(conversation_id),
         )
     except EntityNotFoundError as error:
@@ -168,13 +172,13 @@ async def detach_document(
 @router.delete("/chat/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_conversation(
     conversation_id: UUID,
-    tenant_id: UUID,
-    unit_of_work: UnitOfWorkDependency,
+    member: MemberDependency,
+    unit_of_work: TenantUnitOfWorkDependency,
     event_publisher: EventPublisherDependency,
 ) -> None:
     try:
         await DeleteConversation(unit_of_work, event_publisher).execute(
-            TenantId(tenant_id),
+            member.tenant_id,
             ConversationId(conversation_id),
         )
     except EntityNotFoundError as error:

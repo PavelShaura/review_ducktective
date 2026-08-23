@@ -9,6 +9,10 @@ from typing import (
     Any,
 )
 
+from ducktective.core.code_repository.value_objects import (
+    ModelTrust,
+)
+
 
 class LlmRole(StrEnum):
     SYSTEM = "system"
@@ -80,9 +84,30 @@ class ModelRequirements:
     серверами окно неизвестно, и выдумывать за них его нельзя.
     """
 
-    cloud_allowed: bool = False
+    allowed_trust: ModelTrust = ModelTrust.LOCAL
+    """Предельный уровень доверия, разрешённый политикой репозитория.
+
+    Пришёл на смену признаку «можно облако»: разница между провайдером,
+    обещавшим не хранить запросы, и бесплатным маршрутом, который на них
+    учится, — это в точности та разница, ради которой политика заведена
+    (D-028).
+    """
+
+    preferred_model: str | None = None
+    """Модель, выбранная человеком при запуске прогона или разговора.
+
+    Пожелание, а не приказ: названная модель используется, если проходит
+    и по политике репозитория, и по требованиям узла. Не прошедшая молча
+    уступает место подходящей — файл без ревью хуже файла, проверенного
+    не той моделью.
+    """
+
     max_output_tokens: int = 4096
     temperature: float = 0.0
+
+    @property
+    def cloud_allowed(self) -> bool:
+        return self.allowed_trust is not ModelTrust.LOCAL
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -124,6 +149,13 @@ class LlmStreamPiece:
 
     text: str = ""
     response: LlmResponse | None = None
+    notice: str = ""
+    """Событие, о котором надо сказать человеку до того, как пойдёт текст.
+
+    Пока такое одно: ответ отдан другой модели, потому что первая отказала.
+    Подменить исполнителя молча нельзя — человек выбирал модель сам и вправе
+    знать, чей ответ он читает.
+    """
 
     @property
     def is_final(self) -> bool:

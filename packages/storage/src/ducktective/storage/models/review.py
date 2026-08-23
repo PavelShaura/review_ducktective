@@ -92,6 +92,7 @@ class ReviewRunModel(Base):
         default=0,
         server_default=text("0"),
     )
+    preferred_model: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_by: Mapped[UUID | None] = mapped_column(
         ForeignKey("user_account.id", ondelete="SET NULL"),
         nullable=True,

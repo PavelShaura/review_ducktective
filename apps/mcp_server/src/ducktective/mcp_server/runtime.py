@@ -8,12 +8,24 @@ from contextlib import (
 from dataclasses import (
     dataclass,
 )
-from uuid import (
-    UUID,
-)
 
+import httpx
+
+from ducktective.application.tenancy.sign_in import (
+    ResolveSignedInUser,
+)
+from ducktective.auth.oidc import (
+    OidcIdentityVerifier,
+    OidcSettings,
+)
+from ducktective.auth.session import (
+    TerminalSession,
+)
 from ducktective.config.settings import (
     Settings,
+)
+from ducktective.core.exceptions import (
+    NotAuthenticatedError,
 )
 from ducktective.core.ports import (
     UnitOfWork,
@@ -38,6 +50,9 @@ from ducktective.storage.database import (
     build_engine,
     build_session_factory,
 )
+from ducktective.storage.events.null_publisher import (
+    NullEventPublisher,
+)
 from ducktective.storage.unit_of_work import (
     SqlAlchemyUnitOfWork,
 )
@@ -49,8 +64,9 @@ class McpRuntime:
 
     Тенант фиксируется на запуске, а не приходит с вызовом: у stdio-транспорта
     нет ни сессии, ни идентичности вызывающего — сервер работает от того, кто
-    его запустил. Когда тенантов станет больше одного, идентичность придётся
-    брать из транспорта, и это отдельное решение (D-012).
+    его запустил. Организация при этом берётся из его входа (`ducktective
+    login`), а не из настройки: идентификатор в конфигурации открывал бы
+    чужую кодовую базу тому, кто его подставит.
 
     Unit of Work отдаётся фабрикой, а не готовым экземпляром: он держит одну
     сессию, а инструменты вызываются одновременно.
@@ -79,22 +95,49 @@ async def build_runtime(settings: Settings, tenant_id: TenantId) -> AsyncIterato
     try:
         yield McpRuntime(
             tenant_id=tenant_id,
-            unit_of_work=lambda: SqlAlchemyUnitOfWork(session_factory),
+            unit_of_work=lambda: SqlAlchemyUnitOfWork(session_factory, tenant_id=tenant_id),
             navigators=IndexedNavigators(
-                symbols=SessionScopedSymbolReader(session_factory),
-                search=SessionScopedHybridSearch(session_factory, embedder),
+                symbols=SessionScopedSymbolReader(session_factory, tenant_id=tenant_id),
+                search=SessionScopedHybridSearch(session_factory, embedder, tenant_id=tenant_id),
             ),
         )
     finally:
         await engine.dispose()
 
 
-def resolve_tenant(settings: Settings, override: str | None) -> TenantId:
-    reference = override or settings.mcp_tenant_id
-    if not reference:
-        raise SystemExit("Укажите --tenant или задайте MCP_TENANT_ID")
+async def resolve_tenant(settings: Settings) -> TenantId:
+    """Организация запустившего сервер, по его сохранённому входу.
 
+    Сервер живёт рядом с терминалом и пользуется его входом: отдельного
+    способа представиться у stdio нет, а второй набор учётных данных
+    развалился бы с первым же обновлением токена.
+    """
+    if not settings.authentication_required:
+        raise SystemExit("Не задан OIDC_ISSUER: сервер не может выяснить, от чьего имени работает")
+
+    session = TerminalSession(
+        issuer=settings.oidc_issuer,
+        client_id=settings.oidc_device_client_id,
+    )
+    engine = build_engine(settings.require_database_url())
     try:
-        return TenantId(UUID(reference))
-    except ValueError as error:
-        raise SystemExit(f"Тенант должен быть UUID, получено: {reference}") from error
+        token = await session.access_token()
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            verifier = OidcIdentityVerifier(
+                OidcSettings(issuer=settings.oidc_issuer, audience=settings.oidc_audience),
+                client,
+            )
+            identity = await verifier.verify(token)
+
+        resolved = await ResolveSignedInUser(
+            SqlAlchemyUnitOfWork(build_session_factory(engine)),
+            NullEventPublisher(),
+        ).execute(identity)
+    except NotAuthenticatedError as error:
+        raise SystemExit(f"{error}. Выполните `ducktective login`") from error
+    finally:
+        await engine.dispose()
+
+    if resolved.account is None:
+        raise SystemExit("Учётная запись не состоит в организации: принять приглашение или создать")
+    return resolved.account.tenant_id

@@ -144,7 +144,8 @@ class RunReview(TransactionalUseCase):
                 files=tuple(run.reviewable_files()),
                 requirements=ModelRequirements(
                     needs_deep_reasoning=True,
-                    cloud_allowed=repository.cloud_processing_allowed,
+                    allowed_trust=repository.egress_policy.max_trust,
+                    preferred_model=run.preferred_model,
                     max_output_tokens=self._max_output_tokens,
                 ),
                 head_sha=run.head_sha,

@@ -21,12 +21,12 @@ from ducktective.core.code_repository.entities import (
 )
 from ducktective.core.code_repository.value_objects import (
     EgressPolicy,
+    ModelTrust,
     VcsProvider,
 )
 
 
 class RegisterRepositoryRequest(BaseModel):
-    tenant_id: UUID
     name: str = Field(min_length=1, max_length=255)
     vcs_provider: VcsProvider = VcsProvider.LOCAL
     local_path: Path
@@ -75,3 +75,18 @@ class ResolvedRevisionResponse(BaseModel):
             commit_sha=str(view.commit_sha),
             subject=view.subject,
         )
+
+
+class AvailableModelResponse(BaseModel):
+    """Модель, которую можно предложить для прогона или разговора.
+
+    Уровень доверия приходит вместе с именем: выбирая бесплатный маршрут,
+    человек должен видеть, что запрос уедет к тому, кто на нём учится.
+    """
+
+    name: str
+    model: str
+    trust: ModelTrust
+    supports_tools: bool
+    context_window: int
+    note: str = ""

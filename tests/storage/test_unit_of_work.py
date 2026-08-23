@@ -1,11 +1,17 @@
 from dataclasses import (
     dataclass,
 )
+from uuid import (
+    uuid4,
+)
 
 import pytest
 
 from ducktective.core.events import (
     DomainEvent,
+)
+from ducktective.core.types import (
+    TenantId,
 )
 from ducktective.storage.unit_of_work import (
     SqlAlchemyUnitOfWork,
@@ -22,6 +28,11 @@ class FakeSession:
         self.commit_calls = 0
         self.rollback_calls = 0
         self.is_closed = False
+        self.bound_tenants: list[str] = []
+
+    async def execute(self, statement: object, parameters: dict[str, str]) -> None:
+        """Единственный запрос, который единица работы шлёт сама, — имя тенанта."""
+        self.bound_tenants.append(parameters["value"])
 
     async def commit(self) -> None:
         self.commit_calls += 1
@@ -91,3 +102,30 @@ async def test_events_are_collected_once() -> None:
 
         assert len(unit_of_work.collect_events()) == 1
         assert unit_of_work.collect_events() == []
+
+
+async def test_tenant_is_named_to_every_transaction() -> None:
+    factory = FakeSessionFactory()
+    tenant_id = TenantId(uuid4())
+    unit_of_work = SqlAlchemyUnitOfWork(factory, tenant_id=tenant_id)  # type: ignore[arg-type]
+
+    async with unit_of_work:
+        await unit_of_work.commit()
+
+    session = factory.created_sessions[0]
+    assert session.bound_tenants == [str(tenant_id), str(tenant_id)]
+
+
+async def test_transaction_without_tenant_names_nothing() -> None:
+    """Контур входа открывает единицу работы без тенанта.
+
+    Пустое значение — не «полный доступ», а «ни одной строки»: политики базы
+    сравнивают с ним каждую строку с кодом.
+    """
+    factory = FakeSessionFactory()
+    unit_of_work = SqlAlchemyUnitOfWork(factory)  # type: ignore[arg-type]
+
+    async with unit_of_work:
+        pass
+
+    assert factory.created_sessions[0].bound_tenants == [""]

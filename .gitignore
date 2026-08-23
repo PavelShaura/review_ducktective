@@ -9,6 +9,7 @@ dist/
 uv.lock.bak
 
 .env
+remote_models.json
 .env.local
 *.pem
 *.key

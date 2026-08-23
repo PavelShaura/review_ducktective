@@ -65,11 +65,11 @@ async def store_run(
     tenant_id, repository_id = await prepare_repository(session_factory)
     run = build_run(tenant_id, repository_id)
 
-    async with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:
+    async with SqlAlchemyUnitOfWork(session_factory, tenant_id=tenant_id) as unit_of_work:
         unit_of_work.review_runs.add(run)
         await unit_of_work.commit()
 
-    async with SqlAlchemyUnitOfWork(session_factory) as unit_of_work:
+    async with SqlAlchemyUnitOfWork(session_factory, tenant_id=tenant_id) as unit_of_work:
         stored = await unit_of_work.review_runs.get(run.id)
 
     return tenant_id, PipelineRequest(

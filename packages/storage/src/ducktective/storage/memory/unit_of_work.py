@@ -14,9 +14,13 @@ from ducktective.storage.memory.repositories import (
     InMemoryConversationRepository,
     InMemoryEmbeddingStore,
     InMemoryIndexSnapshotRepository,
+    InMemoryInvitationRepository,
+    InMemoryModelProfileRepository,
     InMemoryReviewRunRepository,
     InMemorySourceFileRepository,
     InMemorySymbolEdgeRepository,
+    InMemoryTenantRepository,
+    InMemoryUserAccountRepository,
 )
 
 
@@ -50,6 +54,10 @@ class InMemoryUnitOfWork:
         self.symbol_edges = InMemorySymbolEdgeRepository(self.source_files)
         self.embeddings = InMemoryEmbeddingStore(self.source_files)
         self.conversations = InMemoryConversationRepository()
+        self.tenants = InMemoryTenantRepository()
+        self.user_accounts = InMemoryUserAccountRepository()
+        self.invitations = InMemoryInvitationRepository()
+        self.model_profiles = InMemoryModelProfileRepository()
         self._collected_events: list[DomainEvent] = []
         self._is_active = False
 
@@ -99,4 +107,8 @@ class InMemoryUnitOfWork:
             self.symbol_edges,
             self.embeddings,
             self.conversations,
+            self.tenants,
+            self.user_accounts,
+            self.invitations,
+            self.model_profiles,
         ]
