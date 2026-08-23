@@ -42,6 +42,10 @@ from ducktective.core.review.pipeline import (
 )
 from ducktective.core.review.ports import (
     CancellationCheck,
+    FindingHistory,
+)
+from ducktective.core.types import (
+    RepositoryId,
 )
 
 
@@ -59,6 +63,8 @@ class ReviewRuntimeContext:
     navigator: CodeNavigator | None = None
     sink: InvestigationSink | None = None
     diff: RunDiff = field(default_factory=RunDiff)
+    history: FindingHistory | None = None
+    repository_id: RepositoryId | None = None
 
 
 class FileReviewTask(BaseModel):

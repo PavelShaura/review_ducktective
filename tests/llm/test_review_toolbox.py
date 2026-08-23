@@ -13,7 +13,15 @@ from ducktective.core.review.entities import (
     ReviewHunk,
     RunDiff,
 )
+from ducktective.core.review.ports import (
+    PastFinding,
+)
+from ducktective.core.review.value_objects import (
+    FeedbackVerdict,
+    Severity,
+)
 from ducktective.core.types import (
+    RepositoryId,
     ReviewFileId,
     ReviewHunkId,
 )
@@ -26,6 +34,9 @@ from ducktective.llm.tools import (
 from tests.fakes import (
     StubNavigator,
 )
+
+
+REPOSITORY_ID = RepositoryId(uuid4())
 
 
 def review_file(
@@ -128,7 +139,90 @@ async def test_single_file_run_does_not_offer_them() -> None:
 async def test_navigation_calls_still_reach_the_navigator() -> None:
     box = toolbox("manifest.txt", "images/build.conf", current="manifest.txt")
 
-    result = await box.execute(call("search_code", '{"query": "weasyprint"}'))
+    result = await box.execute(call("search_code", '{"query": "tablib"}'))
 
     assert not result.is_error
     assert "Ничего не нашлось" in result.text
+
+
+class RecordingHistory:
+    """История, отвечающая заранее заданными отметками."""
+
+    def __init__(self, findings: list[PastFinding] | None = None) -> None:
+        self.findings = findings or []
+        self.asked: list[str] = []
+
+    async def for_file(
+        self,
+        repository_id: RepositoryId,
+        path: str,
+        *,
+        limit: int = 5,
+    ) -> list[PastFinding]:
+        self.asked.append(path)
+        return self.findings[:limit]
+
+
+def past(title: str, verdict: FeedbackVerdict) -> PastFinding:
+    return PastFinding(
+        title=title,
+        severity=Severity.MAJOR,
+        verdict=verdict,
+        line_start=42,
+        comment=None,
+    )
+
+
+def with_history(history: RecordingHistory) -> ReviewToolbox:
+    return ReviewToolbox(
+        NavigationToolbox(StubNavigator()),
+        RunDiff((review_file("manifest.txt"),)),
+        path="manifest.txt",
+        history=history,
+        repository_id=REPOSITORY_ID,
+    )
+
+
+async def test_past_verdicts_are_shown_for_the_file_being_read() -> None:
+    history = RecordingHistory([past("Проверка дублей убрана", FeedbackVerdict.FALSE_POSITIVE)])
+
+    result = await with_history(history).execute(call("past_findings"))
+
+    assert history.asked == ["manifest.txt"]
+    assert "Проверка дублей убрана" in result.text
+    assert "ложным срабатыванием" in result.text
+
+
+async def test_history_is_offered_as_evidence_not_as_a_ban() -> None:
+    """Иначе прошлый вердикт задавит находку, верную сейчас."""
+    history = RecordingHistory([past("Мутабельное значение по умолчанию", FeedbackVerdict.WONTFIX)])
+
+    result = await with_history(history).execute(call("past_findings"))
+
+    assert "не запрет" in result.text
+
+
+async def test_an_unmarked_file_says_so_plainly() -> None:
+    result = await with_history(RecordingHistory()).execute(call("past_findings"))
+
+    assert not result.is_error
+    assert "размеченных находок ещё нет" in result.text
+
+
+async def test_history_is_not_offered_without_a_database() -> None:
+    box = ReviewToolbox(
+        NavigationToolbox(StubNavigator()),
+        RunDiff((review_file("manifest.txt"),)),
+        path="manifest.txt",
+    )
+
+    assert "past_findings" not in [spec.name for spec in box.specs]
+
+
+async def test_verdicts_carry_no_code_into_evidence() -> None:
+    """Отметка — мнение о коде, а не код: доказательством ей быть нечем."""
+    history = RecordingHistory([past("Что-то было", FeedbackVerdict.USEFUL)])
+
+    result = await with_history(history).execute(call("past_findings"))
+
+    assert result.fragments == ()

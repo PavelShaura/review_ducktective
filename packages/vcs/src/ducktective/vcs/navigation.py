@@ -1,9 +1,13 @@
 import re
+from collections import (
+    Counter,
+)
 from fnmatch import (
     fnmatch,
 )
 from pathlib import (
     Path,
+    PurePosixPath,
 )
 
 from ducktective.core.exceptions import (
@@ -44,6 +48,17 @@ REFERENCES_NOTE = (
 )
 
 NAMES_NOTE = "имена найдены по строкам определений, тела не читались"
+
+DOCUMENTATION_SUFFIXES = (".md", ".rst", ".txt", ".adoc")
+DOC_SEARCH_WIDENING = 4
+"""Во сколько раз шире искать, чтобы после отбора осталось нужное число.
+
+Греп не умеет спрашивать «только по документации», поэтому отбор идёт
+после него, и без запаса выдача схлопывается в ноль на первом же файле
+кода, попавшем в совпадения.
+"""
+
+DIRECTORY_LIMIT = 12
 
 REFERENCE_PATTERNS = {
     ReferenceRelation.SUBCLASSES: "(class|extends|implements).*\\b{name}\\b",
@@ -302,6 +317,60 @@ class GitCodeNavigator:
             ),
         )
 
+    async def project_docs(self, query: str, *, limit: int = 5) -> NavigationAnswer:
+        """Поиск по документации грепом, с отбором по расширению файла."""
+        hits = await self._grep(query, limit=limit * DOC_SEARCH_WIDENING)
+        found = [hit for hit in hits if _is_documentation(hit.path)][:limit]
+        if not found:
+            return NavigationAnswer(
+                source=self.source,
+                note=self._note(f"в документации про «{query}» ничего не нашлось"),
+            )
+
+        return NavigationAnswer(
+            source=self.source,
+            fragments=await self._windows(
+                found,
+                before=SEARCH_CONTEXT_LINES,
+                after=SEARCH_CONTEXT_LINES,
+                role=FragmentRole.MATCH,
+            ),
+            note=self._note(SEARCH_NOTE),
+        )
+
+    async def describe_repository(self) -> NavigationAnswer:
+        """Сводка по ревизии: сколько файлов и каких, где они лежат."""
+        try:
+            tree = await self._git.list_tree(self._repository_path, self._revision)
+        except Exception as error:
+            return NavigationAnswer(
+                source=self.source, note=f"Не удалось прочитать ревизию: {error}"
+            )
+
+        if not tree:
+            return NavigationAnswer(
+                source=self.source, note=f"В ревизии {self._revision[:8]} файлов нет"
+            )
+
+        extensions = Counter(PurePosixPath(path).suffix or "без расширения" for path in tree)
+        directories = Counter(
+            path.split("/", maxsplit=1)[0] if "/" in path else "/" for path in tree
+        )
+
+        listed_kinds = ", ".join(
+            f"{name} — {total}" for name, total in extensions.most_common(DIRECTORY_LIMIT)
+        )
+        listed_directories = "\n".join(
+            f"  {name} — {total}" for name, total in directories.most_common(DIRECTORY_LIMIT)
+        )
+        return NavigationAnswer(
+            source=self.source,
+            note=self._note(
+                f"файлов {len(tree)}.\nПо виду: {listed_kinds}\n"
+                f"Каталоги верхнего уровня:\n{listed_directories}"
+            ),
+        )
+
     async def list_files(self, pattern: str, *, limit: int = 40) -> NavigationAnswer:
         """Файлы ревизии, подходящие под образец.
 
@@ -470,3 +539,7 @@ def _starts_definition(line: str) -> bool:
     """Похожа ли строка на начало определения."""
     stripped = line.strip().removeprefix("async ")
     return any(stripped.startswith(f"{keyword} ") for keyword in DEFINITION_KEYWORDS)
+
+
+def _is_documentation(path: str) -> bool:
+    return PurePosixPath(path).suffix.lower() in DOCUMENTATION_SUFFIXES

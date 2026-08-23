@@ -26,6 +26,7 @@ from ducktective.core.indexing.value_objects import (
 from ducktective.core.retrieval.ports import (
     CALL_EDGES,
     RelatedSymbol,
+    RepositoryDigest,
     SymbolContext,
     SymbolHit,
 )
@@ -43,6 +44,15 @@ from ducktective.storage.models.indexing import (
     SourceFileModel,
     SymbolEdgeModel,
 )
+
+
+DIRECTORY_LIMIT = 12
+"""Сколько каталогов верхнего уровня показывает сводка.
+
+Карта, а не перечень: двенадцати хватает, чтобы увидеть, где лежит код,
+где шаблоны и где вендорные библиотеки, — и не хватает, чтобы вытеснить
+из окна сам вопрос.
+"""
 
 
 def _ordering(pattern: str) -> list[Any]:
@@ -171,6 +181,41 @@ class PostgresSymbolReader:
             .limit(limit)
         )
         return await self._read(statement)
+
+    async def describe(self, repository_id: RepositoryId) -> RepositoryDigest:
+        """Сводка по индексу: файлы, символы, языки и крупные каталоги."""
+        by_language = (
+            select(SourceFileModel.language, func.count().label("total"))
+            .where(
+                SourceFileModel.repository_id == repository_id,
+                SourceFileModel.is_deleted.is_(False),
+            )
+            .group_by(SourceFileModel.language)
+            .order_by(func.count().desc())
+        )
+        top_directory = func.split_part(SourceFileModel.path, "/", 1)
+        by_directory = (
+            select(top_directory.label("directory"), func.count().label("total"))
+            .where(
+                SourceFileModel.repository_id == repository_id,
+                SourceFileModel.is_deleted.is_(False),
+            )
+            .group_by(top_directory)
+            .order_by(func.count().desc())
+            .limit(DIRECTORY_LIMIT)
+        )
+        symbols = select(func.count()).where(CodeSymbolModel.repository_id == repository_id)
+
+        languages = (await self._session.execute(by_language)).all()
+        directories = (await self._session.execute(by_directory)).all()
+        symbol_count = (await self._session.execute(symbols)).scalar_one()
+
+        return RepositoryDigest(
+            files=sum(row.total for row in languages),
+            symbols=symbol_count,
+            languages=tuple((row.language or "прочее", row.total) for row in languages),
+            directories=tuple((row.directory, row.total) for row in directories),
+        )
 
     async def symbols_in_file(
         self,

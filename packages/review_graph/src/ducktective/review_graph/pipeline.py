@@ -41,6 +41,7 @@ from ducktective.core.review.pipeline import (
 from ducktective.core.review.ports import (
     CancellationCheck,
     CodeReviewer,
+    FindingHistory,
     ReviewNavigators,
 )
 from ducktective.core.types import (
@@ -73,12 +74,14 @@ class LangGraphReviewPipeline:
         context_builder: ContextBuilder | None = None,
         navigators: ReviewNavigators | None = None,
         sinks: InvestigationSinks | None = None,
+        history: FindingHistory | None = None,
         checkpointer: BaseCheckpointSaver[Any] | None = None,
         max_concurrent_reviews: int = DEFAULT_MAX_CONCURRENT_REVIEWS,
     ) -> None:
         self._reviewers = {reviewer.name: reviewer for reviewer in reviewers}
         self._navigators = navigators
         self._sinks = sinks
+        self._history = history
         self._max_concurrent_reviews = max_concurrent_reviews
         self._checkpointer = checkpointer
         self._graph = build_review_graph(
@@ -116,6 +119,8 @@ class LangGraphReviewPipeline:
                     navigator=self._navigator_for(request),
                     sink=self._sink_for(request),
                     diff=RunDiff(request.files),
+                    history=self._history,
+                    repository_id=request.repository_id,
                 ),
                 config=self._config(request),
             )

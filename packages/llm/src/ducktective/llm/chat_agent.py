@@ -37,6 +37,9 @@ from ducktective.core.llm.value_objects import (
     ModelRequirements,
     ToolCall,
 )
+from ducktective.llm.query_expansion import (
+    QueryExpander,
+)
 from ducktective.llm.tools import (
     NavigationToolbox,
     render_for_model,
@@ -242,6 +245,10 @@ class AgenticChatAgent:
             request.navigator,
             result_chars=TOOL_RESULT_CHARS,
             document=request.document,
+            expander=QueryExpander(
+                self._llm_client,
+                requirements=request.requirements,
+            ),
         )
         messages = self._opening(request)
         requirements = _with_tool_calling(request.requirements)

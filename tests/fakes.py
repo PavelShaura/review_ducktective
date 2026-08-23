@@ -47,6 +47,7 @@ from ducktective.core.retrieval.ports import (
     CALL_EDGES,
     ChunkHit,
     RelatedSymbol,
+    RepositoryDigest,
     SymbolContext,
     SymbolHit,
 )
@@ -389,6 +390,12 @@ class StubNavigator:
     async def list_files(self, pattern: str, *, limit: int = 40) -> NavigationAnswer:
         return NavigationAnswer(source=self.source)
 
+    async def project_docs(self, query: str, *, limit: int = 5) -> NavigationAnswer:
+        return NavigationAnswer(source=self.source)
+
+    async def describe_repository(self) -> NavigationAnswer:
+        return NavigationAnswer(source=self.source)
+
 
 class FakeSymbolReader:
     """Читатель символов на заранее заданных ответах."""
@@ -406,6 +413,7 @@ class FakeSymbolReader:
         in_file: list[SymbolContext] | None = None,
         lines: dict[str, str] | None = None,
         by_query: list[SymbolHit] | None = None,
+        digest: RepositoryDigest | None = None,
     ) -> None:
         self._covering = covering or []
         self._callees = callees or []
@@ -417,6 +425,7 @@ class FakeSymbolReader:
         self._in_file = in_file or []
         self._lines = lines or {}
         self._by_query = by_query or []
+        self._digest = digest or RepositoryDigest(files=0, symbols=0)
         self.asked_lines: list[tuple[int, int]] = []
         self.asked_names: list[str] = []
         self.asked_paths: list[str] = []
@@ -457,6 +466,9 @@ class FakeSymbolReader:
         return [path for path in self._paths if path == pattern or path.endswith(f"/{pattern}")][
             :limit
         ]
+
+    async def describe(self, repository_id: RepositoryId) -> RepositoryDigest:
+        return self._digest
 
     async def symbols_in_file(
         self,
@@ -530,15 +542,18 @@ class FakeChunkSearch:
     def __init__(self, hits: list[ChunkHit] | None = None) -> None:
         self.hits = hits or []
         self.queries: list[str] = []
+        self.languages: list[tuple[str, ...]] = []
 
     async def search_chunks(
         self,
         repository_id: RepositoryId,
         query: str,
         *,
+        languages: tuple[str, ...] = (),
         limit: int = 20,
     ) -> list[ChunkHit]:
         self.queries.append(query)
+        self.languages.append(languages)
         return self.hits[:limit]
 
 

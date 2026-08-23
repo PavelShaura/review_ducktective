@@ -32,6 +32,10 @@ from ducktective.core.review.pipeline import (
     PipelineOutcome,
     PipelineRequest,
 )
+from ducktective.core.review.value_objects import (
+    FeedbackVerdict,
+    Severity,
+)
 from ducktective.core.types import (
     RepositoryId,
     ReviewRunId,
@@ -71,6 +75,41 @@ class FileReviewResult:
     """
 
 
+@dataclass(frozen=True, kw_only=True)
+class PastFinding:
+    """Находка прошлого прогона вместе с вердиктом, который поставил человек.
+
+    Вердикт едет обязательно: неразмеченная находка прошлого прогона —
+    это мнение той же модели, и повторять его себе же незачем.
+    """
+
+    title: str
+    severity: Severity
+    verdict: FeedbackVerdict
+    line_start: int
+    comment: str | None = None
+
+
+class FindingHistory(Protocol):
+    """Что уже находили в этом месте и что человек об этом сказал.
+
+    Отметки копятся с фазы 2 и читаются одним экраном. Ревьюер, знающий,
+    что находку такого вида здесь трижды отклонили, её не повторяет —
+    это обратная связь без дообучения, то есть то, чем можно пользоваться
+    вместо запрещённого D-014 fine-tuning.
+    """
+
+    async def for_file(
+        self,
+        repository_id: RepositoryId,
+        path: str,
+        *,
+        limit: int = 5,
+    ) -> list[PastFinding]:
+        """Размеченные находки этого файла, свежие сначала."""
+        ...
+
+
 class CancellationCheck(Protocol):
     """Спрашивает, не попросили ли прекратить расследование.
 
@@ -97,6 +136,11 @@ class ReviewSupport:
     sink: InvestigationSink | None = None
     cancellation: CancellationCheck | None = None
     diff: RunDiff = field(default_factory=RunDiff)
+    history: FindingHistory | None = None
+    """Чем прогон помнит прошлые вердикты. Без базы истории нет."""
+
+    repository_id: RepositoryId | None = None
+    """Чей это код. Нужен истории: отметки принадлежат репозиторию, не прогону."""
     """Остальные файлы прогона.
 
     Приходит сюда, а не в состояние графа: дифф один на прогон, а задач

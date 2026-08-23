@@ -29,7 +29,7 @@ STYLES = """.report-card {
 
 REQUIREMENTS = """django==4.2.11
 celery==5.3.6
-weasyprint==69.0
+tablib==3.9.0
 """
 
 
@@ -60,7 +60,7 @@ def test_dependencies_become_searchable() -> None:
     """Вопрос «какая версия библиотеки» иначе решается окольным путём."""
     parsed = parse("requirements/base.txt", REQUIREMENTS)
 
-    assert "weasyprint==69.0" in parsed.chunks[0].content
+    assert "tablib==3.9.0" in parsed.chunks[0].content
 
 
 def test_graph_is_not_invented_for_markup() -> None:

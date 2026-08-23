@@ -53,11 +53,22 @@ class HybridSearch:
         repository_id: RepositoryId,
         query: str,
         *,
+        languages: tuple[str, ...] = (),
         limit: int = 10,
         candidates: int = 50,
     ) -> list[ChunkHit]:
-        lexical_hits = await self._lexical.search_chunks(repository_id, query, limit=candidates)
-        vector_hits = await self._vector.search_chunks(repository_id, query, limit=candidates)
+        lexical_hits = await self._lexical.search_chunks(
+            repository_id,
+            query,
+            languages=languages,
+            limit=candidates,
+        )
+        vector_hits = await self._vector.search_chunks(
+            repository_id,
+            query,
+            languages=languages,
+            limit=candidates,
+        )
 
         lexical_weight, vector_weight = LITERAL_WEIGHTS if looks_literal(query) else PROSE_WEIGHTS
 

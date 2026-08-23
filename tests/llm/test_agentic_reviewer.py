@@ -308,6 +308,7 @@ async def test_tools_are_offered_while_investigating_and_dropped_at_the_end() ->
     await review(build_reviewer(client, max_steps=2), FakeNavigator())
 
     assert client.offered_tools[0] == (
+        "describe_repository",
         "search_code",
         "find_symbol",
         "get_definition",
@@ -317,6 +318,7 @@ async def test_tools_are_offered_while_investigating_and_dropped_at_the_end() ->
         "get_file_outline",
         "read_file",
         "list_files",
+        "project_docs",
     )
     assert client.offered_tools[-1] == ()
     assert client.schemas[-1] is not None

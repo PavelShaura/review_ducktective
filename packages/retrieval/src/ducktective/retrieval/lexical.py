@@ -100,6 +100,7 @@ class PostgresLexicalSearch:
         repository_id: RepositoryId,
         query: str,
         *,
+        languages: tuple[str, ...] = (),
         limit: int = 20,
     ) -> list[ChunkHit]:
         """Ищет фрагменты, начиная с самой точной формулировки запроса.
@@ -113,16 +114,16 @@ class PostgresLexicalSearch:
         exact, split = _query_stages(query)
 
         for terms in exact:
-            hits = await self._chunks_matching(repository_id, terms, limit)
+            hits = await self._chunks_matching(repository_id, terms, limit, languages)
             if hits:
                 return hits
 
-        contained = await self._chunks_containing(repository_id, query, limit)
+        contained = await self._chunks_containing(repository_id, query, limit, languages)
         if contained:
             return contained
 
         for terms in split:
-            hits = await self._chunks_matching(repository_id, terms, limit)
+            hits = await self._chunks_matching(repository_id, terms, limit, languages)
             if hits:
                 return hits
 
@@ -133,6 +134,7 @@ class PostgresLexicalSearch:
         repository_id: RepositoryId,
         query: str,
         limit: int,
+        languages: tuple[str, ...] = (),
     ) -> list[ChunkHit]:
         """Последняя попытка: подстрока внутри слова.
 
@@ -170,6 +172,7 @@ class PostgresLexicalSearch:
                 CodeChunkModel.repository_id == repository_id,
                 SourceFileModel.is_deleted.is_(False),
                 CodeChunkModel.content.icontains(needle, autoescape=True),
+                *language_filter(languages),
             )
             .order_by(func.length(CodeChunkModel.content))
             .limit(limit)
@@ -199,6 +202,7 @@ class PostgresLexicalSearch:
         repository_id: RepositoryId,
         terms: ColumnElement[Any],
         limit: int,
+        languages: tuple[str, ...] = (),
     ) -> list[ChunkHit]:
         rank = func.ts_rank_cd(CodeChunkModel.search_vector, terms)
         statement = (
@@ -217,6 +221,7 @@ class PostgresLexicalSearch:
                 CodeChunkModel.repository_id == repository_id,
                 SourceFileModel.is_deleted.is_(False),
                 CodeChunkModel.search_vector.op("@@")(terms),
+                *language_filter(languages),
             )
             .order_by(rank.desc())
             .limit(limit)
@@ -411,3 +416,10 @@ def _clean_term(word: str) -> str:
     """
     stripped = word.translate(_UNSAFE).strip(_EDGE_PUNCTUATION)
     return stripped if any(character.isalnum() for character in stripped) else ""
+
+
+def language_filter(languages: tuple[str, ...]) -> list[ColumnElement[bool]]:
+    """Условие на язык файла. Пустой перечень означает «любой»."""
+    if not languages:
+        return []
+    return [SourceFileModel.language.in_(languages)]

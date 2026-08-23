@@ -2,6 +2,7 @@ from ducktective.core.indexing.value_objects import (
     EdgeKind,
 )
 from ducktective.core.retrieval.navigation import (
+    DOC_LANGUAGES,
     EDGE_NAMES,
     EDGE_ROLES,
     RELATION_EDGES,
@@ -34,6 +35,16 @@ LISTING_SCAN = 300
 Считать их все ради ответа незачем: после трёхсот вывод один и тот же.
 """
 
+
+DOCS_HINT = (
+    "Это документация, а не код: она говорит, как задумано, и может отставать "
+    "от того, как сделано. Реализацию покажет search_code."
+)
+
+DESCRIBE_HINT = (
+    "Сводка говорит, из чего проект состоит, но не что в нём написано: "
+    "загляните в файл через get_file_outline или read_file."
+)
 
 OUTLINE_HINT = (
     "Оглавление говорит, что в файле есть, но не что там написано: тело нужного "
@@ -298,6 +309,47 @@ class IndexedCodeNavigator:
                     title=f"{hit.qualified_name} · {hit.kind.value}",
                 )
                 for hit in hits
+            ),
+        )
+
+    async def project_docs(self, query: str, *, limit: int = 5) -> NavigationAnswer:
+        """Поиск по документации проекта, а не по его коду."""
+        hits = await self._search.search_chunks(
+            self._repository_id,
+            query,
+            languages=DOC_LANGUAGES,
+            limit=limit,
+        )
+        if not hits:
+            return NavigationAnswer(
+                source=self.source,
+                note=f"В документации проекта про «{query}» ничего не нашлось",
+            )
+
+        return NavigationAnswer(
+            source=self.source,
+            note=DOCS_HINT,
+            fragments=tuple(_from_chunk(hit) for hit in hits),
+        )
+
+    async def describe_repository(self) -> NavigationAnswer:
+        """Сводка: сколько файлов, на каких языках, где что лежит."""
+        digest = await self._symbols.describe(self._repository_id)
+        if not digest.files:
+            return NavigationAnswer(
+                source=self.source,
+                note="Индекс этого репозитория пуст: файлов в нём нет",
+            )
+
+        languages = ", ".join(f"{name} — {total}" for name, total in digest.languages)
+        directories = "\n".join(f"  {name or '/'} — {total}" for name, total in digest.directories)
+        return NavigationAnswer(
+            source=self.source,
+            note=(
+                f"Файлов {digest.files}, символов {digest.symbols}.\n"
+                f"Языки: {languages}\n"
+                f"Каталоги верхнего уровня:\n{directories}\n"
+                f"{DESCRIBE_HINT}"
             ),
         )
 

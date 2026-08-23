@@ -21,6 +21,16 @@ from ducktective.core.review.entities import (
     ReviewFile,
     RunDiff,
 )
+from ducktective.core.review.ports import (
+    FindingHistory,
+    PastFinding,
+)
+from ducktective.core.review.value_objects import (
+    FeedbackVerdict,
+)
+from ducktective.core.types import (
+    RepositoryId,
+)
 from ducktective.llm.tools import (
     MAX_TOOL_RESULT_CHARS,
     NavigationToolbox,
@@ -67,6 +77,33 @@ GET_FILE_DIFF = ToolSpec(
     },
 )
 
+PAST_FINDINGS = ToolSpec(
+    name="past_findings",
+    description=(
+        "Show what was reported about this file in earlier reviews and what the human "
+        "said about it: confirmed, false positive, or won't fix. These are verdicts from "
+        "the people who own this code."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "File path, defaults to the one you read"},
+        },
+    },
+)
+
+VERDICT_NAMES = {
+    FeedbackVerdict.USEFUL: "подтверждено человеком",
+    FeedbackVerdict.FALSE_POSITIVE: "человек назвал ложным срабатыванием",
+    FeedbackVerdict.WONTFIX: "человек решил не чинить",
+}
+
+HISTORY_HINT = (
+    "Это отметки человека на прошлых прогонах, а не запрет. Находка, отклонённая "
+    "здесь однажды, скорее всего будет отклонена снова; если ваша про другое или "
+    "код с тех пор изменился — сообщите о ней."
+)
+
 DIFF_TOOLS = (GET_DIFF_SUMMARY, GET_FILE_DIFF)
 
 
@@ -85,20 +122,31 @@ class ReviewToolbox:
         diff: RunDiff,
         *,
         path: str,
+        history: FindingHistory | None = None,
+        repository_id: RepositoryId | None = None,
         result_chars: int = MAX_TOOL_RESULT_CHARS,
     ) -> None:
         self._navigation = navigation
         self._others = diff.others(path)
         self._diff = diff
+        self._path = path
+        self._history = history
+        self._repository_id = repository_id
         self._result_chars = result_chars
 
     @property
     def specs(self) -> tuple[ToolSpec, ...]:
-        if not self._others:
-            return self._navigation.specs
-        return (*self._navigation.specs, *DIFF_TOOLS)
+        specs = self._navigation.specs
+        if self._others:
+            specs = (*specs, *DIFF_TOOLS)
+        if self._history is not None and self._repository_id is not None:
+            specs = (*specs, PAST_FINDINGS)
+        return specs
 
     async def execute(self, call: ToolCall) -> ToolExecutionResult:
+        if call.name == PAST_FINDINGS.name:
+            return await self._past_findings(call)
+
         if call.name not in {tool.name for tool in DIFF_TOOLS}:
             return await self._navigation.execute(call)
 
@@ -114,6 +162,27 @@ class ReviewToolbox:
             return ToolExecutionResult(str(error), is_error=True)
 
         return self._file_diff(str(arguments.get("path", "")))
+
+    async def _past_findings(self, call: ToolCall) -> ToolExecutionResult:
+        """Прошлые находки по файлу вместе с вердиктами человека.
+
+        Фрагментов здесь нет: отметка — это мнение о коде, а не код,
+        и в проверке доказательств ей делать нечего.
+        """
+        if self._history is None or self._repository_id is None:
+            return ToolExecutionResult("История отметок недоступна", is_error=True)
+
+        try:
+            arguments = parse_arguments(call.arguments)
+        except ValueError as error:
+            return ToolExecutionResult(str(error), is_error=True)
+
+        path = str(arguments.get("path") or self._path)
+        found = await self._history.for_file(self._repository_id, path)
+        if not found:
+            return ToolExecutionResult(f"По файлу {path} размеченных находок ещё нет")
+
+        return ToolExecutionResult(_clip(_history(path, found), self._result_chars))
 
     def _file_diff(self, path: str) -> ToolExecutionResult:
         """Патч соседнего файла вместе с фрагментом для проверки доказательств.
@@ -146,6 +215,16 @@ def _summary(files: tuple[ReviewFile, ...]) -> str:
     ]
     listed = "\n".join(lines)
     return f"Ещё файлы этого прогона: {len(files)}\n{listed}\n{SUMMARY_HINT}"
+
+
+def _history(path: str, findings: list[PastFinding]) -> str:
+    lines = [
+        f"  строка {item.line_start} · {item.severity.value} · «{item.title}» — "
+        f"{VERDICT_NAMES[item.verdict]}" + (f": {item.comment}" if item.comment else "")
+        for item in findings
+    ]
+    listed = "\n".join(lines)
+    return f"Что находили в {path} раньше:\n{listed}\n{HISTORY_HINT}"
 
 
 def _as_fragment(file: ReviewFile, patch: str) -> CodeFragment:

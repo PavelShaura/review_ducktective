@@ -16,6 +16,7 @@ from ducktective.core.retrieval.ports import (
     CALL_EDGES,
     ChunkHit,
     RelatedSymbol,
+    RepositoryDigest,
     SymbolContext,
     SymbolHit,
 )
@@ -129,6 +130,10 @@ class SessionScopedSymbolReader:
                 limit=limit,
             )
 
+    async def describe(self, repository_id: RepositoryId) -> RepositoryDigest:
+        async with self._session_factory() as session:
+            return await PostgresSymbolReader(session).describe(repository_id)
+
     async def symbols_in_file(
         self,
         repository_id: RepositoryId,
@@ -236,6 +241,7 @@ class SessionScopedHybridSearch:
         repository_id: RepositoryId,
         query: str,
         *,
+        languages: tuple[str, ...] = (),
         limit: int = 20,
     ) -> list[ChunkHit]:
         async with self._session_factory() as session:
@@ -243,4 +249,9 @@ class SessionScopedHybridSearch:
                 PostgresLexicalSearch(session),
                 VectorSearch(session, self._embedder),
             )
-            return await search.search_chunks(repository_id, query, limit=limit)
+            return await search.search_chunks(
+                repository_id,
+                query,
+                languages=languages,
+                limit=limit,
+            )

@@ -16,6 +16,9 @@ from ducktective.core.types import (
     CodeSymbolId,
     RepositoryId,
 )
+from ducktective.retrieval.lexical import (
+    language_filter,
+)
 from ducktective.storage.models.indexing import (
     ChunkEmbeddingModel,
     CodeChunkModel,
@@ -41,6 +44,7 @@ class VectorSearch:
         repository_id: RepositoryId,
         query: str,
         *,
+        languages: tuple[str, ...] = (),
         limit: int = 20,
     ) -> list[ChunkHit]:
         model_id = await self._active_model_id()
@@ -66,6 +70,7 @@ class VectorSearch:
             .join(ChunkEmbeddingModel, ChunkEmbeddingModel.chunk_id == CodeChunkModel.id)
             .join(SourceFileModel, SourceFileModel.id == CodeChunkModel.file_id)
             .where(
+                *language_filter(languages),
                 CodeChunkModel.repository_id == repository_id,
                 ChunkEmbeddingModel.embedding_model_id == model_id,
                 SourceFileModel.is_deleted.is_(False),

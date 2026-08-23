@@ -79,6 +79,9 @@ from ducktective.storage.events.redis_publisher import (
 from ducktective.storage.events.step_broadcaster import (
     RedisStepBroadcaster,
 )
+from ducktective.storage.history import (
+    PostgresFindingHistory,
+)
 from ducktective.storage.investigation import (
     RecordingInvestigationSinks,
 )
@@ -176,6 +179,7 @@ async def startup(ctx: dict[str, Any]) -> None:
         checkpointer=await resources.enter_async_context(
             open_checkpointer(settings.require_database_url())
         ),
+        history=PostgresFindingHistory(ctx["session_factory"]),
     )
 
     logger.info(

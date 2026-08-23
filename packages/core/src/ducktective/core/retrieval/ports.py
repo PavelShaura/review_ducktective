@@ -88,6 +88,19 @@ class RelatedSymbol:
     is_resolved: bool
 
 
+@dataclass(frozen=True, kw_only=True)
+class RepositoryDigest:
+    """Из чего состоит проиндексированный репозиторий."""
+
+    files: int
+    symbols: int
+    languages: tuple[tuple[str, int], ...] = ()
+    """Язык и число файлов на нём, по убыванию."""
+
+    directories: tuple[tuple[str, int], ...] = ()
+    """Каталог верхнего уровня и число файлов в нём, по убыванию."""
+
+
 class SymbolReader(Protocol):
     """Чтение проиндексированного кода: символы, граф и строки файлов.
 
@@ -141,6 +154,10 @@ class SymbolReader(Protocol):
         по полному имени точнее совпадения по последнему сегменту, поэтому
         порядок выдачи задаёт точность совпадения, а не релевантность.
         """
+        ...
+
+    async def describe(self, repository_id: RepositoryId) -> RepositoryDigest:
+        """Сводка индекса: сколько чего и на каких языках."""
         ...
 
     async def symbols_in_file(
@@ -255,8 +272,16 @@ class ChunkSearch(Protocol):
         repository_id: RepositoryId,
         query: str,
         *,
+        languages: tuple[str, ...] = (),
         limit: int = 20,
-    ) -> list[ChunkHit]: ...
+    ) -> list[ChunkHit]:
+        """Фрагменты по запросу; пустой перечень языков означает «любые».
+
+        Отбор по языку нужен, чтобы разделить два разных вопроса: «как
+        здесь сделано» отвечает код, «как здесь принято» — README и ADR,
+        и в общей выдаче второй проигрывает первому просто по объёму.
+        """
+        ...
 
 
 class LexicalSearch(ChunkSearch, Protocol):

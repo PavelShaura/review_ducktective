@@ -25,6 +25,10 @@ from ducktective.core.retrieval.navigation import (
     NavigationSource,
     ReferenceRelation,
 )
+from ducktective.llm.query_expansion import (
+    QueryExpander,
+    looks_like_prose,
+)
 
 
 MAX_TOOL_RESULT_CHARS = 1600
@@ -34,6 +38,11 @@ MAX_TOOL_RESULT_CHARS = 1600
 четыре неурезанных ответа не оставят места ни на дифф, ни на сам разбор.
 Предел жёсткий именно поэтому, а не из экономии.
 """
+
+EXPANDED_QUERY_NOTE = (
+    "Запрос «{query}» переведён в имена, какими они пишутся в коде, "
+    "и поиск шёл по ним: {candidates}."
+)
 
 SOURCE_NOTES = {
     NavigationSource.INDEX: "Источник: индекс проекта (символы и граф вызовов).",
@@ -194,6 +203,33 @@ FIND_SYMBOL = ToolSpec(
     },
 )
 
+PROJECT_DOCS = ToolSpec(
+    name="project_docs",
+    description=(
+        "Search the documentation of this repository - README, docs, ADRs - instead of its "
+        "code. Use it for questions about how things are meant to work here, what was "
+        "decided and why. It says how the project is intended, which is not always how it "
+        "is built."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "What to look for"},
+        },
+        "required": ["query"],
+    },
+)
+
+DESCRIBE_REPOSITORY = ToolSpec(
+    name="describe_repository",
+    description=(
+        "Describe what this repository is made of: how many files, in which languages, and "
+        "what the top-level directories are. Start here when the question is about the "
+        "project as a whole rather than a place in it."
+    ),
+    parameters={"type": "object", "properties": {}},
+)
+
 LIST_FILES = ToolSpec(
     name="list_files",
     description=(
@@ -228,6 +264,7 @@ SEARCH_DOCUMENT = ToolSpec(
 )
 
 NAVIGATION_TOOLS = (
+    DESCRIBE_REPOSITORY,
     SEARCH_CODE,
     FIND_SYMBOL,
     GET_DEFINITION,
@@ -237,6 +274,7 @@ NAVIGATION_TOOLS = (
     GET_FILE_OUTLINE,
     READ_FILE,
     LIST_FILES,
+    PROJECT_DOCS,
 )
 
 
@@ -287,10 +325,12 @@ class NavigationToolbox:
         *,
         result_chars: int = MAX_TOOL_RESULT_CHARS,
         document: AttachedDocument | None = None,
+        expander: QueryExpander | None = None,
     ) -> None:
         self._navigator = navigator
         self._result_chars = result_chars
         self._document = document
+        self._expander = expander
 
     @property
     def specs(self) -> tuple[ToolSpec, ...]:
@@ -356,9 +396,46 @@ class NavigationToolbox:
             _clipped(f"Документ «{self._document.name}»\n\n{rendered}", self._result_chars)
         )
 
+    async def _search_code(self, query: str, *, limit: int) -> NavigationAnswer:
+        """Поиск по запросу и по тому, как этот запрос выглядел бы в коде.
+
+        Кандидаты идут первыми: перевод вопроса на язык кода точнее самого
+        вопроса, а буквальный запрос на прозе поднимает наверх миграции
+        и тесты, где случайно совпали слова.
+
+        Что искали на самом деле, говорится в ответе: молча подменённый
+        запрос — это выдача, которую нельзя объяснить.
+        """
+        if self._expander is None or not looks_like_prose(query):
+            return await self._navigator.search_code(query, limit=limit)
+
+        candidates = await self._expander.expand(query)
+        if not candidates:
+            return await self._navigator.search_code(query, limit=limit)
+
+        collected: list[CodeFragment] = []
+        seen: set[str] = set()
+        for term in (*candidates, query):
+            if len(collected) >= limit:
+                break
+
+            answer = await self._navigator.search_code(term, limit=limit)
+            for fragment in answer.fragments:
+                if fragment.location in seen:
+                    continue
+                seen.add(fragment.location)
+                collected.append(fragment)
+
+        listed = ", ".join(candidates)
+        return NavigationAnswer(
+            source=self._navigator.source,
+            fragments=tuple(collected[:limit]),
+            note=EXPANDED_QUERY_NOTE.format(query=query, candidates=listed),
+        )
+
     async def _dispatch(self, name: str, arguments: dict[str, Any]) -> NavigationAnswer:
         if name == SEARCH_CODE.name:
-            return await self._navigator.search_code(
+            return await self._search_code(
                 str(arguments["query"]),
                 limit=int(arguments.get("limit", 5)),
             )
@@ -372,6 +449,10 @@ class NavigationToolbox:
                 str(arguments["name"]),
                 limit=int(arguments.get("limit", 8)),
             )
+        if name == DESCRIBE_REPOSITORY.name:
+            return await self._navigator.describe_repository()
+        if name == PROJECT_DOCS.name:
+            return await self._navigator.project_docs(str(arguments["query"]))
         if name == FIND_SYMBOL.name:
             return await self._navigator.find_symbol(
                 str(arguments["query"]),

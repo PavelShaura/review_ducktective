@@ -156,6 +156,9 @@ from ducktective.storage.events.null_publisher import (
 from ducktective.storage.events.redis_publisher import (
     RedisEventPublisher,
 )
+from ducktective.storage.history import (
+    PostgresFindingHistory,
+)
 from ducktective.storage.memory.unit_of_work import (
     InMemoryUnitOfWork,
 )
@@ -678,6 +681,7 @@ def _build_pipeline(
         reviewers,
         context_builder=context_builder,
         navigators=navigators,
+        history=PostgresFindingHistory(session_factory) if session_factory else None,
     )
 
 

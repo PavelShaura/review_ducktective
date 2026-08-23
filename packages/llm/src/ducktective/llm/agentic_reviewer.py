@@ -213,6 +213,8 @@ class AgenticCodeReviewer:
             NavigationToolbox(navigator),
             support.diff,
             path=file.path,
+            history=support.history,
+            repository_id=support.repository_id,
         )
         tool_requirements = _with_tool_calling(requirements)
         messages = [

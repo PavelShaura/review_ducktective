@@ -125,6 +125,7 @@ class TimingOutSearch:
         repository_id: RepositoryId,
         query: str,
         *,
+        languages: tuple[str, ...] = (),
         limit: int = 20,
     ) -> list[ChunkHit]:
         raise SearchTimedOutError("Поиск по индексу не уложился в 5000 мс")

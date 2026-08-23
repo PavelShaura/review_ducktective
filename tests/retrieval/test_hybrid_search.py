@@ -37,6 +37,7 @@ class FakeSource:
         repository_id: RepositoryId,
         query: str,
         *,
+        languages: tuple[str, ...] = (),
         limit: int = 20,
     ) -> list[ChunkHit]:
         self.requested_limits.append(limit)
