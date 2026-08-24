@@ -4,7 +4,7 @@ import { useState } from "react";
 import { api } from "@/api/client";
 import { ConversationList } from "@/components/ConversationList";
 import { ConversationView } from "@/components/ConversationView";
-import { IndexBadge } from "@/components/IndexBadge";
+import { IndexAction, IndexBadge } from "@/components/IndexBadge";
 import { ModelPicker } from "@/components/ModelPicker";
 
 /**
@@ -86,7 +86,12 @@ export default function ChatPage() {
           </select>
         </label>
 
-        {repositoryId ? <IndexBadge repositoryId={repositoryId} /> : null}
+        {repositoryId ? (
+          <div className="flex flex-col items-start gap-1.5">
+            <IndexBadge repositoryId={repositoryId} />
+            <IndexAction repositoryId={repositoryId} />
+          </div>
+        ) : null}
 
         {repositoryId ? (
           <ModelPicker repositoryId={repositoryId} value={model} onChange={setModel} compact />

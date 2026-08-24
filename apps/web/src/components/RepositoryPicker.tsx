@@ -74,7 +74,14 @@ interface FieldsProps {
   onChange: (draft: NewRepositoryDraft) => void;
 }
 
-function NewRepositoryFields({ draft, onChange }: FieldsProps) {
+/**
+ * Поля новой записи: путь, название и то, куда разрешено уезжать коду.
+ *
+ * Вынесены наружу, потому что репозиторий заводят из двух мест — перед
+ * первым ревью и со страницы индексов, — а спрашивать одно и то же
+ * по-разному значит завести две правды об одном.
+ */
+export function NewRepositoryFields({ draft, onChange }: FieldsProps) {
   const [isNameTouched, setIsNameTouched] = useState(false);
 
   const updatePath = (localPath: string) => {

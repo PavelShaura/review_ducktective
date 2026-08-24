@@ -12,14 +12,13 @@ interface Props {
 const WORKER_HINT = "uv run arq ducktective.indexer.worker.WorkerSettings";
 
 /**
- * Общий вид кнопок панели.
+ * Общий вид кнопок панели — тот же, что на карточках подключений и моделей.
  *
- * Все действия здесь равнозначны по весу, и различать их формой значило бы
- * подсказывать выбор, которого нет: удаление отличается только цветом
- * наведения.
+ * Действия здесь равнозначны по весу и различаются не формой, а цветом
+ * наведения: сборка тянется к латуни, удаление — к тревожному тону.
+ * Форма подсказывала бы выбор, которого нет.
  */
-const BUTTON =
-  "rounded-case border border-tweed-dim px-3 py-1 font-mono text-[12px] tracking-wide text-paper-dim transition-colors disabled:opacity-40";
+const BUTTON = "card-action";
 
 /**
  * Состояние индекса репозитория.
@@ -81,7 +80,7 @@ export function IndexState({ repositoryId }: Props) {
   const hasIndex = Boolean(data?.snapshot_id);
 
   return (
-    <div className="border border-tweed-dim bg-ink-sunken px-4 py-3">
+    <div className="rounded-case border border-tweed-dim bg-ink-sunken px-4 py-3">
       <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
         <span className="case-label">индекс</span>
         <span className="font-mono text-[13px] text-paper">{describe(data, start.isPending)}</span>
@@ -145,7 +144,7 @@ export function IndexState({ repositoryId }: Props) {
             type="button"
             onClick={() => start.mutate()}
             disabled={busy}
-            className={`${BUTTON} hover:border-brass hover:text-brass`}
+            className={`${BUTTON} card-action-primary ${busy ? "card-action-busy" : ""}`}
           >
             {start.isPending
               ? "ставлю в очередь…"
@@ -183,7 +182,7 @@ function DeleteIndexButton({ isConfirming, onAsk, onDismiss, onDelete, isPending
       <button
         type="button"
         onClick={onAsk}
-        className={`${BUTTON} hover:border-dismissed hover:text-dismissed`}
+        className={`${BUTTON} card-action-danger`}
       >
         удалить индекс
       </button>
@@ -197,14 +196,16 @@ function DeleteIndexButton({ isConfirming, onAsk, onDismiss, onDelete, isPending
         type="button"
         onClick={onDelete}
         disabled={isPending}
-        className={`${BUTTON} border-dismissed text-dismissed hover:bg-dismissed hover:text-ink disabled:opacity-50`}
+        className={`${BUTTON} card-action-danger border-dismissed text-dismissed ${
+          isPending ? "card-action-busy" : ""
+        }`}
       >
         {isPending ? "стираю…" : "стереть"}
       </button>
       <button
         type="button"
         onClick={onDismiss}
-        className={`${BUTTON} hover:border-paper hover:text-paper`}
+        className={BUTTON}
       >
         отмена
       </button>
@@ -230,7 +231,7 @@ function CancelButton({ onCancel, isPending, label }: CancelProps) {
       type="button"
       onClick={onCancel}
       disabled={isPending}
-      className={`group/cancel ${BUTTON} hover:border-dismissed hover:text-dismissed`}
+      className={`group/cancel ${BUTTON} card-action-danger card-action-busy`}
     >
       <span className="group-hover/cancel:hidden">{isPending ? "отменяю…" : label}</span>
       <span className="hidden group-hover/cancel:inline">отменить</span>

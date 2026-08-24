@@ -638,141 +638,6 @@
     font-variant-numeric: tabular-nums;
   }
 
-  /* Три пункта шапки — три разные вещи, и выглядеть они обязаны по-разному.
-     Общая у них только посадка: одна высота, один шрифт, одна отбивка. */
-  .nav-action {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.5rem 0.9rem;
-    border-radius: var(--radius-case);
-    border: 1px solid transparent;
-    font-family: var(--font-mono);
-    font-size: 13px;
-    letter-spacing: 0.08em;
-    white-space: nowrap;
-    transition:
-      background-color 140ms ease,
-      border-color 140ms ease,
-      color 140ms ease,
-      box-shadow 140ms ease,
-      transform 140ms ease;
-  }
-
-  /* Чат — единственное место, где что-то происходит в реальном времени,
-     поэтому у него живой огонёк, а не просто цвет. */
-  .nav-chat {
-    border-color: var(--color-brass-dim);
-    color: var(--color-brass);
-    background: color-mix(in srgb, var(--color-brass) 8%, transparent);
-  }
-
-  .nav-chat:hover {
-    background: color-mix(in srgb, var(--color-brass) 18%, transparent);
-    border-color: var(--color-brass);
-    box-shadow: 0 0 14px -4px var(--color-brass);
-  }
-
-  .nav-chat[aria-current="page"] {
-    background: color-mix(in srgb, var(--color-brass) 22%, transparent);
-    border-color: var(--color-brass);
-  }
-
-  .nav-live {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--color-brass);
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-brass) 70%, transparent);
-    animation: nav-live-pulse 2.4s ease-out infinite;
-  }
-
-  @keyframes nav-live-pulse {
-    0% {
-      box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-brass) 65%, transparent);
-      opacity: 1;
-    }
-    70% {
-      box-shadow: 0 0 0 7px transparent;
-      opacity: 0.55;
-    }
-    100% {
-      box-shadow: 0 0 0 0 transparent;
-      opacity: 1;
-    }
-  }
-
-  /* Отметки — картотека вердиктов, и знак у неё штампованный: галочка
-     в рамке, зелёная, как подтверждённая находка. */
-  .nav-marks {
-    border-color: var(--color-tweed-dim);
-    color: var(--color-paper-dim);
-  }
-
-  .nav-marks:hover {
-    border-color: color-mix(in srgb, var(--color-confirmed) 65%, transparent);
-    color: var(--color-confirmed);
-  }
-
-  .nav-marks[aria-current="page"] {
-    border-color: color-mix(in srgb, var(--color-confirmed) 65%, transparent);
-    color: var(--color-confirmed);
-    background: color-mix(in srgb, var(--color-confirmed) 10%, transparent);
-  }
-
-  .nav-mark-stamp {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 16px;
-    height: 16px;
-    border: 1px solid currentColor;
-    border-radius: 2px;
-    font-size: 10px;
-    line-height: 1;
-  }
-
-  /* Новое дело — единственное действие, которое что-то заводит, поэтому
-     оно залито латунью, как метка находок на ярлыке файла. */
-  .nav-case {
-    background: var(--color-brass);
-    color: var(--color-ink);
-    border-color: color-mix(in srgb, var(--color-ink) 60%, var(--color-brass));
-    font-weight: 600;
-    box-shadow: 0 1px 3px rgb(0 0 0 / 0.45);
-  }
-
-  .nav-case:hover {
-    background: color-mix(in srgb, var(--color-brass) 82%, white);
-    transform: translateY(-1px);
-    box-shadow: 0 3px 8px -2px rgb(0 0 0 / 0.55);
-  }
-
-  /* Подпись под названием, растянутая ровно по его ширине.
-
-     Ширину задаёт само название: колонка сжимается по содержимому, а подпись
-     разгоняется межбуквенным интервалом до её краёв. Поэтому здесь
-     `text-align-last`, а не привычный `justify` — строка одна, и обычное
-     выравнивание по ширине её не трогает. */
-  .brand {
-    display: inline-flex;
-    flex-direction: column;
-    align-items: stretch;
-    width: fit-content;
-    gap: 0.15rem;
-  }
-
-  .brand-tagline {
-    width: 100%;
-    font-family: var(--font-mono);
-    font-size: 11px;
-    text-transform: lowercase;
-    color: var(--color-paper-dim);
-    text-align: justify;
-    text-align-last: justify;
-    line-height: 1.1;
-  }
-
   /* Действия на карточке. Их четыре в ряд, и без рамок они читаются как
      сплошная строка текста: непонятно даже, что по ним можно нажать. */
   .card-action {
@@ -986,6 +851,301 @@
     white-space: nowrap;
   }
 
+  /* Кнопка, которая ждёт ответа. Мигающая рамка отличает «нажали и идёт»
+     от «нажали и ничего не случилось»: подпись «ставлю в очередь…» без
+     движения читается как застывшая. */
+  .card-action-busy {
+    animation: action-waiting 1.6s ease-in-out infinite;
+  }
+
+  @keyframes action-waiting {
+    0%,
+    100% {
+      border-color: var(--color-tweed-dim);
+    }
+    50% {
+      border-color: var(--color-brass);
+    }
+  }
+
+  /* Верхнее меню.
+
+     Раньше пункты выглядели по-разному намеренно — «три разные двери», —
+     но дверей стало шесть, и разнобой перестал что-либо подсказывать:
+     он просто мешал прочесть строку. Теперь это меню: одна посадка, один
+     шрифт, а различается текущий раздел и единственное действие, которое
+     что-то заводит.
+
+     Опознавательный знак раздела — не цвет, а латунная закладка снизу:
+     она выезжает при наведении и стоит у текущего. В строке из пяти
+     пунктов оттенок теряется, а движение — нет. */
+  .topbar {
+    border-bottom: 1px solid var(--color-tweed-dim);
+    background: color-mix(in srgb, var(--color-ink) 88%, transparent);
+    animation: topbar-settle 320ms ease-out;
+    transition:
+      box-shadow 200ms ease,
+      background-color 200ms ease;
+  }
+
+  /* Отделяется от содержимого только когда под неё что-то уехало:
+     тень над нетронутой страницей обещает прокрутку, которой нет. */
+  .topbar-lifted {
+    background: color-mix(in srgb, var(--color-ink) 96%, transparent);
+    box-shadow: 0 6px 20px -12px rgb(0 0 0 / 0.9);
+  }
+
+  @keyframes topbar-settle {
+    from {
+      opacity: 0;
+      transform: translateY(-6px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .brand-mascot {
+    transition:
+      transform 220ms ease,
+      filter 220ms ease;
+  }
+
+  .brand-link:hover .brand-mascot {
+    transform: rotate(-6deg) scale(1.06);
+    filter: drop-shadow(0 0 8px color-mix(in srgb, var(--color-brass) 45%, transparent));
+  }
+
+  /* Меню сжимается и прокручивается, а не переносится на вторую строку:
+     перенос уводил вниз организацию и выход, и шапка становилась двухэтажной
+     на ровном месте. Полоса прокрутки скрыта — она бы делила строку надвое. */
+  .menu-scroll {
+    scrollbar-width: none;
+  }
+
+  .menu-scroll::-webkit-scrollbar {
+    display: none;
+  }
+
+  .menu-link {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.5rem 0.75rem 0.55rem;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    letter-spacing: 0.06em;
+    color: var(--color-paper-dim);
+    white-space: nowrap;
+    transition: color 160ms ease;
+  }
+
+  .menu-link::after {
+    content: "";
+    position: absolute;
+    left: 0.6rem;
+    right: 0.6rem;
+    bottom: 0.15rem;
+    height: 2px;
+    background: var(--color-brass);
+    border-radius: 1px;
+    transform: scaleX(0);
+    transform-origin: left center;
+    transition: transform 200ms ease;
+  }
+
+  .menu-link:hover {
+    color: var(--color-paper);
+  }
+
+  .menu-link:hover::after {
+    transform: scaleX(1);
+  }
+
+  .menu-link[aria-current="page"] {
+    color: var(--color-brass);
+  }
+
+  .menu-link[aria-current="page"]::after {
+    transform: scaleX(1);
+    box-shadow: 0 0 10px -2px var(--color-brass);
+  }
+
+  /* Знак раздела — моноширинный глиф в рамке, как пометка на папке.
+     Он же держит ширину: без него пункты прыгали бы при смене шрифта. */
+  .menu-glyph {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border: 1px solid currentColor;
+    border-radius: 2px;
+    font-size: 9px;
+    line-height: 1;
+    opacity: 0.7;
+    transition:
+      opacity 160ms ease,
+      transform 160ms ease;
+  }
+
+  .menu-link:hover .menu-glyph,
+  .menu-link[aria-current="page"] .menu-glyph {
+    opacity: 1;
+    transform: translateY(-1px);
+  }
+
+  /* Разговор — единственное место, где что-то происходит прямо сейчас,
+     поэтому у него живой огонёк вместо глифа. */
+  .menu-live {
+    width: 7px;
+    height: 7px;
+    margin: 0 4px;
+    border-radius: 50%;
+    background: currentColor;
+    animation: nav-live-pulse 2.4s ease-out infinite;
+  }
+
+  @keyframes nav-live-pulse {
+    0% {
+      box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-brass) 65%, transparent);
+      opacity: 1;
+    }
+    70% {
+      box-shadow: 0 0 0 7px transparent;
+      opacity: 0.55;
+    }
+    100% {
+      box-shadow: 0 0 0 0 transparent;
+      opacity: 1;
+    }
+  }
+
+  /* Единственное действие в шапке, которое что-то заводит: залито латунью
+     и стоит после разделителя, отдельно от разделов. */
+  .menu-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.45rem 0.85rem;
+    border-radius: var(--radius-case);
+    border: 1px solid color-mix(in srgb, var(--color-ink) 60%, var(--color-brass));
+    background: var(--color-brass);
+    color: var(--color-ink);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.45);
+    transition:
+      background-color 160ms ease,
+      transform 160ms ease,
+      box-shadow 160ms ease;
+  }
+
+  .menu-action:hover {
+    background: color-mix(in srgb, var(--color-brass) 82%, white);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 10px -3px rgb(0 0 0 / 0.6);
+  }
+
+  .menu-action:active {
+    transform: translateY(0);
+  }
+
+  .menu-divider {
+    width: 1px;
+    height: 1.5rem;
+    background: linear-gradient(
+      to bottom,
+      transparent,
+      var(--color-tweed-dim) 25%,
+      var(--color-tweed-dim) 75%,
+      transparent
+    );
+  }
+
+  /* Выход — действие с последствием, поэтому рамка есть всегда, а тревожный
+     тон появляется при наведении: пугать тем, мимо чего ходят каждый день,
+     незачем. */
+  .menu-signout {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.45rem 0.7rem;
+    border-radius: var(--radius-case);
+    border: 1px solid var(--color-tweed-dim);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    color: var(--color-paper-dim);
+    cursor: pointer;
+    transition:
+      background-color 160ms ease,
+      border-color 160ms ease,
+      color 160ms ease;
+  }
+
+  .menu-signout:hover {
+    border-color: color-mix(in srgb, var(--color-critical) 70%, transparent);
+    color: var(--color-critical);
+    background: color-mix(in srgb, var(--color-critical) 10%, transparent);
+  }
+
+  .menu-signout-glyph {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    border: 1px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 2px;
+    font-size: 9px;
+    line-height: 1;
+    transition: transform 160ms ease;
+  }
+
+  .menu-signout:hover .menu-signout-glyph {
+    transform: translateX(2px);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .topbar {
+      animation: none;
+    }
+
+    .menu-live {
+      animation: none;
+    }
+
+    .menu-link::after,
+    .menu-glyph,
+    .menu-action,
+    .menu-signout-glyph,
+    .brand-mascot {
+      transition: none;
+    }
+
+    .menu-action:hover,
+    .brand-link:hover .brand-mascot {
+      transform: none;
+    }
+
+    .card-action:active,
+    .preset-card:active {
+      transform: none;
+    }
+
+    .card-action-busy,
+    .status-live .status-dot {
+      animation: none;
+    }
+  }
+
   /* Организация — не пункт меню, а подпись на папке: чьё это дело.
      Поэтому у неё две строки и вид корешка, а не кнопки. */
   .nav-org {
@@ -993,23 +1153,21 @@
     flex-direction: column;
     align-items: flex-start;
     gap: 0.1rem;
-    padding: 0.35rem 0.75rem;
+    padding: 0.3rem 0.7rem;
     border-radius: var(--radius-case);
     border: 1px solid var(--color-tweed-dim);
     border-left: 3px solid var(--color-brass-dim);
     background: color-mix(in srgb, var(--color-paper) 4%, transparent);
-    max-width: 15rem;
+    max-width: 13rem;
     transition:
       border-color 140ms ease,
-      background-color 140ms ease,
-      box-shadow 140ms ease;
+      background-color 140ms ease;
   }
 
   .nav-org:hover {
     border-color: var(--color-brass-dim);
     border-left-color: var(--color-brass);
     background: color-mix(in srgb, var(--color-brass) 10%, transparent);
-    box-shadow: 0 0 14px -6px var(--color-brass);
   }
 
   .nav-org[aria-current="page"] {
@@ -1037,88 +1195,63 @@
     white-space: nowrap;
   }
 
-  /* Модели — настройка, а не действие: тон приглушённый, при наведении
-     подсвечивается тем же, чем помечены удалённые модели. */
-  .nav-models {
-    border-color: var(--color-tweed-dim);
-    color: var(--color-paper-dim);
-  }
-
-  .nav-models:hover {
-    border-color: var(--color-brass-dim);
-    color: var(--color-brass);
-    background: color-mix(in srgb, var(--color-brass) 8%, transparent);
-  }
-
-  .nav-models[aria-current="page"] {
-    border-color: var(--color-brass-dim);
-    color: var(--color-brass);
-    background: color-mix(in srgb, var(--color-brass) 12%, transparent);
-  }
-
   /* Выход — действие с последствием, поэтому обрамление есть всегда,
-     а тревожный тон появляется только при наведении: пугать пунктом,
-     мимо которого ходят каждый день, незачем. */
-  .nav-signout {
-    border-color: var(--color-tweed-dim);
+     а тревожный тон появляется только при наведении. */
+  .menu-signout {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.45rem 0.7rem;
+    border-radius: var(--radius-case);
+    border: 1px solid var(--color-tweed-dim);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    letter-spacing: 0.06em;
     color: var(--color-paper-dim);
     cursor: pointer;
+    transition:
+      background-color 140ms ease,
+      border-color 140ms ease,
+      color 140ms ease;
   }
 
-  .nav-signout:hover {
+  .menu-signout:hover {
     border-color: color-mix(in srgb, var(--color-critical) 70%, transparent);
     color: var(--color-critical);
     background: color-mix(in srgb, var(--color-critical) 10%, transparent);
   }
 
-  .nav-signout:active {
-    transform: translateY(1px);
-  }
+  /* Подпись под названием, растянутая ровно по его ширине.
 
-  .nav-signout-glyph {
+     Ширину задаёт само название: колонка сжимается по содержимому, а подпись
+     разгоняется межбуквенным интервалом до её краёв. Поэтому здесь
+     `text-align-last`, а не привычный `justify` — строка одна, и обычное
+     выравнивание по ширине её не трогает. */
+  .brand {
     display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 15px;
-    height: 15px;
-    border: 1px solid currentColor;
-    border-right-color: transparent;
-    border-radius: 2px;
-    font-size: 10px;
-    line-height: 1;
+    flex-direction: column;
+    align-items: stretch;
+    width: fit-content;
+    gap: 0.15rem;
   }
 
-  /* Разделитель между пунктами: они не варианты одного выбора, а три
-     отдельные двери. */
-  .nav-divider {
-    width: 1px;
-    align-self: stretch;
-    background: var(--color-tweed-dim);
-    opacity: 0.6;
+  .brand-tagline {
+    width: 100%;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    text-transform: lowercase;
+    color: var(--color-paper-dim);
+    text-align: justify;
+    text-align-last: justify;
+    line-height: 1.1;
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .nav-live {
+    .menu-live {
       animation: none;
     }
 
-    .nav-case:hover {
-      transform: none;
-    }
-
-    .nav-signout:active {
-      transform: none;
-    }
-
-    .card-action:active {
-      transform: none;
-    }
-
-    .status-live .status-dot {
-      animation: none;
-    }
-
-    .preset-card:active {
+    .menu-action:hover {
       transform: none;
     }
   }

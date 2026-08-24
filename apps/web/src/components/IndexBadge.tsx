@@ -8,22 +8,45 @@ interface Props {
 }
 
 /**
- * Состояние индекса одной строкой — для боковой панели разговора.
+ * Состояние индекса одной строкой.
  *
  * Полная панель со стадиями, шкалой и удалением живёт на карточке дела:
- * в разговоре она занимала всю ширину и отталкивала вниз то, ради чего
- * страницу открыли. Здесь нужен ответ на один вопрос — можно ли уже
- * спрашивать, — и кнопка на случай «нет».
+ * в разговоре и в списке индексов она занимала бы всю ширину и отталкивала
+ * вниз то, ради чего страницу открыли. Здесь нужен ответ на один вопрос —
+ * можно ли уже спрашивать.
+ *
+ * Только бейдж, без кнопки: он встаёт в строку с названием репозитория,
+ * а кнопка рядом с ним разрывала бы эту строку. Действие живёт отдельно —
+ * `IndexAction`, — и каждая страница ставит его туда, где оно уместно.
  */
 export function IndexBadge({ repositoryId }: Props) {
-  const queryClient = useQueryClient();
+  const state = useIndexState(repositoryId);
 
-  const state = useQuery({
-    queryKey: ["index", repositoryId],
-    queryFn: () => api.getIndexState(repositoryId),
-    enabled: Boolean(repositoryId),
-    refetchInterval: (query) => (isBusy(query.state.data) ? 2000 : false),
-  });
+  if (state.isPending || state.isError) {
+    return null;
+  }
+
+  const value = state.data;
+  const busy = isBusy(value);
+
+  return (
+    <span className={`status-badge ${value.context_ready || busy ? "status-live" : "status-off"}`}>
+      <span className="status-dot" aria-hidden />
+      {label(value, busy)}
+    </span>
+  );
+}
+
+/**
+ * Кнопка сборки — там, где индекса ещё нет.
+ *
+ * Пока сборка идёт или индекс готов, кнопки нет вовсе: обновлять и удалять
+ * ходят в полную панель, а здесь нужен один шаг для того, у кого индекса
+ * не было никогда.
+ */
+export function IndexAction({ repositoryId }: Props) {
+  const queryClient = useQueryClient();
+  const state = useIndexState(repositoryId);
 
   const start = useMutation({
     mutationFn: () => api.startIndexing(repositoryId),
@@ -34,27 +57,29 @@ export function IndexBadge({ repositoryId }: Props) {
     return null;
   }
 
-  const value = state.data;
-  const busy = isBusy(value);
+  if (state.data.context_ready || isBusy(state.data)) {
+    return null;
+  }
 
   return (
-    <div className="space-y-1.5">
-      <span className={`status-badge ${value.context_ready || busy ? "status-live" : "status-off"}`}>
-        <span className="status-dot" aria-hidden />
-        {label(value, busy)}
-      </span>
-      {value.context_ready || busy ? null : (
-        <button
-          type="button"
-          disabled={start.isPending}
-          onClick={() => start.mutate()}
-          className="card-action w-full justify-center"
-        >
-          {start.isPending ? "ставлю в очередь…" : "собрать индекс"}
-        </button>
-      )}
-    </div>
+    <button
+      type="button"
+      disabled={start.isPending}
+      onClick={() => start.mutate()}
+      className={`card-action card-action-primary ${start.isPending ? "card-action-busy" : ""}`}
+    >
+      {start.isPending ? "ставлю в очередь…" : "собрать индекс"}
+    </button>
   );
+}
+
+function useIndexState(repositoryId: string) {
+  return useQuery({
+    queryKey: ["index", repositoryId],
+    queryFn: () => api.getIndexState(repositoryId),
+    enabled: Boolean(repositoryId),
+    refetchInterval: (query) => (isBusy(query.state.data) ? 2000 : false),
+  });
 }
 
 function isBusy(state?: IndexState): boolean {
