@@ -350,12 +350,21 @@ class LiteLlmClient:
 
 
 def _short_reason(error: Exception | None) -> str:
-    """Причина отказа в двух словах — она едет человеку, а не в журнал."""
+    """Причина отказа коротко — она едет человеку, а не в журнал.
+
+    У знакомых причин своя формулировка, у остальных — первая строка ответа
+    провайдера: «провайдер отказал» не даёт человеку ни одной зацепки, а
+    «model not found» или «invalid api key» лечатся сразу.
+    """
     if isinstance(error, RateLimitError):
         return "исчерпан лимит запросов"
     if isinstance(error, Timeout):
         return "не дождались ответа"
-    return "провайдер отказал"
+    if error is None:
+        return "провайдер отказал"
+
+    first_line = str(error).strip().splitlines()
+    return first_line[0][:160] if first_line else "провайдер отказал"
 
 
 def _to_wire(message: LlmMessage) -> dict[str, Any]:

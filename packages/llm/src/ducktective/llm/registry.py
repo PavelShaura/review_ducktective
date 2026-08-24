@@ -100,6 +100,9 @@ class ResolvedModelSpec(Protocol):
     def context_window(self) -> int: ...
 
 
+DEFAULT_COMPATIBLE_PROVIDER = "openai"
+
+
 def build_tenant_choices(specs: Sequence[ResolvedModelSpec]) -> tuple[ModelChoice, ...]:
     """Превращает модели организации в кандидатов роутера.
 
@@ -109,8 +112,8 @@ def build_tenant_choices(specs: Sequence[ResolvedModelSpec]) -> tuple[ModelChoic
     return tuple(
         ModelChoice(
             name=spec.name,
-            model=spec.model,
-            provider=spec.provider or spec.model.split("/", 1)[0],
+            model=_addressed(spec),
+            provider=spec.provider or _prefix_of(spec.model),
             api_base=spec.base_url or None,
             api_key=spec.api_key or None,
             trust=spec.trust,
@@ -119,3 +122,22 @@ def build_tenant_choices(specs: Sequence[ResolvedModelSpec]) -> tuple[ModelChoic
         )
         for spec in specs
     )
+
+
+def _addressed(spec: ResolvedModelSpec) -> str:
+    """Имя модели с провайдером впереди — иначе адресат неизвестен.
+
+    Перечень моделей провайдер отдаёт голыми идентификаторами (`kimi-k3`),
+    а LiteLLM по такому имени не знает, куда идти, и отказывает ещё до
+    сети. Свой сервер при этом опознаётся как OpenAI-совместимый: другого
+    протокола у `base_url` не бывает.
+    """
+    if "/" in spec.model:
+        return spec.model
+
+    provider = spec.provider or DEFAULT_COMPATIBLE_PROVIDER
+    return f"{provider}/{spec.model}"
+
+
+def _prefix_of(model: str) -> str:
+    return model.split("/", 1)[0] if "/" in model else DEFAULT_COMPATIBLE_PROVIDER
