@@ -11,6 +11,19 @@ const TRUST_LABEL: Record<ModelTrust, string> = {
   training_remote: "учится на запросах",
 };
 
+const TRUST_CLASS: Record<ModelTrust, string> = {
+  local: "trust-stamp trust-local",
+  private_remote: "trust-stamp trust-private",
+  training_remote: "trust-stamp trust-training",
+};
+
+/** То же самое короче: на плитке рядом с названием длинная подпись не встаёт. */
+const TRUST_SHORT: Record<ModelTrust, string> = {
+  local: "локально",
+  private_remote: "не учится",
+  training_remote: "учится",
+};
+
 /**
  * Подключения организации к провайдерам моделей.
  *
@@ -47,22 +60,26 @@ export default function ModelsPage() {
 
       <section className="space-y-4">
         <h2 className="font-display text-xl text-paper">Добавить подключение</h2>
-        <div className="flex flex-wrap gap-2">
+        <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
           {presets.data.map((preset) => (
-            <button
-              key={preset.key}
-              type="button"
-              onClick={() => setChosen(preset)}
-              className={`case-label rounded-case border px-3 py-2 hover:text-brass ${
-                chosen?.key === preset.key
-                  ? "border-brass text-brass"
-                  : "border-tweed-dim text-paper-dim"
-              }`}
-            >
-              {preset.title}
-            </button>
+            <li key={preset.key}>
+              <button
+                type="button"
+                aria-pressed={chosen?.key === preset.key}
+                onClick={() => setChosen(preset)}
+                className="preset-card w-full"
+              >
+                <span className="flex items-start justify-between gap-2">
+                  <span className="preset-title">{preset.title}</span>
+                  <span className={`${TRUST_CLASS[preset.trust]} shrink-0`}>
+                    {TRUST_SHORT[preset.trust]}
+                  </span>
+                </span>
+                <span className="preset-pricing">{preset.pricing}</span>
+              </button>
+            </li>
           ))}
-        </div>
+        </ul>
         {chosen ? (
           <AddConnectionForm key={chosen.key} preset={chosen} onDone={() => setChosen(null)} />
         ) : null}
@@ -106,78 +123,141 @@ function ConnectionCard({ connection }: { connection: ProviderConnection }) {
     mutationFn: () => api.refreshCatalogue(connection.id),
     onSuccess: refresh,
   });
+  const choose = useMutation({
+    mutationFn: (model: string) => api.updateConnection(connection.id, { default_model: model }),
+    onSuccess: refresh,
+  });
 
   return (
-    <li className="rounded-case border border-tweed-dim bg-ink-raised px-5 py-4">
-      <div className="flex items-start justify-between gap-4">
-        <span className="min-w-0 space-y-1">
-          <span className="flex flex-wrap items-baseline gap-3">
-            <span className="text-paper">{connection.name}</span>
-            <span className="case-label">{TRUST_LABEL[connection.trust]}</span>
-            {connection.is_enabled ? null : <span className="case-label">выключено</span>}
-          </span>
-          <span className="block text-[13px] text-paper-dim">
+    <li
+      className={`rounded-case border bg-ink-raised ${
+        connection.is_enabled ? "border-tweed-dim" : "border-tweed-dim/50 opacity-60"
+      }`}
+    >
+      <div className="space-y-3 px-5 py-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="font-display text-lg text-paper">{connection.name}</span>
+          <span className={TRUST_CLASS[connection.trust]}>{TRUST_LABEL[connection.trust]}</span>
+          <ConnectionStatus connection={connection} />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="fact-chip">
             {connection.models.length === 1
-              ? connection.models[0]
-              : `${connection.models.length} моделей · по умолчанию ${connection.default_model}`}
-            {connection.has_api_key ? " · ключ задан" : " · без ключа"}
-            {connection.context_window ? ` · окно ${connection.context_window}` : ""}
+              ? "одна модель"
+              : `${connection.models.length} моделей`}
           </span>
+          <span className="fact-chip">по умолчанию {connection.default_model}</span>
+          <span className="fact-chip">{connection.has_api_key ? "ключ задан" : "без ключа"}</span>
+          {connection.context_window ? (
+            <span className="fact-chip">окно {connection.context_window.toLocaleString("ru")}</span>
+          ) : null}
           {connection.catalogue_refreshed_at ? (
-            <span className="case-label block">
-              перечень обновлён {formatDateTime(connection.catalogue_refreshed_at)}
+            <span className="fact-chip">
+              перечень от {formatDateTime(connection.catalogue_refreshed_at)}
             </span>
           ) : null}
-        </span>
-        <span className="flex shrink-0 flex-wrap items-center gap-3">
-          <button
-            type="button"
-            onClick={() => setIsOpen(!isOpen)}
-            className="case-label text-paper-dim hover:text-brass"
-          >
-            {isOpen ? "скрыть модели" : "модели"}
+        </div>
+
+        {connection.note ? (
+          <p className="max-w-3xl text-[13px] leading-relaxed text-paper-dim">{connection.note}</p>
+        ) : null}
+
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          <button type="button" onClick={() => setIsOpen(!isOpen)} className="card-action">
+            {isOpen ? "скрыть модели" : `показать модели (${connection.models.length})`}
           </button>
           <button
             type="button"
             disabled={reload.isPending}
             onClick={() => reload.mutate()}
-            className="case-label text-paper-dim hover:text-brass disabled:opacity-40"
+            className="card-action card-action-primary"
           >
-            {reload.isPending ? "спрашиваю…" : "обновить перечень"}
+            {reload.isPending ? "спрашиваю провайдера…" : "обновить перечень"}
           </button>
-          <button
-            type="button"
-            onClick={() => toggle.mutate()}
-            className="case-label text-paper-dim hover:text-brass"
-          >
+          <button type="button" onClick={() => toggle.mutate()} className="card-action">
             {connection.is_enabled ? "выключить" : "включить"}
           </button>
           <button
             type="button"
             onClick={() => remove.mutate()}
-            className="case-label text-paper-dim hover:text-critical"
+            className="card-action card-action-danger ml-auto"
           >
             убрать
           </button>
-        </span>
+        </div>
+
+        {reload.error ? <p className="text-critical">{describe(reload.error)}</p> : null}
       </div>
 
-      {connection.note ? (
-        <p className="mt-2 text-[13px] text-paper-dim">{connection.note}</p>
-      ) : null}
-
       {isOpen ? (
-        <ul className="mt-3 grid gap-1 border-t border-tweed-dim pt-3 sm:grid-cols-2">
-          {connection.models.map((model) => (
-            <li key={model} className="font-mono text-[13px] text-paper-dim">
-              {connection.name}/{model}
-            </li>
-          ))}
-        </ul>
+        <div className="border-t border-tweed-dim px-5 py-4">
+          <p className="case-label mb-3">
+            так они выглядят в выборе при запуске ревью и разговора
+          </p>
+          <ul className="grid gap-1 sm:grid-cols-2 lg:grid-cols-3">
+            {connection.models.map((model) => (
+              <li key={model} className="flex items-center justify-between gap-2">
+                <span
+                  className={`truncate font-mono text-[13px] ${
+                    model === connection.default_model ? "text-brass" : "text-paper-dim"
+                  }`}
+                >
+                  {connection.name}/{model}
+                </span>
+                {model === connection.default_model ? (
+                  <span className="case-label shrink-0">по умолчанию</span>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={choose.isPending}
+                    onClick={() => choose.mutate(model)}
+                    className="case-label shrink-0 text-paper-dim/60 hover:text-brass disabled:opacity-40"
+                  >
+                    выбрать
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
       ) : null}
-
-      {reload.error ? <p className="mt-2 text-critical">{describe(reload.error)}</p> : null}
     </li>
+  );
+}
+
+/**
+ * Состояние подключения: работает оно сейчас или отключено.
+ *
+ * Огонёк живой только у работающего — на карточке это единственное, что
+ * движется, и взгляд находит его раньше остального текста. Подключение
+ * без ключа тоже не работает, поэтому оно не «подключено», а ждёт ключа:
+ * иначе зелёный горел бы там, где первый же вопрос упрётся в отказ.
+ */
+function ConnectionStatus({ connection }: { connection: ProviderConnection }) {
+  if (!connection.is_enabled) {
+    return (
+      <span className="status-badge status-off">
+        <span className="status-dot" aria-hidden />
+        выключена
+      </span>
+    );
+  }
+
+  if (!connection.has_api_key && connection.base_url === "") {
+    return (
+      <span className="status-badge status-off">
+        <span className="status-dot" aria-hidden />
+        нужен ключ
+      </span>
+    );
+  }
+
+  return (
+    <span className="status-badge status-live">
+      <span className="status-dot" aria-hidden />
+      подключена
+    </span>
   );
 }
 
@@ -286,7 +366,7 @@ function AddConnectionForm({ preset, onDone }: { preset: ModelPreset; onDone: ()
           type="button"
           disabled={probe.isPending || !model.trim()}
           onClick={() => probe.mutate()}
-          className="case-label rounded-case border border-tweed-dim px-4 py-2 text-paper-dim hover:text-brass disabled:opacity-40"
+          className="card-action"
         >
           {probe.isPending ? "спрашиваю провайдера…" : "проверить"}
         </button>
@@ -294,17 +374,17 @@ function AddConnectionForm({ preset, onDone }: { preset: ModelPreset; onDone: ()
           type="button"
           disabled={add.isPending || !name.trim() || !model.trim()}
           onClick={() => add.mutate()}
-          className="case-label rounded-case border border-tweed-dim px-4 py-2 text-paper hover:text-brass disabled:opacity-40"
+          className="card-action card-action-primary"
         >
           {add.isPending ? "завожу…" : "подключить"}
         </button>
-        <button type="button" onClick={onDone} className="case-label text-paper-dim hover:text-brass">
+        <button type="button" onClick={onDone} className="card-action">
           отмена
         </button>
         <button
           type="button"
           onClick={() => setIsDetailed(!isDetailed)}
-          className="case-label ml-auto text-paper-dim hover:text-brass"
+          className="card-action ml-auto"
         >
           {isDetailed ? "скрыть подробности" : "настроить вручную"}
         </button>

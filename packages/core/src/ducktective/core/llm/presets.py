@@ -29,12 +29,21 @@ class ModelPreset:
     supports_tools: bool = True
     context_window: int = 0
     signup_url: str = ""
+    pricing: str = ""
+    """Чем платят за этот доступ — словом, а не догадкой по описанию.
+
+    Разница между бесплатным тиром, подпиской и оплатой по токенам решает
+    выбор быстрее любого другого признака, и прятать её в конец примечания
+    значит заставлять читать всё подряд.
+    """
+
     note: str = ""
 
 
 MODEL_PRESETS: tuple[ModelPreset, ...] = (
     ModelPreset(
         key="opencode-zen",
+        pricing="бесплатно",
         title="OpenCode Zen",
         model="openai/big-pickle",
         provider="openai",
@@ -46,6 +55,7 @@ MODEL_PRESETS: tuple[ModelPreset, ...] = (
     ),
     ModelPreset(
         key="opencode-go",
+        pricing="подписка, от $10 в месяц",
         title="OpenCode Go (подписка)",
         model="openai/kimi-k3",
         provider="openai",
@@ -60,6 +70,7 @@ MODEL_PRESETS: tuple[ModelPreset, ...] = (
     ),
     ModelPreset(
         key="openrouter-free",
+        pricing="бесплатно",
         title="OpenRouter, бесплатный маршрут",
         model="openrouter/openai/gpt-oss-120b:free",
         provider="openrouter",
@@ -70,6 +81,7 @@ MODEL_PRESETS: tuple[ModelPreset, ...] = (
     ),
     ModelPreset(
         key="groq",
+        pricing="бесплатный тир",
         title="Groq",
         model="groq/llama-3.3-70b-versatile",
         provider="groq",
@@ -79,6 +91,7 @@ MODEL_PRESETS: tuple[ModelPreset, ...] = (
     ),
     ModelPreset(
         key="gemini",
+        pricing="бесплатный тир",
         title="Google AI Studio",
         model="gemini/gemini-2.5-flash",
         provider="gemini",
@@ -88,6 +101,7 @@ MODEL_PRESETS: tuple[ModelPreset, ...] = (
     ),
     ModelPreset(
         key="cerebras",
+        pricing="бесплатный тир",
         title="Cerebras",
         model="cerebras/qwen-3-coder-480b",
         provider="cerebras",
@@ -97,6 +111,7 @@ MODEL_PRESETS: tuple[ModelPreset, ...] = (
     ),
     ModelPreset(
         key="anthropic",
+        pricing="по токенам",
         title="Anthropic",
         model="anthropic/claude-sonnet-5",
         provider="anthropic",
@@ -107,6 +122,7 @@ MODEL_PRESETS: tuple[ModelPreset, ...] = (
     ),
     ModelPreset(
         key="compatible",
+        pricing="свой сервер",
         title="Свой OpenAI-совместимый сервер",
         model="openai/",
         provider="openai",

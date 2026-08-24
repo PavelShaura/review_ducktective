@@ -97,6 +97,7 @@ class ModelPresetResponse(BaseModel):
     supports_tools: bool
     context_window: int
     signup_url: str
+    pricing: str
     note: str
 
     @classmethod
@@ -111,6 +112,7 @@ class ModelPresetResponse(BaseModel):
             supports_tools=preset.supports_tools,
             context_window=preset.context_window,
             signup_url=preset.signup_url,
+            pricing=preset.pricing,
             note=preset.note,
         )
 

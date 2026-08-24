@@ -594,6 +594,50 @@
     border-color: var(--color-tweed);
   }
 
+  /* Строка, в которую сложен весь путь агента по кодовой базе.
+
+     Десяток обращений своими карточками вытесняли с экрана ответ — то,
+     ради чего спрашивали. Здесь их след занимает одну строку и раскрывается,
+     когда источники нужно проверить. */
+  .trail-summary {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.3rem 0.6rem;
+    border: 1px dashed var(--color-tweed-dim);
+    border-radius: var(--radius-case);
+    background: transparent;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    color: var(--color-paper-dim);
+    text-align: left;
+    cursor: pointer;
+    transition:
+      border-color 140ms ease,
+      color 140ms ease;
+  }
+
+  .trail-summary:hover {
+    border-color: var(--color-brass-dim);
+    color: var(--color-brass);
+  }
+
+  .trail-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.15rem;
+    height: 1.15rem;
+    padding: 0 0.25rem;
+    border-radius: var(--radius-case);
+    background: color-mix(in srgb, var(--color-brass) 18%, transparent);
+    color: var(--color-brass);
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+  }
+
   /* Три пункта шапки — три разные вещи, и выглядеть они обязаны по-разному.
      Общая у них только посадка: одна высота, один шрифт, одна отбивка. */
   .nav-action {
@@ -729,6 +773,219 @@
     line-height: 1.1;
   }
 
+  /* Действия на карточке. Их четыре в ряд, и без рамок они читаются как
+     сплошная строка текста: непонятно даже, что по ним можно нажать. */
+  .card-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.35rem 0.75rem;
+    border-radius: var(--radius-case);
+    border: 1px solid var(--color-tweed-dim);
+    background: color-mix(in srgb, var(--color-paper) 4%, transparent);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    color: var(--color-paper-dim);
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      background-color 140ms ease,
+      border-color 140ms ease,
+      color 140ms ease,
+      transform 120ms ease;
+  }
+
+  .card-action:hover {
+    border-color: var(--color-brass-dim);
+    color: var(--color-brass);
+    background: color-mix(in srgb, var(--color-brass) 10%, transparent);
+  }
+
+  .card-action:active {
+    transform: translateY(1px);
+  }
+
+  .card-action:disabled {
+    opacity: 0.4;
+    cursor: default;
+    transform: none;
+  }
+
+  /* Обновление перечня — единственное действие, которое ходит к провайдеру
+     и меняет то, из чего потом выбирают. Поэтому оно заметнее соседей. */
+  .card-action-primary {
+    border-color: var(--color-brass-dim);
+    color: var(--color-brass);
+  }
+
+  .card-action-primary:hover {
+    background: color-mix(in srgb, var(--color-brass) 18%, transparent);
+    border-color: var(--color-brass);
+  }
+
+  /* Удаление уводит ключ вместе с подключением: тревожный тон появляется
+     при наведении, чтобы не пугать тем, мимо чего ходят каждый день. */
+  .card-action-danger:hover {
+    border-color: color-mix(in srgb, var(--color-critical) 70%, transparent);
+    color: var(--color-critical);
+    background: color-mix(in srgb, var(--color-critical) 10%, transparent);
+  }
+
+  /* Состояние подключения: работает оно сейчас или отключено.
+
+     Живой огонёк, а не просто цвет, — тем же приёмом, что у чата: он
+     единственный на карточке движется, и взгляд находит его первым. */
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.15rem 0.55rem;
+    border: 1px solid currentColor;
+    border-radius: var(--radius-case);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+  }
+
+  .status-live {
+    color: var(--color-confirmed);
+    background: color-mix(in srgb, var(--color-confirmed) 10%, transparent);
+  }
+
+  .status-off {
+    color: var(--color-paper-dim);
+    background: transparent;
+  }
+
+  .status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
+  .status-live .status-dot {
+    animation: status-pulse 2s ease-out infinite;
+  }
+
+  @keyframes status-pulse {
+    0% {
+      box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-confirmed) 70%, transparent);
+      opacity: 1;
+    }
+    70% {
+      box-shadow: 0 0 0 6px transparent;
+      opacity: 0.45;
+    }
+    100% {
+      box-shadow: 0 0 0 0 transparent;
+      opacity: 1;
+    }
+  }
+
+  /* Плитка провайдера в списке «добавить подключение».
+
+     Строчкой в ряд они читались перечнем слов, из которого не выбрать:
+     видно только имя, а решают цена и то, учится ли провайдер на запросах.
+     Поэтому плитка, и оба признака — на ней. */
+  .preset-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.85rem 1rem;
+    border: 1px solid var(--color-tweed-dim);
+    border-left: 3px solid var(--color-tweed-dim);
+    border-radius: var(--radius-case);
+    background: color-mix(in srgb, var(--color-paper) 3%, transparent);
+    text-align: left;
+    cursor: pointer;
+    transition:
+      border-color 140ms ease,
+      background-color 140ms ease,
+      transform 120ms ease;
+  }
+
+  .preset-card:hover {
+    border-color: var(--color-brass-dim);
+    border-left-color: var(--color-brass);
+    background: color-mix(in srgb, var(--color-brass) 8%, transparent);
+  }
+
+  .preset-card:active {
+    transform: translateY(1px);
+  }
+
+  .preset-card[aria-pressed="true"] {
+    border-color: var(--color-brass);
+    border-left-color: var(--color-brass);
+    background: color-mix(in srgb, var(--color-brass) 14%, transparent);
+  }
+
+  .preset-title {
+    font-family: var(--font-display);
+    font-size: 15px;
+    color: var(--color-paper);
+  }
+
+  .preset-pricing {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    color: var(--color-paper-dim);
+  }
+
+  /* Куда уезжает код — не подпись, а штамп: это первое, что нужно увидеть
+     на карточке подключения. */
+  .trust-stamp {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.15rem 0.5rem;
+    border: 1px solid currentColor;
+    border-radius: var(--radius-case);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: lowercase;
+  }
+
+  .trust-stamp::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
+  .trust-local {
+    color: var(--color-confirmed);
+  }
+
+  .trust-private {
+    color: var(--color-brass);
+  }
+
+  .trust-training {
+    color: var(--color-major);
+  }
+
+  /* Мелкие факты о подключении: число моделей, окно, наличие ключа.
+     Разделены на плашки, потому что одной строкой через точки они
+     сливаются в предложение, которое никто не дочитывает. */
+  .fact-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.1rem 0.45rem;
+    border-radius: var(--radius-case);
+    background: color-mix(in srgb, var(--color-paper) 6%, transparent);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--color-paper-dim);
+    white-space: nowrap;
+  }
+
   /* Организация — не пункт меню, а подпись на папке: чьё это дело.
      Поэтому у неё две строки и вид корешка, а не кнопки. */
   .nav-org {
@@ -850,6 +1107,18 @@
     }
 
     .nav-signout:active {
+      transform: none;
+    }
+
+    .card-action:active {
+      transform: none;
+    }
+
+    .status-live .status-dot {
+      animation: none;
+    }
+
+    .preset-card:active {
       transform: none;
     }
   }

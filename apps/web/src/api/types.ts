@@ -388,6 +388,7 @@ export interface ModelPreset {
   supports_tools: boolean;
   context_window: number;
   signup_url: string;
+  pricing: string;
   note: string;
 }
 

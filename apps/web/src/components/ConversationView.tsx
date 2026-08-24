@@ -5,7 +5,8 @@ import { api } from "@/api/client";
 import type { ChatEvent, ChatMessage } from "@/api/types";
 import { Answer } from "@/components/Answer";
 import { DocumentAttachment } from "@/components/DocumentAttachment";
-import { ToolCard } from "@/components/ToolCard";
+import { ToolTrail } from "@/components/ToolTrail";
+import type { TrailTool } from "@/components/ToolTrail";
 import { useChatSocket } from "@/lib/useChatSocket";
 
 interface Props {
@@ -100,22 +101,21 @@ export function ConversationView({ conversationId, repositoryName, isIndexReady 
   return (
     <section className="flex h-full min-h-0 flex-col rounded-case border border-tweed-dim bg-ink-sunken">
       <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
-        {stored.map((message) => (
-          <StoredMessage key={message.id} message={message} />
-        ))}
+        {groupStored(stored).map((entry, index) =>
+          entry.kind === "trail" ? (
+            <ToolTrail key={`trail-${index}`} tools={entry.tools} isLive={false} />
+          ) : (
+            <StoredMessage key={entry.message.id} message={entry.message} />
+          ),
+        )}
 
         {pending ? <Bubble side="user">{pending}</Bubble> : null}
 
-        {live.map((item, index) =>
-          item.kind === "tool" ? (
-            <ToolCard
-              key={`${item.tool.callId}-${index}`}
-              name={item.tool.name}
-              arguments={item.tool.arguments}
-              result={item.tool.result}
-            />
+        {groupLive(live).map((entry, index) =>
+          entry.kind === "trail" ? (
+            <ToolTrail key={`trail-${index}`} tools={entry.tools} isLive={isAnswering} />
           ) : (
-            <LiveBubble key={index} piece={item} />
+            <LiveBubble key={index} piece={entry.piece} />
           ),
         )}
 
@@ -125,7 +125,7 @@ export function ConversationView({ conversationId, repositoryName, isIndexReady 
           <div className="flex h-full flex-col items-center justify-center gap-2 py-12 text-center">
             <p className="font-display text-lg text-paper">Разговор пуст</p>
             <p className="max-w-md text-[13px] text-paper-dim">
-              Спросите о коде {repositoryName} своими словами — точное имя знать не нужно.
+              Спросите о коде {repositoryName}.
             </p>
           </div>
         ) : null}
@@ -149,6 +149,96 @@ export function ConversationView({ conversationId, repositoryName, isIndexReady 
       />
     </section>
   );
+}
+
+type LiveEntry = { kind: "trail"; tools: TrailTool[] } | { kind: "piece"; piece: LivePiece };
+type StoredEntry = { kind: "trail"; tools: TrailTool[] } | { kind: "message"; message: ChatMessage };
+
+/**
+ * Складывает подряд идущие обращения в один след.
+ *
+ * Группируются именно соседние: обращения, разделённые ответом модели, —
+ * это два разных захода в кодовую базу, и слить их значило бы соврать
+ * о том, как агент рассуждал.
+ */
+function groupLive(items: LiveItem[]): LiveEntry[] {
+  const entries: LiveEntry[] = [];
+
+  for (const item of items) {
+    if (item.kind !== "tool") {
+      entries.push({ kind: "piece", piece: item });
+      continue;
+    }
+
+    const last = entries[entries.length - 1];
+    if (last && last.kind === "trail") {
+      last.tools.push(item.tool);
+    } else {
+      entries.push({ kind: "trail", tools: [item.tool] });
+    }
+  }
+
+  return entries;
+}
+
+/**
+ * То же для записанной истории.
+ *
+ * В базе обращение живёт двумя репликами — просьбой ассистента и ответом
+ * инструмента, — поэтому результат подшивается к последнему вызову
+ * с тем же именем: иначе след распался бы на пары «вызов» и «ответ».
+ */
+function groupStored(messages: ChatMessage[]): StoredEntry[] {
+  const entries: StoredEntry[] = [];
+
+  for (const message of messages) {
+    const trail = entries[entries.length - 1];
+
+    if (message.role === "tool") {
+      const pending = trail?.kind === "trail" ? trail.tools : [];
+      const target = [...pending].reverse().find((tool) => !tool.result);
+      if (target) {
+        target.result = message.content;
+      } else {
+        entries.push({
+          kind: "trail",
+          tools: [
+            {
+              callId: message.id,
+              name: message.tool_name ?? "",
+              arguments: "",
+              result: message.content,
+            },
+          ],
+        });
+      }
+      continue;
+    }
+
+    if (message.role === "assistant" && message.tool_calls.length > 0) {
+      const asked = message.tool_calls.map((call) => ({
+        callId: call.call_id,
+        name: call.name,
+        arguments: call.arguments,
+        result: "",
+      }));
+
+      if (trail && trail.kind === "trail") {
+        trail.tools.push(...asked);
+      } else {
+        entries.push({ kind: "trail", tools: asked });
+      }
+
+      if (message.content.trim()) {
+        entries.push({ kind: "message", message });
+      }
+      continue;
+    }
+
+    entries.push({ kind: "message", message });
+  }
+
+  return entries;
 }
 
 function absorb(items: LiveItem[], event: ChatEvent): LiveItem[] {
@@ -213,24 +303,23 @@ function closeDraft(items: LiveItem[]): LiveItem[] {
   return [...items.slice(0, -1), { kind: "thought", text: last.text }];
 }
 
+/**
+ * Реплика из истории — всё, кроме обращений к кодовой базе.
+ *
+ * Сами обращения сюда не доходят: их собирает в свёрнутый след `groupStored`,
+ * и рисовать их второй раз здесь значило бы показывать каждое дважды.
+ */
 function StoredMessage({ message }: { message: ChatMessage }) {
   if (message.role === "user") {
     return <Bubble side="user">{message.content}</Bubble>;
   }
 
   if (message.role === "tool") {
-    return <ToolCard name={message.tool_name ?? ""} arguments="" result={message.content} />;
+    return null;
   }
 
   if (message.tool_calls.length > 0) {
-    return (
-      <>
-        {message.content.trim() ? <Thought text={message.content} /> : null}
-        {message.tool_calls.map((call) => (
-          <ToolCard key={call.call_id} name={call.name} arguments={call.arguments} result="" />
-        ))}
-      </>
-    );
+    return message.content.trim() ? <Thought text={message.content} /> : null;
   }
 
   return (

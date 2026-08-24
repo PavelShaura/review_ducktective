@@ -4,6 +4,7 @@ interface Props {
   name: string;
   arguments: string;
   result: string;
+  dense?: boolean;
 }
 
 const TOOL_LABEL: Record<string, string> = {
@@ -11,6 +12,13 @@ const TOOL_LABEL: Record<string, string> = {
   get_definition: "читает определение",
   find_callers: "смотрит, кто вызывает",
   get_file_context: "смотрит окружение",
+  find_symbol: "ищет символ",
+  read_file: "читает файл",
+  list_files: "смотрит, что есть",
+  get_file_outline: "смотрит состав файла",
+  describe_repository: "осматривается",
+  project_docs: "читает документацию",
+  search_document: "ищет в документе",
 };
 
 /**
@@ -19,20 +27,28 @@ const TOOL_LABEL: Record<string, string> = {
  * Показывается свёрнутым: ответ важнее источников, но проверить источник
  * должно быть можно — иначе утверждение о чужом коде нечем подтвердить.
  */
-export function ToolCard({ name, arguments: args, result }: Props) {
+export function ToolCard({ name, arguments: args, result, dense = false }: Props) {
   const [isOpen, setIsOpen] = useState(false);
   const label = TOOL_LABEL[name] ?? name;
 
   return (
-    <div className="tool-card px-3 py-2">
+    <div className={dense ? "tool-card px-2.5 py-1" : "tool-card px-3 py-2"}>
       <button
         type="button"
         onClick={() => setIsOpen((previous) => !previous)}
         className="flex w-full items-baseline gap-2 text-left"
       >
-        <span className="case-label text-brass">{label}</span>
-        <span className="truncate font-mono text-[12px] text-paper-dim">{summarize(args)}</span>
-        <span className="ml-auto font-mono text-[12px] text-paper-dim">
+        <span className={`case-label text-brass ${dense ? "shrink-0" : ""}`}>{label}</span>
+        <span
+          className={`truncate font-mono text-paper-dim ${dense ? "text-[11px]" : "text-[12px]"}`}
+        >
+          {summarize(args)}
+        </span>
+        <span
+          className={`ml-auto shrink-0 font-mono text-paper-dim ${
+            dense ? "text-[11px]" : "text-[12px]"
+          }`}
+        >
           {result ? (isOpen ? "свернуть −" : "показать +") : "ищу…"}
         </span>
       </button>
