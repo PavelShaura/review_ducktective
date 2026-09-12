@@ -105,7 +105,7 @@ function Header({ user }: { user?: CurrentUser }) {
 
   return (
     <header className={`topbar sticky top-0 z-20 backdrop-blur ${isLifted ? "topbar-lifted" : ""}`}>
-      <div className="mx-auto flex w-full max-w-7xl flex-nowrap items-center gap-3 px-5 py-3">
+      <div className="menu-scroll mx-auto flex w-full max-w-7xl flex-nowrap items-center gap-3 overflow-x-auto px-5 py-3">
         <Link to="/" className="brand-link flex shrink-0 items-center gap-3">
           <img
             src="/mascot.webp"
@@ -124,7 +124,7 @@ function Header({ user }: { user?: CurrentUser }) {
 
         <span className="menu-divider hidden lg:block" aria-hidden />
 
-        <nav className="menu-scroll flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+        <nav className="flex shrink-0 items-center gap-1">
           {SECTIONS.map((section) => (
             <NavLink
               key={section.to}
@@ -145,8 +145,8 @@ function Header({ user }: { user?: CurrentUser }) {
           ))}
         </nav>
 
-        <span className="flex shrink-0 items-center gap-3">
-          <NavLink to="/cases/new" className="menu-action" title="Запустить ревью диффа">
+        <span className="ml-auto flex min-w-0 items-center gap-3">
+          <NavLink to="/cases/new" className="menu-action shrink-0" title="Запустить ревью диффа">
             + новое ревью
           </NavLink>
 
@@ -155,7 +155,7 @@ function Header({ user }: { user?: CurrentUser }) {
           {user?.organization ? (
             <NavLink
               to="/organization"
-              className="nav-org hidden xl:inline-flex"
+              className="nav-org hidden min-w-0 xl:inline-flex"
               title="Состав организации: участники, роли и приглашения"
             >
               <span className="nav-org-name">{user.organization.name}</span>
@@ -168,7 +168,7 @@ function Header({ user }: { user?: CurrentUser }) {
           <button
             type="button"
             onClick={() => void auth.signoutRedirect()}
-            className="menu-signout"
+            className="menu-signout shrink-0"
             title={user?.email ? `Выйти из учётной записи ${user.email}` : "Выйти"}
           >
             <span className="menu-signout-glyph" aria-hidden>

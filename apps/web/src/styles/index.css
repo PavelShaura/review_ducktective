@@ -1159,6 +1159,7 @@
     border-left: 3px solid var(--color-brass-dim);
     background: color-mix(in srgb, var(--color-paper) 4%, transparent);
     max-width: 13rem;
+    flex-shrink: 1;
     transition:
       border-color 140ms ease,
       background-color 140ms ease;
