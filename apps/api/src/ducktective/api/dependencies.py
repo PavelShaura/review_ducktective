@@ -16,6 +16,9 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
 )
 
+from ducktective.api.embedders import (
+    embedders_of,
+)
 from ducktective.application.chat.ask import (
     AskQuestion,
 )
@@ -34,9 +37,6 @@ from ducktective.core.review.ports import (
 )
 from ducktective.core.types import (
     TenantId,
-)
-from ducktective.llm.embedder import (
-    LiteLlmEmbedder,
 )
 from ducktective.llm.factory import (
     build_chat_agent,
@@ -176,15 +176,11 @@ def build_navigators(app: FastAPI, tenant_id: TenantId) -> IndexedNavigators:
     """
     settings: Settings = app.state.settings
     session_factory = app.state.session_factory
-    embedder = LiteLlmEmbedder(
-        model=settings.local_embedding_model,
-        dimensions=settings.embedding_dimensions,
-        base_url=settings.local_embedding_base_url or None,
-        api_key=settings.local_llm_api_key,
-    )
     return IndexedNavigators(
         symbols=SessionScopedSymbolReader(session_factory, tenant_id=tenant_id),
-        search=SessionScopedHybridSearch(session_factory, embedder, tenant_id=tenant_id),
+        search=SessionScopedHybridSearch(
+            session_factory, embedders_of(settings), tenant_id=tenant_id
+        ),
     )
 
 

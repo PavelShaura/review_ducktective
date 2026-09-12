@@ -8,6 +8,7 @@ from ducktective.indexing.parsers import (
     build_parser,
 )
 from ducktective.indexing.text_parser import (
+    HARD_CHUNK_TOKENS,
     TextParser,
 )
 
@@ -85,3 +86,12 @@ def test_markup_goes_through_the_composite_parser() -> None:
 
     assert parsed.chunks
     assert parsed.references == []
+
+
+def test_file_without_blank_lines_is_still_cut() -> None:
+    content = "\n".join(f'{{"key_{n}": "value {n} with some words"}},' for n in range(400))
+
+    parsed = TextParser().parse(path="fixtures/data.json", content=content)
+
+    assert len(parsed.chunks) > 1
+    assert all(chunk.token_count <= HARD_CHUNK_TOKENS + 20 for chunk in parsed.chunks)

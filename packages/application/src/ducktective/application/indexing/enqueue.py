@@ -53,7 +53,9 @@ class EnqueueIndexing(TransactionalUseCase):
         tenant_id: TenantId,
         repository_id: RepositoryId,
         revision: str,
+        embedding_backend: str | None = None,
     ) -> IndexSnapshotId:
+        """Ставит сборку в очередь; выбранный эмбеддер запоминается у репозитория."""
         async with self._unit_of_work:
             repository = await self._unit_of_work.code_repositories.get(repository_id)
             if repository.tenant_id != tenant_id:
@@ -64,6 +66,10 @@ class EnqueueIndexing(TransactionalUseCase):
                 raise IndexingAlreadyQueuedError(
                     "Индексация этого репозитория уже идёт — дождитесь её или отмените"
                 )
+
+            if embedding_backend is not None:
+                repository.choose_embedding_backend(embedding_backend)
+                await self._unit_of_work.commit()
 
             repository_path = repository.local_path
             previous = await self._unit_of_work.index_snapshots.find_latest_ready(repository_id)

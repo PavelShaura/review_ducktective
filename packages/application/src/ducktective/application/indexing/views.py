@@ -10,6 +10,7 @@ from ducktective.core.indexing.entities import (
     IndexStats,
 )
 from ducktective.core.indexing.ports import (
+    IndexTotals,
     VectorCoverage,
 )
 from ducktective.core.indexing.value_objects import (
@@ -47,6 +48,15 @@ class IndexStateView:
     здесь."""
 
     embedding_stopped: bool = False
+    embedding_backend: str = ""
+    """Ключ сервера эмбеддингов, чей набор векторов ищет поиск."""
+
+    totals: IndexTotals = field(default_factory=IndexTotals)
+    """Что лежит в индексе сейчас — по базе, а не по последней сборке.
+
+    `stats` описывают одну сборку: сколько она разобрала. Инкрементальная
+    сборка без изменений разбирает ноль, и это не размер индекса."""
+
     context_ready: bool = False
     """Есть ли снапшот, из которого ревью может взять окружение.
 
@@ -61,3 +71,18 @@ class IndexStateView:
     @property
     def is_running(self) -> bool:
         return self.status in {SnapshotStatus.PENDING, SnapshotStatus.RUNNING}
+
+    @property
+    def is_embedding(self) -> bool:
+        """Идёт ли досчёт векторов прямо сейчас.
+
+        Готовый снапшот на этапе досчёта без признака остановки и без
+        причины отказа. Неполное покрытие само по себе досчётом не считается:
+        векторы другой модели или прерванный досчёт выглядят так же.
+        """
+        return (
+            self.status is SnapshotStatus.READY
+            and self.stage is SnapshotStage.EMBEDDING
+            and not self.embedding_stopped
+            and self.failure_reason is None
+        )

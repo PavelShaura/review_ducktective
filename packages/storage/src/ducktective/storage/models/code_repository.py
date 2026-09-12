@@ -58,3 +58,4 @@ class CodeRepositoryModel(Base):
         )
     )
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    embedding_backend: Mapped[str | None] = mapped_column(String(64), nullable=True)

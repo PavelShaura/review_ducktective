@@ -51,6 +51,13 @@ MAX_CHUNK_TOKENS = 400
 токенов хватает на секцию страницы или блок правил.
 """
 
+HARD_CHUNK_TOKENS = 2 * MAX_CHUNK_TOKENS
+"""Предел, после которого кусок режется и без пустой строки.
+
+Файл без пустых строк — минифицированный или сгенерированный — иначе идёт
+одним куском на весь себя, а модель эмбеддингов такой кусок обрезает молча.
+"""
+
 MIN_CHUNK_LINES = 3
 
 
@@ -101,10 +108,11 @@ def _chunks_of(lines: list[str], path: str, symbol: CodeSymbol) -> list[CodeChun
 
     for number, line in enumerate(lines, start=1):
         current.append(line)
+        tokens = estimate_tokens("\n".join(current))
         is_boundary = not line.strip() and len(current) >= MIN_CHUNK_LINES
-        is_full = estimate_tokens("\n".join(current)) >= MAX_CHUNK_TOKENS
+        is_full = tokens >= MAX_CHUNK_TOKENS
 
-        if is_boundary and is_full:
+        if (is_boundary and is_full) or tokens >= HARD_CHUNK_TOKENS:
             chunks.append(_chunk_of(current, start, number, path, symbol))
             current = []
             start = number + 1

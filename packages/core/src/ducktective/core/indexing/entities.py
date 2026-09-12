@@ -333,6 +333,16 @@ class IndexSnapshot(AggregateRoot):
             raise InvariantViolationError(f"Досчёт векторов не идёт: снапшот на этапе {self.stage}")
         self.embedding_stopped = True
 
+    def finish_embedding(self) -> None:
+        """Закрывает досчёт векторов: индексация закончена целиком.
+
+        Только с этапа досчёта: остановленный или упавший досчёт остаётся
+        на нём со своим признаком.
+        """
+        if self.stage is not SnapshotStage.EMBEDDING:
+            raise InvariantViolationError(f"Досчёт векторов не идёт: снапшот на этапе {self.stage}")
+        self.stage = SnapshotStage.COMPLETE
+
     def record_embedding_failure(self, reason: str) -> None:
         """Отмечает, что векторы досчитать не удалось.
 

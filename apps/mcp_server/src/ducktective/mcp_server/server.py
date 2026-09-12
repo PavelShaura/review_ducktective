@@ -82,7 +82,9 @@ def build_server(runtime: McpRuntime) -> MCPServer:
         С этого стоит начинать: остальные инструменты требуют имя репозитория,
         а отвечает он, только когда индекс собран.
         """
-        overviews = await SurveyRepositories(runtime.unit_of_work()).execute(runtime.tenant_id)
+        overviews = await SurveyRepositories(
+            runtime.unit_of_work(), embedders=runtime.embedders
+        ).execute(runtime.tenant_id)
         return render_repositories(overviews)
 
     @server.tool()
@@ -230,7 +232,9 @@ async def _guarded(runtime: McpRuntime, reference: str, action: _Action) -> str:
     except PermissionDeniedError as error:
         return str(error)
 
-    state = await GetIndexState(unit_of_work).execute(runtime.tenant_id, repository.id)
+    state = await GetIndexState(unit_of_work, embedders=runtime.embedders).execute(
+        runtime.tenant_id, repository.id
+    )
     answer = await action(_Target(repository_id=repository.id, index=state))
 
     return f"{clipped(answer, MAX_ANSWER_CHARS)}\n\n— {repository.name}: {describe_index(state)}"

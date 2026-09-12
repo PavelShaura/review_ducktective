@@ -22,10 +22,14 @@ from ducktective.core.indexing.entities import (
     SymbolEdge,
 )
 from ducktective.core.indexing.ports import (
+    IndexTotals,
     VectorCoverage,
 )
 from ducktective.core.indexing.value_objects import (
     SnapshotStatus,
+)
+from ducktective.core.indexing.vectors import (
+    deserves_vector,
 )
 from ducktective.core.llm.provider_connection import (
     ConnectionId,
@@ -331,6 +335,14 @@ class InMemorySourceFileRepository:
             and source_file.last_seen_snapshot_id in ready
         }
 
+    async def count_totals(self, repository_id: RepositoryId) -> IndexTotals:
+        files = self.live_files(repository_id)
+        return IndexTotals(
+            files=len(files),
+            symbols=sum(len(source_file.symbols) for source_file in files),
+            chunks=sum(len(source_file.chunks) for source_file in files),
+        )
+
     def live_files(self, repository_id: RepositoryId) -> list[SourceFile]:
         """Неудалённые файлы репозитория."""
         return [
@@ -393,6 +405,13 @@ class InMemorySymbolEdgeRepository:
     async def refresh_statistics(self) -> None:
         """В памяти планировать нечего."""
 
+    async def count_resolved(self, repository_id: RepositoryId) -> int:
+        return sum(
+            1
+            for edge in self._edges
+            if edge.repository_id == repository_id and edge.target_symbol_id is not None
+        )
+
     async def resolve_pending(self, repository_id: RepositoryId) -> int:
         known = self._known_symbols(repository_id)
 
@@ -441,13 +460,10 @@ class InMemoryEmbeddingStore:
         self._models: dict[str, EmbeddingModelId] = {}
         self._vectors: dict[tuple[EmbeddingModelId, CodeChunkId], list[float]] = {}
 
-    async def count_coverage(self, repository_id: RepositoryId) -> VectorCoverage:
-        chunk_ids = {
-            chunk.id
-            for source_file in self._source_files.live_files(repository_id)
-            for chunk in source_file.chunks
-        }
-        embedded = {chunk_id for _, chunk_id in self._vectors}
+    async def count_coverage(self, repository_id: RepositoryId, model: str) -> VectorCoverage:
+        chunk_ids = {chunk.id for chunk in self._chunks_of(repository_id)}
+        model_id = self._models.get(model)
+        embedded = {chunk_id for owner, chunk_id in self._vectors if owner == model_id}
         return VectorCoverage(
             chunks=len(chunk_ids),
             embedded=len(chunk_ids & embedded),
@@ -506,9 +522,11 @@ class InMemoryEmbeddingStore:
         return []
 
     def _chunks_of(self, repository_id: RepositoryId) -> list[CodeChunk]:
+        """Чанки, заслуживающие вектора: правило то же, что в базе."""
         return [
             chunk
             for source_file in self._source_files.live_files(repository_id)
+            if deserves_vector(source_file.path)
             for chunk in source_file.chunks
         ]
 

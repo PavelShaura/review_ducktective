@@ -1,6 +1,9 @@
 from ducktective.application.exceptions import (
     PermissionDeniedError,
 )
+from ducktective.application.indexing.embedders import (
+    EmbedderCatalogue,
+)
 from ducktective.application.indexing.read_state import (
     GetIndexState,
 )
@@ -28,9 +31,9 @@ class SurveyRepositories:
     приходится угадывать, а угадав — выяснять, отвечает ли он вообще.
     """
 
-    def __init__(self, unit_of_work: UnitOfWork) -> None:
+    def __init__(self, unit_of_work: UnitOfWork, *, embedders: EmbedderCatalogue) -> None:
         self._unit_of_work = unit_of_work
-        self._read_state = GetIndexState(unit_of_work)
+        self._read_state = GetIndexState(unit_of_work, embedders=embedders)
 
     async def execute(self, tenant_id: TenantId) -> list[RepositoryOverview]:
         async with self._unit_of_work:

@@ -10,6 +10,10 @@ import pytest
 from ducktective.application.exceptions import (
     PermissionDeniedError,
 )
+from ducktective.application.indexing.embedders import (
+    EmbedderCatalogue,
+    EmbedderChoice,
+)
 from ducktective.application.retrieval.read_index import (
     NavigateCode,
     SurveyRepositories,
@@ -44,6 +48,15 @@ from tests.fakes import (
     FakeSymbolReader,
     FakeUnitOfWork,
 )
+
+
+def catalogue(*names: str) -> EmbedderCatalogue:
+    return EmbedderCatalogue(
+        [
+            EmbedderChoice(key=name, title=name, vector_set=name)
+            for name in names or ("fake-embedder",)
+        ]
+    )
 
 
 TENANT_ID = TenantId(uuid4())
@@ -265,7 +278,7 @@ async def test_survey_lists_repositories_with_index_state() -> None:
     unit_of_work = FakeUnitOfWork()
     repository = registered(unit_of_work)
 
-    overviews = await SurveyRepositories(unit_of_work).execute(TENANT_ID)
+    overviews = await SurveyRepositories(unit_of_work, embedders=catalogue()).execute(TENANT_ID)
 
     assert [overview.name for overview in overviews] == ["ducktective"]
     assert overviews[0].repository_id == repository.id
@@ -276,4 +289,4 @@ async def test_survey_does_not_show_foreign_repositories() -> None:
     unit_of_work = FakeUnitOfWork()
     registered(unit_of_work, tenant_id=OTHER_TENANT_ID)
 
-    assert await SurveyRepositories(unit_of_work).execute(TENANT_ID) == []
+    assert await SurveyRepositories(unit_of_work, embedders=catalogue()).execute(TENANT_ID) == []

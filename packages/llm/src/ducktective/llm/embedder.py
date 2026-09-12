@@ -48,10 +48,11 @@ class LiteLlmEmbedder:
         dimensions: int,
         base_url: str | None = None,
         api_key: str = "",
+        vector_set: str = "",
         batch_size: int = DEFAULT_BATCH_SIZE,
         timeout_seconds: float = 120.0,
     ) -> None:
-        self._name = model
+        self._name = vector_set or model
         self._model = _qualify(model, base_url)
         self._dimensions = dimensions
         self._base_url = base_url
@@ -61,11 +62,10 @@ class LiteLlmEmbedder:
 
     @property
     def name(self) -> str:
-        """Имя модели без префикса провайдера.
+        """Имя набора векторов в базе.
 
-        Под этим именем набор векторов лежит в базе, и способ обращения
-        к модели не должен на него влиять: сменив локальный сервер на
-        другой, пересчитывать индекс не нужно.
+        Названо отдельно от модели у сервера: два сервера с одними весами
+        пишут в один набор, и смена сервера не требует пересчёта.
         """
         return self._name
 

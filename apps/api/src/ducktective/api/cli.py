@@ -41,6 +41,9 @@ from ducktective.api.dev import (
     plan,
     supervise,
 )
+from ducktective.api.embedders import (
+    embedders_of,
+)
 from ducktective.api.rendering import (
     render_index_outcome,
     render_markdown,
@@ -145,9 +148,6 @@ from ducktective.indexing.parsers import (
 from ducktective.llm.code_reviewer import (
     PROMPT_SET_NAME,
     system_prompt,
-)
-from ducktective.llm.embedder import (
-    LiteLlmEmbedder,
 )
 from ducktective.llm.factory import (
     build_code_reviewers,
@@ -620,12 +620,7 @@ async def _embed(
     и граф символов от неё не зависят, поэтому ошибка сообщается, а прогон
     считается состоявшимся.
     """
-    embedder = LiteLlmEmbedder(
-        model=settings.local_embedding_model,
-        dimensions=settings.embedding_dimensions,
-        base_url=settings.local_embedding_base_url or None,
-        api_key=settings.local_llm_api_key,
-    )
+    embedder = next(iter(embedders_of(settings).values()))
 
     try:
         with console.status("[dim]Считаю векторы…[/]", spinner="dots"):
@@ -691,15 +686,9 @@ def _build_context_builder(
     пока транзакция прогона закрыта, и делить одну сессию между ними значило бы
     открывать её раньше времени.
     """
-    embedder = LiteLlmEmbedder(
-        model=settings.local_embedding_model,
-        dimensions=settings.embedding_dimensions,
-        base_url=settings.local_embedding_base_url or None,
-        api_key=settings.local_llm_api_key,
-    )
     return SessionScopedContextBuilder(
         session_factory,
-        embedder,
+        embedders_of(settings),
         tenant_id=tenant_id,
         token_budget=settings.context_token_budget,
     )
@@ -795,12 +784,7 @@ def _build_indexed_navigators(
         symbols=SessionScopedSymbolReader(session_factory, tenant_id=tenant_id),
         search=SessionScopedHybridSearch(
             session_factory,
-            LiteLlmEmbedder(
-                model=settings.local_embedding_model,
-                dimensions=settings.embedding_dimensions,
-                base_url=settings.local_embedding_base_url or None,
-                api_key=settings.local_llm_api_key,
-            ),
+            embedders_of(settings),
             tenant_id=tenant_id,
         ),
     )

@@ -10,6 +10,12 @@ from pydantic_settings import (
     SettingsConfigDict,
 )
 
+from ducktective.config.embedding import (
+    DEFAULT_BACKEND_KEY,
+    EmbeddingBackend,
+    load_embedding_backends,
+)
+
 
 class DeploymentProfile(StrEnum):
     DEV = "dev"
@@ -45,9 +51,20 @@ class Settings(BaseSettings):
     local_llm_provider: str = "ollama"
     local_llm_base_url: str = "http://localhost:11434"
     local_llm_api_key: str = ""
-    local_embedding_model: str = "nomic-embed-text"
+    local_embedding_model: str = "nomic-embed-text-q8"
     local_embedding_base_url: str = "http://localhost:11434/v1"
     """Эмбеддер из compose: Ollama на CPU, независимо от того, где живёт LLM."""
+    local_embedding_title: str = "Ollama из compose"
+    local_embedding_note: str = (
+        "Считает на CPU и медленно, зато всегда рядом с приложением: по этому "
+        "набору векторов идёт поиск по смыслу по умолчанию. Отдельно поднятая "
+        "модель на GPU считает быстрее — если пишет в тот же набор, посчитанное "
+        "ею подхватится здесь."
+    )
+    local_embedding_vector_set: str = "nomic-embed-text-v1.5"
+    """Имя набора векторов эмбеддера по умолчанию."""
+    embedding_backends_file: Path = Path("embedding_backends.json")
+    """Дополнительные серверы эмбеддингов, выбираемые при индексации."""
     embedding_dimensions: int = 768
     context_token_budget: int = 2000
     local_reranker_model: str = "bge-reranker-v2-m3"
@@ -172,6 +189,19 @@ class Settings(BaseSettings):
     def cloud_providers_allowed(self) -> bool:
         """В air-gapped профиле облачные провайдеры запрещены на уровне конфигурации."""
         return self.deployment_profile is not DeploymentProfile.AIRGAPPED
+
+    def embedding_backends(self) -> tuple[EmbeddingBackend, ...]:
+        """Все серверы эмбеддингов: из compose по умолчанию плюс реестр."""
+        default = EmbeddingBackend(
+            key=DEFAULT_BACKEND_KEY,
+            title=self.local_embedding_title,
+            model=self.local_embedding_model,
+            base_url=self.local_embedding_base_url or self.local_llm_base_url,
+            api_key=self.local_llm_api_key,
+            vector_set=self.local_embedding_vector_set,
+            note=self.local_embedding_note,
+        )
+        return (default, *load_embedding_backends(self.embedding_backends_file))
 
     def require_database_url(self) -> str:
         """Адреса хранилищ не обязательны: автономный режим CLI работает без них."""

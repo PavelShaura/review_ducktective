@@ -170,7 +170,7 @@ function IndexRow({ repository }: { repository: Repository }) {
     queryFn: () => api.getIndexState(repository.id),
   });
 
-  const stats = state.data?.stats;
+  const totals = state.data?.totals;
 
   return (
     <li className="rounded-case border border-tweed-dim bg-ink-raised">
@@ -184,9 +184,9 @@ function IndexRow({ repository }: { repository: Repository }) {
             {state.data?.commit_sha ? (
               <span className="fact-chip">ревизия {shortSha(state.data.commit_sha)}</span>
             ) : null}
-            {stats ? <span className="fact-chip">{stats.symbols} символов</span> : null}
-            {stats ? <span className="fact-chip">{stats.chunks} фрагментов</span> : null}
-            {stats ? <span className="fact-chip">{stats.edges_resolved} связей</span> : null}
+            {totals?.files ? <span className="fact-chip">{totals.symbols} символов</span> : null}
+            {totals?.files ? <span className="fact-chip">{totals.chunks} фрагментов</span> : null}
+            {totals?.files ? <span className="fact-chip">{totals.edges} связей</span> : null}
             <span className="fact-chip">{repository.local_path}</span>
           </span>
         </span>

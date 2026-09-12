@@ -91,7 +91,7 @@ function label(state: IndexState, busy: boolean): string {
     return state.stage_title ? `индексирую · ${state.stage_title}` : "индексирую";
   }
   if (state.context_ready) {
-    const files = state.stats?.files_total;
+    const files = state.totals.files;
     return files ? `индекс готов · ${files} файлов` : "индекс готов";
   }
   return "индекса нет";

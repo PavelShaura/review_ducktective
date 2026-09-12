@@ -16,6 +16,9 @@ from ducktective.api.dependencies import (
     VcsProviderDependency,
     tenant_model_choices,
 )
+from ducktective.api.embedders import (
+    embedder_catalogue,
+)
 from ducktective.api.schemas.code_repository import (
     AvailableModelResponse,
     RegisterRepositoryRequest,
@@ -25,6 +28,7 @@ from ducktective.api.schemas.code_repository import (
 from ducktective.api.schemas.indexing import (
     CancelIndexingResponse,
     DeleteIndexResponse,
+    EmbedderChoiceResponse,
     IndexStateResponse,
     StartIndexingRequest,
     StartIndexingResponse,
@@ -83,6 +87,23 @@ from ducktective.llm.factory import (
 
 
 router = APIRouter(prefix="/repositories", tags=["repositories"])
+
+
+@router.get("/embedders", response_model=list[EmbedderChoiceResponse])
+async def list_embedders(
+    _member: MemberDependency,
+    settings: SettingsDependency,
+) -> list[EmbedderChoiceResponse]:
+    """Серверы эмбеддингов, из которых выбирают при индексации; первый — по умолчанию."""
+    return [
+        EmbedderChoiceResponse(
+            key=choice.key,
+            title=choice.title,
+            note=choice.note,
+            vector_set=choice.vector_set,
+        )
+        for choice in embedder_catalogue(settings).choices
+    ]
 
 
 @router.post("", response_model=RepositoryResponse, status_code=status.HTTP_201_CREATED)
@@ -170,8 +191,9 @@ async def get_index_state(
     repository_id: UUID,
     member: MemberDependency,
     unit_of_work: TenantUnitOfWorkDependency,
+    settings: SettingsDependency,
 ) -> IndexStateResponse:
-    use_case = GetIndexState(unit_of_work)
+    use_case = GetIndexState(unit_of_work, embedders=embedder_catalogue(settings))
 
     try:
         view = await use_case.execute(member.tenant_id, RepositoryId(repository_id))
@@ -224,12 +246,19 @@ async def start_indexing(
     event_publisher: EventPublisherDependency,
     vcs_provider: VcsProviderDependency,
     task_queue: TaskQueueDependency,
+    settings: SettingsDependency,
 ) -> StartIndexingResponse:
     """Ставит индексацию в очередь.
 
     Запрос не ждёт результата: полная индексация чужого репозитория занимает
     минуты, а состояние потом опрашивается через GET.
     """
+    catalogue = embedder_catalogue(settings)
+    if payload.embedding_backend is not None and not catalogue.is_known(payload.embedding_backend):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"Сервер эмбеддингов «{payload.embedding_backend}» не настроен",
+        )
     use_case = EnqueueIndexing(unit_of_work, event_publisher, vcs_provider)
 
     try:
@@ -237,6 +266,7 @@ async def start_indexing(
             member.tenant_id,
             RepositoryId(repository_id),
             payload.revision,
+            embedding_backend=payload.embedding_backend,
         )
     except EntityNotFoundError as error:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
@@ -253,6 +283,7 @@ async def start_indexing(
         str(member.tenant_id),
         payload.revision,
         str(snapshot_id),
+        payload.embedding_backend,
         _queue_name=INDEX_QUEUE,
     )
     return StartIndexingResponse(queued=True, revision=payload.revision)

@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { api } from "@/api/client";
-import type { IndexState as State } from "@/api/types";
+import type { EmbedderChoice, IndexState as State } from "@/api/types";
 import { formatDateTime, shortSha } from "@/lib/format";
 
 interface Props {
@@ -49,8 +49,16 @@ export function IndexState({ repositoryId }: Props) {
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["index", repositoryId] });
 
+  const embedders = useQuery({
+    queryKey: ["embedders"],
+    queryFn: () => api.listEmbedders(),
+    staleTime: 5 * 60 * 1000,
+  });
+  const [embedder, setEmbedder] = useState<string | null>(null);
+
   const start = useMutation({
-    mutationFn: () => api.startIndexing(repositoryId),
+    mutationFn: () =>
+      api.startIndexing(repositoryId, "HEAD", embedder ?? data?.embedding_backend ?? undefined),
     onSuccess: invalidate,
   });
 
@@ -76,7 +84,8 @@ export function IndexState({ repositoryId }: Props) {
   const queued = data?.status === "pending";
   const running = data?.status === "running";
   const busy = queued || running || start.isPending;
-  const embedding = vectorsPending(data);
+  const embedding = Boolean(data?.is_embedding);
+  const incomplete = vectorsPending(data);
   const hasIndex = Boolean(data?.snapshot_id);
 
   return (
@@ -94,7 +103,8 @@ export function IndexState({ repositoryId }: Props) {
 
       {data?.status === "cancelled" ? (
         <p className="mt-2 text-[13px] text-paper-dim">
-          Прошлая сборка отменена — записанное откатилось, индекс не изменился.
+          Последняя сборка отменена — записанное откатилось
+          {data.context_ready ? ", ревью работает по прежнему индексу." : ", индекса нет."}
         </p>
       ) : null}
 
@@ -111,7 +121,7 @@ export function IndexState({ repositoryId }: Props) {
         </p>
       ) : null}
 
-      {data?.is_ready && embedding ? <Vectors state={data} /> : null}
+      {data?.context_ready && (embedding || incomplete) ? <Vectors state={data} /> : null}
 
       {data?.embedding_stopped ? (
         <p className="mt-2 text-[13px] text-paper-dim">
@@ -121,6 +131,14 @@ export function IndexState({ repositoryId }: Props) {
       ) : null}
 
       {queued ? <Queued state={data} /> : null}
+
+      {!busy && !embedding && embedders.data && embedders.data.length > 1 ? (
+        <EmbedderPicker
+          choices={embedders.data}
+          value={embedder ?? data?.embedding_backend ?? ""}
+          onChange={setEmbedder}
+        />
+      ) : null}
 
       <div className="mt-3 flex flex-wrap items-center justify-end gap-2 border-t border-tweed-dim pt-3">
         {hasIndex && !busy && !embedding ? (
@@ -155,6 +173,47 @@ export function IndexState({ repositoryId }: Props) {
         )}
       </div>
     </div>
+  );
+}
+
+interface EmbedderPickerProps {
+  choices: EmbedderChoice[];
+  value: string;
+  onChange: (key: string) => void;
+}
+
+/**
+ * Каким сервером считать векторы.
+ *
+ * Показывается только когда серверов больше одного: выбор из одного —
+ * не выбор. Пояснение к выбранному стоит прямо под списком, а не в
+ * подсказке при наведении: разница между «долго на CPU» и «быстро на
+ * соседнем хосте» решает, стоит ли вообще нажимать.
+ */
+function EmbedderPicker({ choices, value, onChange }: EmbedderPickerProps) {
+  const chosen = choices.find((choice) => choice.key === value) ?? choices[0];
+  if (!chosen) {
+    return null;
+  }
+
+  return (
+    <label className="mt-3 block space-y-1.5">
+      <span className="case-label">векторы считает</span>
+      <select
+        value={chosen.key}
+        onChange={(event) => onChange(event.target.value)}
+        className="w-full rounded-case border border-tweed-dim bg-ink-sunken px-2 py-1.5 font-mono text-[12px] text-paper"
+      >
+        {choices.map((choice) => (
+          <option key={choice.key} value={choice.key}>
+            {choice.title}
+          </option>
+        ))}
+      </select>
+      {chosen.note ? (
+        <span className="block text-[11px] leading-snug text-paper-dim">{chosen.note}</span>
+      ) : null}
+    </label>
   );
 }
 
@@ -329,6 +388,9 @@ interface VectorsProps {
  * Досчёт векторов после того, как символы и граф уже готовы.
  *
  * Знаменатель здесь известен, в отличие от связывания, поэтому шкала честная.
+ * Двигается она пачками раз в полминуты, и между прыжками счётчик времени —
+ * единственное, что отличает работу от остановки. Отсчёт идёт от конца
+ * разбора: досчёт начинается сразу за ним.
  * Без неё индекс выглядит собранным, хотя поиск по смыслу ещё не работает —
  * и человек делает вывод о качестве по неполному индексу.
  *
@@ -339,6 +401,7 @@ function Vectors({ state }: VectorsProps) {
   const { chunks, embedded } = state.vectors;
   const percent = Math.min(100, Math.round((embedded / chunks) * 100));
   const stalled = Boolean(state.failure_reason);
+  const idle = !state.is_embedding && !stalled;
 
   return (
     <div className="mt-3">
@@ -350,7 +413,8 @@ function Vectors({ state }: VectorsProps) {
       </div>
       <p className="case-label mt-1.5">
         символы и граф готовы · векторы {embedded} из {chunks} · {percent}%
-        {stalled ? " · досчёт остановлен" : ""}
+        {stalled ? " · досчёт остановлен" : idle ? " · досчёт не идёт" : ""}
+        {state.is_embedding ? <Elapsed since={state.finished_at} /> : null}
       </p>
       {stalled ? (
         <p className="mt-1.5 text-[13px] text-critical">{state.failure_reason}</p>
@@ -362,7 +426,9 @@ function Vectors({ state }: VectorsProps) {
         называется иначе, чем запрос.{" "}
         {stalled
           ? "Досчёт оборвался, сам он не возобновится: почините доступ к модели и соберите индекс заново — посчитанное сохранено, пойдёт только остаток."
-          : "Пока векторы считаются, ревью опирается на слова и граф: оно работает, но похожие места находит хуже."}
+          : idle
+            ? "Векторов текущей модели не хватает — они посчитаны другой моделью или досчёт не был доведён до конца. Нажмите «обновить»: посчитанное сохранено, пойдёт только остаток."
+            : "Пока векторы считаются, ревью опирается на слова и граф: оно работает, но похожие места находит хуже."}
       </p>
     </div>
   );
@@ -376,11 +442,12 @@ interface QueuedProps {
  * Почему задача стоит в очереди.
  *
  * Ожидание бывает двух видов, и лечатся они противоположно: занятый воркер
- * требует терпения, отсутствующий — запуска. Один и тот же совет на оба
- * случая предлагает запускать то, что уже работает.
+ * требует терпения, отсутствующий — запуска. Занятость снаружи не видна —
+ * очередь живёт в Redis, а не в состоянии индекса, — поэтому названы обе
+ * причины и срок, после которого верить второй.
  */
 function Queued({ state }: QueuedProps) {
-  if (vectorsPending(state)) {
+  if (state?.is_embedding) {
     return (
       <p className="mt-2 text-[13px] text-paper-dim">
         Воркер досчитывает векторы прошлой сборки — задача пойдёт следом.
@@ -452,7 +519,9 @@ function describe(state: State | undefined, isStarting: boolean): string {
     return "последняя попытка не удалась";
   }
   if (!state?.is_ready || !state.stats) {
-    return "не собран — ревью пойдёт по одному диффу, без окружения";
+    return state?.context_ready
+      ? `индекс прежний · ${state.totals.files} файлов`
+      : "не собран — ревью пойдёт по одному диффу, без окружения";
   }
 
   const when = state.finished_at ? ` · собран ${formatDateTime(state.finished_at)}` : "";
@@ -474,12 +543,12 @@ function vectorsPending(state: State | undefined): boolean {
 }
 
 /**
- * Считаются ли векторы прямо сейчас.
+ * Считаются ли векторы прямо сейчас — по слову сервера, не по доле.
  *
- * Отличается от `vectorsPending` одним: оборвавшийся досчёт остаётся
- * недосчитанным, но перестаёт двигаться. Опрашивать сервер дальше нечего,
- * а блок про векторы показывать надо — там названа причина.
+ * Неполное покрытие само по себе не признак счёта: векторы могли быть
+ * посчитаны другой моделью, а досчёт — оборваться. Опрашивать сервер
+ * дальше есть смысл только пока он сам говорит, что считает.
  */
 function vectorsAdvancing(state: State | undefined): boolean {
-  return vectorsPending(state) && !state?.failure_reason;
+  return Boolean(state?.is_embedding);
 }

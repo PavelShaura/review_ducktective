@@ -53,8 +53,8 @@ from ducktective.core.types import (
 from ducktective.indexing.parsers import (
     build_parser,
 )
-from ducktective.llm.embedder import (
-    LiteLlmEmbedder,
+from ducktective.llm.factory import (
+    build_embedders,
 )
 from ducktective.observability.logging import (
     configure_logging,
@@ -112,6 +112,7 @@ async def build_index_task(
     tenant_id: str,
     revision: str = "HEAD",
     snapshot_id: str | None = None,
+    embedding_backend: str | None = None,
 ) -> dict[str, Any]:
     """Фоновая индексация репозитория.
 
@@ -153,6 +154,7 @@ async def build_index_task(
         unit_of_work,
         command.repository_id,
         outcome.snapshot.id,
+        embedding_backend,
     )
 
     stats = outcome.stats
@@ -198,13 +200,21 @@ async def _embed(
     unit_of_work: SqlAlchemyUnitOfWork,
     repository_id: RepositoryId,
     snapshot_id: IndexSnapshotId,
+    embedding_backend: str | None,
 ) -> int:
-    embedder = LiteLlmEmbedder(
-        model=settings.local_embedding_model,
-        dimensions=settings.embedding_dimensions,
-        base_url=settings.local_embedding_base_url or None,
-        api_key=settings.local_llm_api_key,
-    )
+    """Считает векторы выбранным сервером.
+
+    Пустой ключ — выбор, записанный у репозитория; неизвестный — сервер
+    по умолчанию.
+    """
+    if embedding_backend is None:
+        async with unit_of_work:
+            repository = await unit_of_work.code_repositories.get(repository_id)
+            embedding_backend = repository.embedding_backend
+
+    backends = settings.embedding_backends()
+    backend = next((item for item in backends if item.key == embedding_backend), backends[0])
+    embedder = build_embedders([backend], dimensions=settings.embedding_dimensions)[backend.key]
 
     try:
         outcome = await BuildEmbeddings(unit_of_work, embedder).execute(
@@ -216,13 +226,26 @@ async def _embed(
         await _record_embedding_failure(
             unit_of_work,
             snapshot_id,
-            f"Векторы досчитаны не полностью: модель {settings.local_embedding_model} "
-            f"по адресу {settings.local_embedding_base_url or settings.local_llm_base_url} "
-            f"не ответила. {error}",
+            f"Векторы досчитаны не полностью: {backend.title} — модель {backend.model} "
+            f"по адресу {backend.base_url} не ответила. {error}",
         )
         return 0
 
+    if not outcome.stopped:
+        await _finish_embedding(unit_of_work, snapshot_id)
     return outcome.total
+
+
+async def _finish_embedding(
+    unit_of_work: SqlAlchemyUnitOfWork,
+    snapshot_id: IndexSnapshotId,
+) -> None:
+    """Закрывает досчёт: без этой отметки он неотличим от идущего."""
+    async with unit_of_work:
+        snapshot = await unit_of_work.index_snapshots.get(snapshot_id)
+        if snapshot.stage is SnapshotStage.EMBEDDING and not snapshot.embedding_stopped:
+            snapshot.finish_embedding()
+        await unit_of_work.commit()
 
 
 async def _record_embedding_failure(

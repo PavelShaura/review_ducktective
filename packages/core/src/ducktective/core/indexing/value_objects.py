@@ -24,6 +24,8 @@ class SnapshotStage(StrEnum):
     STORING = "storing"
     LINKING = "linking"
     EMBEDDING = "embedding"
+    COMPLETE = "complete"
+    """Векторы досчитаны; индексация закончена целиком."""
 
 
 STAGE_TITLES = {
@@ -31,6 +33,7 @@ STAGE_TITLES = {
     SnapshotStage.STORING: "сохраняю символы и фрагменты",
     SnapshotStage.LINKING: "строю граф связей",
     SnapshotStage.EMBEDDING: "считаю векторы",
+    SnapshotStage.COMPLETE: "готов",
 }
 
 

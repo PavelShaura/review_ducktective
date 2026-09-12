@@ -1,0 +1,11 @@
+[
+  {
+    "key": "gpu-host",
+    "title": "LM Studio на хосте с GPU",
+    "model": "text-embedding-nomic-embed-text-v1.5",
+    "base_url": "http://<host-с-gpu>:1234/v1",
+    "api_key": "lm-studio",
+    "vector_set": "nomic-embed-text-v1.5",
+    "note": "Те же веса, что у Ollama из compose, но на видеокарте в разы быстрее. Пишет в тот же набор векторов: посчитанное здесь видит и поиск по умолчанию. Хост должен быть включён."
+  }
+]

@@ -17,6 +17,10 @@ from ducktective.application.indexing.build_index import (
     IndexingCancelledError,
     IndexOutcome,
 )
+from ducktective.application.indexing.embedders import (
+    EmbedderCatalogue,
+    EmbedderChoice,
+)
 from ducktective.application.indexing.enqueue import (
     EnqueueIndexing,
 )
@@ -44,6 +48,15 @@ from tests.fakes import (
     FakeUnitOfWork,
     FakeVcsProvider,
 )
+
+
+def catalogue(*names: str) -> EmbedderCatalogue:
+    return EmbedderCatalogue(
+        [
+            EmbedderChoice(key=name, title=name, vector_set=name)
+            for name in names or ("fake-embedder",)
+        ]
+    )
 
 
 MODULE = "class Builder:\n    def build(self):\n        return 1\n"
@@ -332,7 +345,9 @@ async def test_context_stays_available_while_the_index_is_rebuilt() -> None:
         "HEAD",
     )
 
-    state = await GetIndexState(unit_of_work).execute(tenant_id, repository_id)
+    state = await GetIndexState(unit_of_work, embedders=catalogue()).execute(
+        tenant_id, repository_id
+    )
 
     assert state.status is SnapshotStatus.PENDING
     assert state.is_ready is False
@@ -349,7 +364,9 @@ async def test_first_build_leaves_review_without_context() -> None:
         "HEAD",
     )
 
-    state = await GetIndexState(unit_of_work).execute(tenant_id, repository_id)
+    state = await GetIndexState(unit_of_work, embedders=catalogue()).execute(
+        tenant_id, repository_id
+    )
 
     assert state.context_ready is False
 
@@ -368,9 +385,116 @@ async def test_vector_coverage_is_reported_separately_from_readiness() -> None:
     )
     await build(unit_of_work, vcs_provider, tenant_id, repository_id)
 
-    state = await GetIndexState(unit_of_work).execute(tenant_id, repository_id)
+    state = await GetIndexState(unit_of_work, embedders=catalogue()).execute(
+        tenant_id, repository_id
+    )
 
     assert state.is_ready is True
     assert state.vectors.chunks > 0
     assert state.vectors.embedded == 0
     assert state.vectors.is_complete is False
+
+
+async def test_vectors_of_another_model_do_not_count_as_coverage() -> None:
+    """Поиск ищет по векторам активной модели; чужие векторы ему не помогают."""
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, repository_id = prepare(unit_of_work)
+    vcs_provider = FakeVcsProvider(
+        tree={"app/report.py": ContentHash("hash-1")},
+        file_contents={"app/report.py": MODULE},
+    )
+    await build(unit_of_work, vcs_provider, tenant_id, repository_id)
+    old_model = await unit_of_work.embeddings.register_model("old-embedder", 3)
+    pending = await unit_of_work.embeddings.missing_chunks(repository_id, old_model)
+    await unit_of_work.embeddings.store(
+        old_model, [(chunk_id, [0.0, 0.0, 1.0]) for chunk_id, _, _ in pending]
+    )
+
+    old = await GetIndexState(unit_of_work, embedders=catalogue("old-embedder")).execute(
+        tenant_id, repository_id
+    )
+    new = await GetIndexState(unit_of_work, embedders=catalogue()).execute(tenant_id, repository_id)
+
+    assert old.vectors.embedded == old.vectors.chunks
+    assert new.vectors.embedded == 0
+
+
+async def test_totals_come_from_the_index_not_from_the_last_build() -> None:
+    """Инкрементальная сборка без изменений разбирает ноль файлов — это не размер индекса."""
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, repository_id = prepare(unit_of_work)
+    vcs_provider = FakeVcsProvider(
+        tree={"app/report.py": ContentHash("hash-1")},
+        file_contents={"app/report.py": MODULE},
+    )
+    await build(unit_of_work, vcs_provider, tenant_id, repository_id)
+    await build(unit_of_work, vcs_provider, tenant_id, repository_id)
+
+    state = await GetIndexState(unit_of_work, embedders=catalogue()).execute(
+        tenant_id, repository_id
+    )
+
+    assert state.stats is not None
+    assert state.stats.files_parsed == 0
+    assert state.totals.files == 1
+    assert state.totals.symbols > 0
+    assert state.totals.chunks > 0
+
+
+async def test_embedding_is_reported_only_while_the_snapshot_is_on_that_stage() -> None:
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, repository_id = prepare(unit_of_work)
+    vcs_provider = FakeVcsProvider(
+        tree={"app/report.py": ContentHash("hash-1")},
+        file_contents={"app/report.py": MODULE},
+    )
+    await build(unit_of_work, vcs_provider, tenant_id, repository_id)
+    read = GetIndexState(unit_of_work, embedders=catalogue())
+
+    before = await read.execute(tenant_id, repository_id)
+    assert before.snapshot_id is not None
+    async with unit_of_work:
+        snapshot = await unit_of_work.index_snapshots.get(before.snapshot_id)
+        snapshot.enter_stage(SnapshotStage.EMBEDDING)
+        await unit_of_work.commit()
+    during = await read.execute(tenant_id, repository_id)
+    async with unit_of_work:
+        snapshot = await unit_of_work.index_snapshots.get(before.snapshot_id)
+        snapshot.finish_embedding()
+        await unit_of_work.commit()
+    after = await read.execute(tenant_id, repository_id)
+
+    assert before.is_embedding is False
+    assert during.is_embedding is True
+    assert after.is_embedding is False
+    assert after.vectors.embedded < after.vectors.chunks
+
+
+async def test_chosen_embedder_is_remembered_by_the_repository() -> None:
+    """Поиск ищет по набору выбранного сервера, поэтому выбор живёт у репозитория."""
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, repository_id = prepare(unit_of_work)
+
+    await EnqueueIndexing(unit_of_work, FakeEventPublisher(), FakeVcsProvider()).execute(
+        tenant_id,
+        repository_id,
+        "HEAD",
+        embedding_backend="gpu-host",
+    )
+
+    async with unit_of_work:
+        repository = await unit_of_work.code_repositories.get(repository_id)
+    state = await GetIndexState(
+        unit_of_work, embedders=catalogue("fake-embedder", "gpu-host")
+    ).execute(tenant_id, repository_id)
+
+    assert repository.embedding_backend == "gpu-host"
+    assert state.embedding_backend == "gpu-host"
+
+
+def test_unknown_embedder_key_resolves_to_the_default() -> None:
+    choices = catalogue("fake-embedder", "gpu-host")
+
+    assert choices.resolve("gone").key == "fake-embedder"
+    assert choices.resolve(None).key == "fake-embedder"
+    assert choices.is_known("gpu-host")

@@ -12,9 +12,15 @@ from sqlalchemy.dialects.postgresql import insert as postgres_insert
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
 )
+from sqlalchemy.sql import (
+    ColumnElement,
+)
 
 from ducktective.core.indexing.ports import (
     VectorCoverage,
+)
+from ducktective.core.indexing.vectors import (
+    VECTOR_SKIP_PATTERNS,
 )
 from ducktective.core.types import (
     CodeChunkId,
@@ -30,26 +36,44 @@ from ducktective.storage.models.indexing import (
 )
 
 
+def _deserves_vector() -> ColumnElement[bool]:
+    """Условие доменного правила `deserves_vector` на языке базы."""
+    return ~SourceFileModel.path.regexp_match(f"({'|'.join(VECTOR_SKIP_PATTERNS)})")
+
+
 class SqlAlchemyEmbeddingStore:
     """Векторы чанков в pgvector."""
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def count_coverage(self, repository_id: RepositoryId) -> VectorCoverage:
+    async def count_coverage(self, repository_id: RepositoryId, model: str) -> VectorCoverage:
         """Считает фрагменты и те из них, у которых уже есть вектор.
 
         Два счётчика одним запросом: расхождение между ними — это ровно то,
         что осталось досчитать, и делать из этого два обращения к базе
         на каждый опрос интерфейса незачем.
         """
-        embedded = select(ChunkEmbeddingModel.chunk_id).where(
-            ChunkEmbeddingModel.chunk_id == CodeChunkModel.id
+        embedded = (
+            select(ChunkEmbeddingModel.chunk_id)
+            .join(
+                EmbeddingModelModel,
+                EmbeddingModelModel.id == ChunkEmbeddingModel.embedding_model_id,
+            )
+            .where(
+                ChunkEmbeddingModel.chunk_id == CodeChunkModel.id,
+                EmbeddingModelModel.name == model,
+            )
         )
-        statement = select(
-            func.count(),
-            func.count().filter(embedded.exists()),
-        ).where(CodeChunkModel.repository_id == repository_id)
+        statement = (
+            select(
+                func.count(),
+                func.count().filter(embedded.exists()),
+            )
+            .select_from(CodeChunkModel)
+            .join(SourceFileModel, SourceFileModel.id == CodeChunkModel.file_id)
+            .where(CodeChunkModel.repository_id == repository_id, _deserves_vector())
+        )
 
         chunks, with_vector = (await self._session.execute(statement)).one()
         return VectorCoverage(chunks=int(chunks), embedded=int(with_vector))
@@ -89,6 +113,7 @@ class SqlAlchemyEmbeddingStore:
             .where(
                 CodeChunkModel.repository_id == repository_id,
                 SourceFileModel.is_deleted.is_(False),
+                _deserves_vector(),
                 ~embedded.exists(),
             )
         )

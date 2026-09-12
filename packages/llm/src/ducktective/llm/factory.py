@@ -1,5 +1,9 @@
 from collections.abc import (
+    Iterable,
     Sequence,
+)
+from typing import (
+    Protocol,
 )
 
 from redis.asyncio import (
@@ -34,6 +38,9 @@ from ducktective.llm.client import (
 )
 from ducktective.llm.code_reviewer import (
     LlmCodeReviewer,
+)
+from ducktective.llm.embedder import (
+    LiteLlmEmbedder,
 )
 from ducktective.llm.router import (
     ModelChoice,
@@ -116,6 +123,39 @@ def build_chat_agent(
         return preset
 
     return AgenticChatAgent(client, fallback=preset)
+
+
+class EmbedderBackend(Protocol):
+    """Сервер эмбеддингов, каким его описывает конфигурация."""
+
+    @property
+    def key(self) -> str: ...
+    @property
+    def model(self) -> str: ...
+    @property
+    def base_url(self) -> str: ...
+    @property
+    def api_key(self) -> str: ...
+    @property
+    def vector_set_name(self) -> str: ...
+
+
+def build_embedders(
+    backends: Iterable[EmbedderBackend],
+    *,
+    dimensions: int,
+) -> dict[str, LiteLlmEmbedder]:
+    """Эмбеддеры по ключу сервера, в порядке перечня: первый — по умолчанию."""
+    return {
+        backend.key: LiteLlmEmbedder(
+            model=backend.model,
+            dimensions=dimensions,
+            base_url=backend.base_url or None,
+            api_key=backend.api_key,
+            vector_set=backend.vector_set_name,
+        )
+        for backend in backends
+    }
 
 
 def build_code_reviewers(

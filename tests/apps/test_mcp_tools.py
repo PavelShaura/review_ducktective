@@ -13,6 +13,10 @@ from mcp.types import (
     TextContent,
 )
 
+from ducktective.application.indexing.embedders import (
+    EmbedderCatalogue,
+    EmbedderChoice,
+)
 from ducktective.core.code_repository.entities import (
     CodeRepository,
 )
@@ -53,6 +57,15 @@ from tests.fakes import (
 )
 
 
+def catalogue(*names: str) -> EmbedderCatalogue:
+    return EmbedderCatalogue(
+        [
+            EmbedderChoice(key=name, title=name, vector_set=name)
+            for name in names or ("fake-embedder",)
+        ]
+    )
+
+
 TENANT_ID = TenantId(uuid4())
 
 
@@ -65,6 +78,7 @@ def runtime_over(
     return McpRuntime(
         tenant_id=TENANT_ID,
         unit_of_work=lambda: unit_of_work,
+        embedders=catalogue(),
         navigators=IndexedNavigators(
             symbols=symbols or FakeSymbolReader(),
             search=search or FakeChunkSearch(),

@@ -25,6 +25,7 @@ def to_domain(model: CodeRepositoryModel) -> CodeRepository:
         local_path=Path(model.local_path),
         egress_policy=model.egress_policy,
         created_at=model.created_at,
+        embedding_backend=model.embedding_backend,
     )
 
 
@@ -39,6 +40,7 @@ def to_model(repository: CodeRepository) -> CodeRepositoryModel:
         local_path=str(repository.local_path),
         egress_policy=repository.egress_policy,
         created_at=repository.created_at,
+        embedding_backend=repository.embedding_backend,
     )
 
 
@@ -49,3 +51,4 @@ def apply_changes(model: CodeRepositoryModel, repository: CodeRepository) -> Non
     model.default_branch = repository.default_branch
     model.local_path = str(repository.local_path)
     model.egress_policy = repository.egress_policy
+    model.embedding_backend = repository.embedding_backend

@@ -20,6 +20,9 @@ from ducktective.core.indexing.entities import (
     SourceFile,
     SymbolEdge,
 )
+from ducktective.core.indexing.ports import (
+    IndexTotals,
+)
 from ducktective.core.indexing.value_objects import (
     SnapshotStatus,
     SymbolKind,
@@ -200,6 +203,31 @@ class SqlAlchemySourceFileRepository:
 
         return loaded
 
+    async def count_totals(self, repository_id: RepositoryId) -> IndexTotals:
+        live = (
+            SourceFileModel.repository_id == repository_id,
+            SourceFileModel.is_deleted.is_(False),
+        )
+        files = select(func.count()).select_from(SourceFileModel).where(*live)
+        symbols = (
+            select(func.count())
+            .select_from(CodeSymbolModel)
+            .join(SourceFileModel, SourceFileModel.id == CodeSymbolModel.file_id)
+            .where(*live)
+        )
+        chunks = (
+            select(func.count())
+            .select_from(CodeChunkModel)
+            .join(SourceFileModel, SourceFileModel.id == CodeChunkModel.file_id)
+            .where(*live)
+        )
+        row = (
+            await self._session.execute(
+                select(files.scalar_subquery(), symbols.scalar_subquery(), chunks.scalar_subquery())
+            )
+        ).one()
+        return IndexTotals(files=int(row[0]), symbols=int(row[1]), chunks=int(row[2]))
+
     async def list_paths(self, repository_id: RepositoryId) -> dict[str, str]:
         """Путь → хеш содержимого без загрузки символов и чанков.
 
@@ -295,6 +323,17 @@ class SqlAlchemySymbolEdgeRepository:
         """
         for table in ("symbol_edge", "code_symbol"):
             await self._session.execute(text(f"ANALYZE {table}"))
+
+    async def count_resolved(self, repository_id: RepositoryId) -> int:
+        statement = (
+            select(func.count())
+            .select_from(SymbolEdgeModel)
+            .where(
+                SymbolEdgeModel.repository_id == repository_id,
+                SymbolEdgeModel.target_symbol_id.is_not(None),
+            )
+        )
+        return int((await self._session.execute(statement)).scalar_one())
 
     async def resolve_pending(self, repository_id: RepositoryId) -> int:
         """Замыкает висящие рёбра.

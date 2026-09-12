@@ -1,4 +1,5 @@
 import type {
+  EmbedderChoice,
   AddConnectionPayload,
   AvailableModel,
   Conversation,
@@ -190,11 +191,13 @@ export const api = {
         `&revision=${encodeURIComponent(revision)}`,
     ),
 
-  startIndexing: (repositoryId: string, revision = "HEAD") =>
+  startIndexing: (repositoryId: string, revision = "HEAD", embeddingBackend?: string) =>
     request<{ queued: boolean; revision: string }>(`/repositories/${repositoryId}/index`, {
       method: "POST",
-      body: JSON.stringify({ revision }),
+      body: JSON.stringify({ revision, embedding_backend: embeddingBackend ?? null }),
     }),
+
+  listEmbedders: () => request<EmbedderChoice[]>("/repositories/embedders"),
 
   cancelIndexing: (repositoryId: string) =>
     request<{ cancelled: boolean }>(

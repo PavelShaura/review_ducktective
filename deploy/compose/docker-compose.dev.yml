@@ -74,9 +74,12 @@ services:
         condition: service_healthy
     environment:
       OLLAMA_HOST: http://ollama:11434
+      OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text-q8}
+      OLLAMA_EMBEDDING_THREADS: ${OLLAMA_EMBEDDING_THREADS:-}
     volumes:
       - ollama_models:/root/.ollama
-    entrypoint: ["ollama", "pull", "${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}"]
+      - ./ollama/prepare.sh:/prepare.sh:ro
+    entrypoint: ["/bin/sh", "/prepare.sh"]
     restart: "no"
 
 volumes:

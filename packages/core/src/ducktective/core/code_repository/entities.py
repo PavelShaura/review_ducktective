@@ -53,6 +53,12 @@ class CodeRepository(AggregateRoot):
     local_path: Path
     egress_policy: EgressPolicy
     created_at: datetime
+    embedding_backend: str | None = None
+    """Ключ сервера эмбеддингов, которым считался индекс.
+
+    По нему поиск находит набор векторов репозитория; пусто — сервер
+    по умолчанию.
+    """
 
     @classmethod
     def register(
@@ -96,6 +102,9 @@ class CodeRepository(AggregateRoot):
     @property
     def cloud_processing_allowed(self) -> bool:
         return self.egress_policy is EgressPolicy.ALLOW_CLOUD
+
+    def choose_embedding_backend(self, key: str | None) -> None:
+        self.embedding_backend = key or None
 
     def change_egress_policy(self, policy: EgressPolicy) -> None:
         if policy is self.egress_policy:

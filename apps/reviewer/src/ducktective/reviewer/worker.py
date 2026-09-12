@@ -50,11 +50,9 @@ from ducktective.core.types import (
     ReviewRunId,
     TenantId,
 )
-from ducktective.llm.embedder import (
-    LiteLlmEmbedder,
-)
 from ducktective.llm.factory import (
     build_code_reviewers,
+    build_embedders,
 )
 from ducktective.llm.registry import (
     build_remote_choices,
@@ -224,17 +222,14 @@ async def build_pipeline(ctx: dict[str, Any], tenant_id: TenantId) -> LangGraphR
         local_context_window=settings.local_review_model_context_window,
         max_agent_steps=settings.agent_max_steps,
     )
-    embedder = LiteLlmEmbedder(
-        model=settings.local_embedding_model,
-        dimensions=settings.embedding_dimensions,
-        base_url=settings.local_embedding_base_url or None,
-        api_key=settings.local_llm_api_key,
+    embedders = build_embedders(
+        settings.embedding_backends(), dimensions=settings.embedding_dimensions
     )
     return LangGraphReviewPipeline(
         reviewers,
         context_builder=SessionScopedContextBuilder(
             session_factory,
-            embedder,
+            embedders,
             tenant_id=tenant_id,
             token_budget=settings.context_token_budget,
         ),
@@ -243,7 +238,7 @@ async def build_pipeline(ctx: dict[str, Any], tenant_id: TenantId) -> LangGraphR
                 symbols=SessionScopedSymbolReader(session_factory, tenant_id=tenant_id),
                 search=SessionScopedHybridSearch(
                     session_factory,
-                    embedder,
+                    embedders,
                     tenant_id=tenant_id,
                 ),
             ),

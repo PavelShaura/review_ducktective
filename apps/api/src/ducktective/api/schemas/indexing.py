@@ -35,6 +35,13 @@ class VectorCoverageResponse(BaseModel):
     embedded: int = 0
 
 
+class IndexTotalsResponse(BaseModel):
+    files: int = 0
+    symbols: int = 0
+    chunks: int = 0
+    edges: int = 0
+
+
 class CancelIndexingResponse(BaseModel):
     cancelled: bool
 
@@ -60,9 +67,12 @@ class IndexStateResponse(BaseModel):
     finished_at: datetime | None = None
     failure_reason: str | None = None
     is_ready: bool = False
+    is_embedding: bool = False
+    embedding_backend: str = ""
     embedding_stopped: bool = False
     context_ready: bool = False
     vectors: VectorCoverageResponse = VectorCoverageResponse()
+    totals: IndexTotalsResponse = IndexTotalsResponse()
     stats: IndexStatsResponse | None = None
 
     @classmethod
@@ -77,11 +87,19 @@ class IndexStateResponse(BaseModel):
             finished_at=view.finished_at,
             failure_reason=view.failure_reason,
             is_ready=view.is_ready,
+            is_embedding=view.is_embedding,
+            embedding_backend=view.embedding_backend,
             embedding_stopped=view.embedding_stopped,
             context_ready=view.context_ready,
             vectors=VectorCoverageResponse(
                 chunks=view.vectors.chunks,
                 embedded=view.vectors.embedded,
+            ),
+            totals=IndexTotalsResponse(
+                files=view.totals.files,
+                symbols=view.totals.symbols,
+                chunks=view.totals.chunks,
+                edges=view.totals.edges,
             ),
             stats=(
                 IndexStatsResponse(
@@ -102,6 +120,15 @@ class IndexStateResponse(BaseModel):
 
 class StartIndexingRequest(BaseModel):
     revision: str = "HEAD"
+    embedding_backend: str | None = None
+    """Ключ сервера эмбеддингов; пусто — прежний выбор репозитория или по умолчанию."""
+
+
+class EmbedderChoiceResponse(BaseModel):
+    key: str
+    title: str
+    note: str
+    vector_set: str
 
 
 class StartIndexingResponse(BaseModel):

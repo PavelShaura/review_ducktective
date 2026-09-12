@@ -71,7 +71,10 @@ uv run ducktective dev
 Compose brings up Postgres, Redis, Keycloak and an Ollama that serves the embedding
 model: `ollama-pull` fetches it into a volume on the first start (about 270 MB), so
 vectors never depend on a GPU host being awake. For an air-gapped install, fill the
-`ollama_models` volume beforehand.
+`ollama_models` volume beforehand. A faster embedding server — the same weights on
+a GPU host — goes into `embedding_backends.json` (see the example file) and becomes a
+choice in the index panel; servers that share a `vector_set` write into one set of
+vectors.
 
 One command brings up the API, both workers, and the frontend, merges their logs
 into a single stream tagged by source, and shuts everyone down on Ctrl+C. The

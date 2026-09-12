@@ -200,7 +200,7 @@ export interface FeedbackDigest {
 
 export type SnapshotStatus = "pending" | "running" | "ready" | "failed" | "cancelled";
 
-export type SnapshotStage = "parsing" | "storing" | "linking" | "embedding";
+export type SnapshotStage = "parsing" | "storing" | "linking" | "embedding" | "complete";
 
 export interface IndexStats {
   files_total: number;
@@ -228,10 +228,27 @@ export interface IndexState {
   finished_at: string | null;
   failure_reason: string | null;
   is_ready: boolean;
+  is_embedding: boolean;
+  embedding_backend: string;
   embedding_stopped: boolean;
   context_ready: boolean;
   vectors: VectorCoverage;
+  totals: IndexTotals;
   stats: IndexStats | null;
+}
+
+export interface EmbedderChoice {
+  key: string;
+  title: string;
+  note: string;
+  vector_set: string;
+}
+
+export interface IndexTotals {
+  files: number;
+  symbols: number;
+  chunks: number;
+  edges: number;
 }
 
 export type StepKind =

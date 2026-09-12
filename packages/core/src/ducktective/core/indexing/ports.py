@@ -97,6 +97,16 @@ class VectorCoverage:
         return self.embedded >= self.chunks
 
 
+@dataclass(frozen=True, kw_only=True)
+class IndexTotals:
+    """Сколько всего в индексе репозитория: файлов, символов, фрагментов, связей."""
+
+    files: int = 0
+    symbols: int = 0
+    chunks: int = 0
+    edges: int = 0
+
+
 class EmbeddingStore(Protocol):
     """Хранилище векторов.
 
@@ -106,11 +116,11 @@ class EmbeddingStore(Protocol):
 
     async def register_model(self, name: str, dimensions: int) -> EmbeddingModelId: ...
 
-    async def count_coverage(self, repository_id: RepositoryId) -> VectorCoverage:
-        """Считает, у скольких фрагментов уже есть вектор.
+    async def count_coverage(self, repository_id: RepositoryId, model: str) -> VectorCoverage:
+        """Считает, у скольких фрагментов есть вектор названной модели.
 
-        Считается по любой модели: вопрос интерфейса — работает ли поиск
-        по смыслу, а не какой моделью посчитано.
+        Поиск по смыслу ищет только по векторам активной модели, поэтому
+        векторы других моделей покрытием не считаются.
         """
         ...
 
@@ -193,6 +203,10 @@ class SourceFileRepository(Protocol):
         """
         ...
 
+    async def count_totals(self, repository_id: RepositoryId) -> IndexTotals:
+        """Итоги по неудалённым файлам репозитория; связи считает репозиторий рёбер."""
+        ...
+
     async def list_paths(self, repository_id: RepositoryId) -> dict[str, str]:
         """Путь → хеш содержимого для всех живых файлов репозитория.
 
@@ -223,6 +237,10 @@ class SymbolEdgeRepository(Protocol):
         сколько строк хранилище считает существующими, а после массовой
         записи оно об этом ещё не знает.
         """
+        ...
+
+    async def count_resolved(self, repository_id: RepositoryId) -> int:
+        """Сколько рёбер репозитория связано с определением."""
         ...
 
     async def resolve_pending(self, repository_id: RepositoryId) -> int:

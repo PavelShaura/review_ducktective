@@ -1,10 +1,14 @@
 from collections.abc import (
     AsyncIterator,
+    Mapping,
 )
 from contextlib import (
     asynccontextmanager,
 )
 
+from sqlalchemy import (
+    select,
+)
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -51,6 +55,9 @@ from ducktective.retrieval.symbols import (
 from ducktective.retrieval.vector import (
     VectorSearch,
 )
+from ducktective.storage.models.code_repository import (
+    CodeRepositoryModel,
+)
 from ducktective.storage.tenant_scope import (
     bind_tenant,
 )
@@ -84,23 +91,24 @@ class SessionScopedContextBuilder:
     def __init__(
         self,
         session_factory: async_sessionmaker[AsyncSession],
-        embedder: Embedder,
+        embedders: Mapping[str, Embedder],
         *,
         tenant_id: TenantId | None = None,
         token_budget: int = DEFAULT_TOKEN_BUDGET,
     ) -> None:
         self._session_factory = session_factory
-        self._embedder = embedder
+        self._embedders = embedders
         self._tenant_id = tenant_id
         self._token_budget = token_budget
 
     async def build(self, repository_id: RepositoryId, file: ReviewFile) -> DiffContext:
         async with _tenant_session(self._session_factory, self._tenant_id) as session:
+            embedder = await _embedder_for(session, self._embedders, repository_id)
             builder = DiffContextBuilder(
                 PostgresSymbolReader(session),
                 HybridSearch(
                     PostgresLexicalSearch(session),
-                    VectorSearch(session, self._embedder),
+                    VectorSearch(session, embedder),
                 ),
                 token_budget=self._token_budget,
             )
@@ -262,17 +270,23 @@ class SessionScopedSymbolReader:
 
 
 class SessionScopedHybridSearch:
-    """Гибридный поиск, живущий на своей сессии."""
+    """Гибридный поиск, живущий на своей сессии.
+
+    Эмбеддер запроса выбирается по репозиторию: у того записан ключ сервера,
+    которым считался индекс, а искать можно только по векторам того же
+    набора. Первый в перечне — сервер по умолчанию; запрос уходит ему,
+    если он пишет в тот же набор, что и выбранный.
+    """
 
     def __init__(
         self,
         session_factory: async_sessionmaker[AsyncSession],
-        embedder: Embedder,
+        embedders: Mapping[str, Embedder],
         *,
         tenant_id: TenantId | None = None,
     ) -> None:
         self._session_factory = session_factory
-        self._embedder = embedder
+        self._embedders = embedders
         self._tenant_id = tenant_id
 
     async def search_chunks(
@@ -284,9 +298,10 @@ class SessionScopedHybridSearch:
         limit: int = 20,
     ) -> list[ChunkHit]:
         async with _tenant_session(self._session_factory, self._tenant_id) as session:
+            embedder = await _embedder_for(session, self._embedders, repository_id)
             search = HybridSearch(
                 PostgresLexicalSearch(session),
-                VectorSearch(session, self._embedder),
+                VectorSearch(session, embedder),
             )
             return await search.search_chunks(
                 repository_id,
@@ -294,3 +309,27 @@ class SessionScopedHybridSearch:
                 languages=languages,
                 limit=limit,
             )
+
+
+async def _embedder_for(
+    session: AsyncSession,
+    embedders: Mapping[str, Embedder],
+    repository_id: RepositoryId,
+) -> Embedder:
+    """Эмбеддер запроса под набор векторов репозитория.
+
+    Первый в перечне — сервер по умолчанию; он и отвечает, если пишет
+    в тот же набор, что выбранный для репозитория.
+    """
+    if not embedders:
+        raise ValueError("Перечень эмбеддеров пуст")
+
+    key = await session.scalar(
+        select(CodeRepositoryModel.embedding_backend).where(CodeRepositoryModel.id == repository_id)
+    )
+    default = next(iter(embedders.values()))
+    chosen = embedders.get(key or "", default)
+    for candidate in embedders.values():
+        if candidate.name == chosen.name:
+            return candidate
+    return chosen

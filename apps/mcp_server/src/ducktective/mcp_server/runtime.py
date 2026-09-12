@@ -11,6 +11,9 @@ from dataclasses import (
 
 import httpx
 
+from ducktective.application.indexing.embedders import (
+    EmbedderCatalogue,
+)
 from ducktective.application.tenancy.sign_in import (
     ResolveSignedInUser,
 )
@@ -36,8 +39,8 @@ from ducktective.core.retrieval.navigation import (
 from ducktective.core.types import (
     TenantId,
 )
-from ducktective.llm.embedder import (
-    LiteLlmEmbedder,
+from ducktective.llm.factory import (
+    build_embedders,
 )
 from ducktective.retrieval.navigation import (
     IndexedNavigators,
@@ -74,6 +77,7 @@ class McpRuntime:
 
     tenant_id: TenantId
     unit_of_work: Callable[[], UnitOfWork]
+    embedders: EmbedderCatalogue
     navigators: CodeNavigatorFactory
 
 
@@ -85,20 +89,17 @@ async def build_runtime(settings: Settings, tenant_id: TenantId) -> AsyncIterato
         max_overflow=settings.database_pool_max_overflow,
     )
     session_factory = build_session_factory(engine)
-    embedder = LiteLlmEmbedder(
-        model=settings.local_embedding_model,
-        dimensions=settings.embedding_dimensions,
-        base_url=settings.local_embedding_base_url or None,
-        api_key=settings.local_llm_api_key,
-    )
+    backends = settings.embedding_backends()
+    embedders = build_embedders(backends, dimensions=settings.embedding_dimensions)
 
     try:
         yield McpRuntime(
             tenant_id=tenant_id,
             unit_of_work=lambda: SqlAlchemyUnitOfWork(session_factory, tenant_id=tenant_id),
+            embedders=EmbedderCatalogue.from_backends(backends),
             navigators=IndexedNavigators(
                 symbols=SessionScopedSymbolReader(session_factory, tenant_id=tenant_id),
-                search=SessionScopedHybridSearch(session_factory, embedder, tenant_id=tenant_id),
+                search=SessionScopedHybridSearch(session_factory, embedders, tenant_id=tenant_id),
             ),
         )
     finally:
