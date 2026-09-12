@@ -40,6 +40,7 @@ services:
     ports:
       - "${KEYCLOAK_HOST_PORT:-8081}:8080"
     volumes:
+      - keycloak_data:/opt/keycloak/data
       - ./keycloak:/opt/keycloak/data/import:ro
     healthcheck:
       test:
@@ -80,4 +81,5 @@ services:
 
 volumes:
   postgres_data:
+  keycloak_data:
   ollama_models:
