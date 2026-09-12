@@ -112,6 +112,16 @@ FINAL_INSTRUCTION = (
     "Stop investigating and answer now. Return the JSON object with your findings and nothing else."
 )
 
+NOT_JSON_MESSAGE = (
+    "Your reply contained no JSON object. Reply with the JSON object of findings only: "
+    "no reasoning, no prose, no code fences."
+)
+
+NOT_JSON_NOTE = "В ответе нет JSON — прошу вернуть только объект с находками"
+TRUNCATED_ANSWER_NOTE = (
+    "Ответ оборван на лимите выходных токенов и JSON до конца не дописан — прошу ответить короче"
+)
+
 UNPROVEN_CLAIM_MESSAGE = (
     "Your answer claims something about code outside the diff — callers, contracts or "
     "project conventions — but you have not looked at that code. Call the tool that checks "
@@ -426,6 +436,8 @@ class AgenticCodeReviewer:
         Последнее обращение идёт без инструментов и со схемой: пока инструменты
         на столе, модель вправе попросить ещё вызов, и цикл, у которого шаги
         кончились, получил бы вместо находок очередную просьбу.
+
+        Ответ без JSON переспрашивается один раз; сырой ответ пишется в ленту.
         """
         await self._record(
             listener,
@@ -434,21 +446,56 @@ class AgenticCodeReviewer:
             StepKind.STAGE,
             "Спрашиваю модель в последний раз: прошу назвать находки",
         )
-        response = await self._llm_client.complete(
-            [*messages, LlmMessage(role=LlmRole.USER, content=FINAL_INSTRUCTION)],
-            requirements=requirements,
-            json_schema=ReviewPayload.model_json_schema(),
-        )
-        payload = parse_payload(response.content, model=response.model)
+        closing = [*messages, LlmMessage(role=LlmRole.USER, content=FINAL_INSTRUCTION)]
+        response = await self._complete_closing(closing, requirements)
+        usage = _add(usage, response.usage)
+        step += 1
+
+        try:
+            payload = parse_payload(response.content, model=response.model)
+        except LlmOutputError:
+            await self._record(listener, file, step, StepKind.THOUGHT, response.content)
+            await self._record(
+                listener,
+                file,
+                step,
+                StepKind.STAGE,
+                TRUNCATED_ANSWER_NOTE if response.is_truncated else NOT_JSON_NOTE,
+            )
+            closing.extend(
+                [
+                    _assistant(response),
+                    LlmMessage(role=LlmRole.USER, content=NOT_JSON_MESSAGE),
+                ]
+            )
+            response = await self._complete_closing(closing, requirements)
+            usage = _add(usage, response.usage)
+            step += 1
+            try:
+                payload = parse_payload(response.content, model=response.model)
+            except LlmOutputError:
+                await self._record(listener, file, step, StepKind.THOUGHT, response.content)
+                raise
 
         return await self._finish(
             file,
             payload,
-            _add(usage, response.usage),
+            usage,
             response.model or model,
-            step + 1,
+            step,
             shown,
             listener,
+        )
+
+    async def _complete_closing(
+        self,
+        messages: list[LlmMessage],
+        requirements: ModelRequirements,
+    ) -> LlmResponse:
+        return await self._llm_client.complete(
+            messages,
+            requirements=requirements,
+            json_schema=ReviewPayload.model_json_schema(),
         )
 
     async def _finish(

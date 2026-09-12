@@ -50,5 +50,34 @@ services:
       retries: 20
       start_period: 40s
 
+  # Эмбеддинги живут рядом с приложением
+  # Модель тянется в volume один раз (ollama-pull);
+  # для установки без сети volume наполняется заранее.
+  ollama:
+    image: ollama/ollama:0.12.6
+    ports:
+      - "${OLLAMA_HOST_PORT:-11434}:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  ollama-pull:
+    image: ollama/ollama:0.12.6
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    volumes:
+      - ollama_models:/root/.ollama
+    entrypoint: ["ollama", "pull", "${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}"]
+    restart: "no"
+
 volumes:
   postgres_data:
+  ollama_models:

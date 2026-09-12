@@ -612,3 +612,32 @@ async def test_tool_result_is_clipped_when_the_window_is_unknown() -> None:
 
     tool_answer = next(message for message in client.calls[1] if message.role is LlmRole.TOOL)
     assert "ответ обрезан" in tool_answer.content
+
+
+async def test_conclusion_without_json_is_asked_again_once() -> None:
+    """Расследование стоит десятки обращений; один сбой формата их не выбрасывает."""
+    client = ScriptedLlmClient(
+        [answer(calls=(call(),)), answer("Подумав, я считаю..."), answer(FINDINGS_JSON)]
+    )
+    sink = RecordingSink()
+
+    result = await review(build_reviewer(client, sink=sink, max_steps=1), FakeNavigator())
+
+    assert len(client.calls) == 3
+    assert "no JSON object" in client.calls[2][-1].content
+    assert len(result.drafts) == 1
+    assert any("Подумав" in step.detail for step in sink.steps if step.kind is StepKind.THOUGHT)
+
+
+async def test_second_answer_without_json_falls_back() -> None:
+    client = ScriptedLlmClient([answer(calls=(call(),)), answer("не могу")])
+    sink = RecordingSink()
+
+    result = await review(
+        build_reviewer(client, sink=sink, max_steps=1, fallback_content=FINDINGS_JSON),
+        FakeNavigator(),
+    )
+
+    assert len(client.calls) == 3
+    assert len(result.drafts) == 1
+    assert sink.steps[-1].kind is StepKind.FALLBACK

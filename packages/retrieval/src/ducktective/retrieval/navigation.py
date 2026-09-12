@@ -256,7 +256,7 @@ class IndexedCodeNavigator:
                     path=resolved,
                     start_line=start_line,
                     end_line=end_line,
-                    text=clip_code(text),
+                    text=text,
                     role=FragmentRole.SOURCE,
                 ),
             ),

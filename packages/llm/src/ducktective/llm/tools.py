@@ -68,7 +68,7 @@ EXPANDED_QUERY_NOTE = (
 
 SOURCE_NOTES = {
     NavigationSource.INDEX: "Источник: индекс проекта (символы и граф вызовов).",
-    NavigationSource.GIT: "Источник: поиск по словам в ревизии, индекса нет.",
+    NavigationSource.GIT: "Источник: git на ревизии прогона, поиск по словам без графа символов.",
 }
 
 ROLE_TITLES = {

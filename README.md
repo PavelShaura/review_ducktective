@@ -68,6 +68,11 @@ uv run alembic upgrade head
 uv run ducktective dev
 ```
 
+Compose brings up Postgres, Redis, Keycloak and an Ollama that serves the embedding
+model: `ollama-pull` fetches it into a volume on the first start (about 270 MB), so
+vectors never depend on a GPU host being awake. For an air-gapped install, fill the
+`ollama_models` volume beforehand.
+
 One command brings up the API, both workers, and the frontend, merges their logs
 into a single stream tagged by source, and shuts everyone down on Ctrl+C. The
 processes stay separate, though — indexing and review have different load profiles
@@ -166,9 +171,9 @@ dropping to the terminal. Review will still run without an index — but one dif
 a time, with no surroundings, and the UI will say so.
 
 A re-run only parses the files that changed — the hashes come straight from git, so
-an unchanged file isn't even read. Vectors are computed by a local embedding model
-(`LOCAL_EMBEDDING_MODEL`, `LOCAL_EMBEDDING_BASE_URL`); if it's unavailable, the index
-still gets built and the vectors are filled in on the next run.
+an unchanged file isn't even read. Vectors are computed by the embedding model from
+compose (`LOCAL_EMBEDDING_MODEL`, `LOCAL_EMBEDDING_BASE_URL`, CPU is enough); if it's
+unavailable, the index still gets built and the vectors are filled in on the next run.
 
 ## Quality evaluation
 

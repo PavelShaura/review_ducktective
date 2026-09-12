@@ -45,8 +45,9 @@ class Settings(BaseSettings):
     local_llm_provider: str = "ollama"
     local_llm_base_url: str = "http://localhost:11434"
     local_llm_api_key: str = ""
-    local_embedding_model: str = "qwen3-embedding:0.6b"
-    local_embedding_base_url: str = ""
+    local_embedding_model: str = "nomic-embed-text"
+    local_embedding_base_url: str = "http://localhost:11434/v1"
+    """Эмбеддер из compose: Ollama на CPU, независимо от того, где живёт LLM."""
     embedding_dimensions: int = 768
     context_token_budget: int = 2000
     local_reranker_model: str = "bge-reranker-v2-m3"

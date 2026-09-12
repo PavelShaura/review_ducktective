@@ -511,7 +511,7 @@ def _window(
         path=path,
         start_line=first,
         end_line=last,
-        text=clip_code("\n".join(lines[first - 1 : last]).rstrip()),
+        text="\n".join(lines[first - 1 : last]).rstrip(),
         role=role,
     )
 
