@@ -222,6 +222,7 @@ async def build_pipeline(ctx: dict[str, Any], tenant_id: TenantId) -> LangGraphR
         timeout_seconds=settings.llm_timeout_seconds,
         local_supports_tools=settings.local_review_model_supports_tools,
         local_context_window=settings.local_review_model_context_window,
+        max_agent_steps=settings.agent_max_steps,
     )
     embedder = LiteLlmEmbedder(
         model=settings.local_embedding_model,

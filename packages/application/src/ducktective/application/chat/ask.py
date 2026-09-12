@@ -118,6 +118,7 @@ class AskQuestion(TransactionalUseCase):
                 allowed_trust=_allowed_trust(repository, conversation),
                 preferred_model=conversation.preferred_model,
                 max_output_tokens=self._max_output_tokens,
+                session_key=str(conversation_id),
             ),
             navigator=self._navigators.for_repository(conversation.repository_id),
             index_revision=snapshot.commit_sha,

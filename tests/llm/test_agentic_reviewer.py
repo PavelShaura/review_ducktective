@@ -158,14 +158,17 @@ def answer(
     *,
     calls: tuple[ToolCall, ...] = (),
     truncated: bool = False,
+    input_tokens: int = 100,
+    context_window: int = 0,
 ) -> LlmResponse:
     return LlmResponse(
         content=content,
         model="fake-model",
         provider="fake",
-        usage=LlmUsage(input_tokens=100, output_tokens=50),
+        usage=LlmUsage(input_tokens=input_tokens, output_tokens=50),
         tool_calls=calls,
         is_truncated=truncated,
+        context_window=context_window,
     )
 
 
@@ -176,8 +179,9 @@ def call(name: str = "find_callers", arguments: str = '{"name": "build"}') -> To
 class FakeNavigator(StubNavigator):
     source = NavigationSource.INDEX
 
-    def __init__(self, *, empty: bool = False) -> None:
+    def __init__(self, *, empty: bool = False, text: str = "") -> None:
         self.empty = empty
+        self.text = text or "def handler():\n    builder.build()"
         self.asked: list[tuple[str, str]] = []
 
     def _answer(self) -> NavigationAnswer:
@@ -190,7 +194,7 @@ class FakeNavigator(StubNavigator):
                     path="app/api.py",
                     start_line=5,
                     end_line=6,
-                    text="def handler():\n    builder.build()",
+                    text=self.text,
                     role=FragmentRole.CALLER,
                     title="app.api.handler · function",
                 ),
@@ -542,3 +546,69 @@ async def test_a_single_file_run_offers_navigation_only() -> None:
     await review(build_reviewer(client), FakeNavigator(), diff=RunDiff((build_file(),)))
 
     assert "get_diff_summary" not in client.offered_tools[0]
+
+
+async def test_full_window_forces_the_answer_before_the_step_ceiling() -> None:
+    """Рабочий ограничитель — окно, а не счётчик обращений."""
+    client = ScriptedLlmClient(
+        [answer(calls=(call(),), input_tokens=9000, context_window=10000), answer(FINDINGS_JSON)]
+    )
+    sink = RecordingSink()
+
+    result = await review(build_reviewer(client, sink=sink, max_steps=10), FakeNavigator())
+
+    assert len(client.calls) == 2
+    assert len(result.drafts) == 1
+    assert any("заполнил окно" in step.detail for step in sink.steps)
+
+
+async def test_unknown_window_leaves_the_ceiling_in_charge() -> None:
+    client = ScriptedLlmClient(
+        [answer(calls=(call(),), input_tokens=9000)] * 3 + [answer(EMPTY_JSON)]
+    )
+    sink = RecordingSink()
+
+    await review(build_reviewer(client, sink=sink, max_steps=3), FakeNavigator())
+
+    assert len(client.calls) == 4
+    assert any("потолок обращений" in step.detail for step in sink.steps)
+
+
+async def test_repeated_call_is_refused_instead_of_executed() -> None:
+    """Второй такой же вызов — место в окне, потраченное на то, что уже есть."""
+    client = ScriptedLlmClient(
+        [
+            answer(calls=(call(arguments='{"name": "build"}'),)),
+            answer(calls=(call(arguments='{"name":"build"}'),)),
+            answer(EMPTY_JSON),
+        ]
+    )
+    navigator = FakeNavigator()
+
+    await review(build_reviewer(client), navigator)
+
+    assert navigator.asked == [("find_callers", "build")]
+    refusal = [message for message in client.calls[2] if message.role is LlmRole.TOOL][-1]
+    assert "уже был" in refusal.content
+
+
+async def test_tool_result_limit_follows_the_model_window() -> None:
+    """Окно в 128 000 не режется до размера 16 000."""
+    long_text = "\n".join(f"line {number}" for number in range(400))
+    scripted = [answer(calls=(call(),), context_window=128000), answer(EMPTY_JSON)]
+    client = ScriptedLlmClient(scripted)
+
+    await review(build_reviewer(client), FakeNavigator(text=long_text))
+
+    tool_answer = next(message for message in client.calls[1] if message.role is LlmRole.TOOL)
+    assert "ответ обрезан" not in tool_answer.content
+
+
+async def test_tool_result_is_clipped_when_the_window_is_unknown() -> None:
+    long_text = "\n".join(f"line {number}" for number in range(400))
+    client = ScriptedLlmClient([answer(calls=(call(),)), answer(EMPTY_JSON)])
+
+    await review(build_reviewer(client), FakeNavigator(text=long_text))
+
+    tool_answer = next(message for message in client.calls[1] if message.role is LlmRole.TOOL)
+    assert "ответ обрезан" in tool_answer.content

@@ -1,3 +1,4 @@
+import json
 import time
 
 from ducktective.core.exceptions import (
@@ -59,19 +60,33 @@ from ducktective.llm.schemas import (
     ReviewPayload,
 )
 from ducktective.llm.tools import (
+    CHARS_PER_TOKEN,
     NavigationToolbox,
     Toolbox,
+    ToolExecutionResult,
 )
 
 
-DEFAULT_MAX_STEPS = 5
-"""Сколько раз агент может обратиться к модели с инструментами на столе.
+DEFAULT_MAX_STEPS = 25
+"""Потолок обращений к модели с инструментами на столе.
 
-Ограничение не про деньги и не про скорость: при восьмидесяти токенах
-в секунду лишнее обращение стоит секунд. Ограничено окно — каждый результат
-инструмента остаётся в диалоге до конца, и на шестом вызове разбирать
-будет уже негде.
+Страховка от модели, ходящей по кругу. Рабочий ограничитель — окно модели:
+цикл кончается, когда диалог заполнил его на `WINDOW_FILL_LIMIT` (D-030).
 """
+
+WINDOW_FILL_LIMIT = 0.75
+"""Доля окна, после которой цикл просит назвать находки.
+
+Остаток нужен заключительному обращению: диалог целиком, ответ размером
+с `max_output_tokens` и расхождение между счётом токенов у сервера
+и оценкой результатов инструментов.
+"""
+
+REPEATED_CALL_MESSAGE = (
+    "Этот вызов уже был на шаге {step}, его результат выше в диалоге. "
+    "Спросите что-нибудь другое или ответьте находками."
+)
+"""Ответ на вызов, повторяющий уже исполненный с теми же аргументами."""
 
 AGENTIC_MIN_CONTEXT_TOKENS = 16384
 """Окно, ниже которого цикл не имеет смысла.
@@ -122,7 +137,9 @@ class AgenticCodeReviewer:
 
     Три вещи цикл обязан ограничивать — число обращений, размер каждого
     результата и общий расход токенов. Все три упираются в одно: окно модели,
-    которое цикл копит быстрее одноразового прохода.
+    которое цикл копит быстрее одноразового прохода. Предел результата
+    и момент остановки выводятся из окна ответившей модели; число обращений —
+    потолок на случай модели, ходящей по кругу (D-030).
 
     Откат к проходу без инструментов случается в трёх случаях: инструментов
     нет вовсе, диалог не поместился в окно, итог расследования не разобрался.
@@ -224,6 +241,7 @@ class AgenticCodeReviewer:
 
         usage = LlmUsage()
         shown: list[CodeFragment] = []
+        seen_calls: dict[str, int] = {}
         step = 0
         model = ""
         nudged = False
@@ -237,7 +255,7 @@ class AgenticCodeReviewer:
                 file,
                 step,
                 StepKind.STAGE,
-                f"Спрашиваю модель, обращение {attempt} из {self._max_steps}",
+                f"Спрашиваю модель, обращение {attempt}",
             )
             response = await self._llm_client.complete(
                 messages,
@@ -247,6 +265,8 @@ class AgenticCodeReviewer:
             usage = _add(usage, response.usage)
             model = response.model
             step += 1
+            if attempt == 1:
+                toolbox.fit_window(response.context_window)
 
             if response.has_tool_calls and response.is_truncated:
                 messages.extend(
@@ -293,14 +313,36 @@ class AgenticCodeReviewer:
 
             await self._record(listener, file, step, StepKind.THOUGHT, response.content)
             messages.append(_assistant(response))
+            dialogue_tokens = response.usage.input_tokens + response.usage.output_tokens
             for call in response.tool_calls:
                 step += 1
-                message, fragments = await self._run_tool(toolbox, call, file, step, listener)
+                message, fragments = await self._run_tool(
+                    toolbox, call, file, step, listener, seen_calls
+                )
                 messages.append(message)
                 shown.extend(fragments)
+                dialogue_tokens += len(message.content) // CHARS_PER_TOKEN
 
             if self._out_of_budget(usage):
                 break
+            if _window_nearly_full(dialogue_tokens, response.context_window):
+                await self._record(
+                    listener,
+                    file,
+                    step,
+                    StepKind.STAGE,
+                    f"Диалог заполнил окно модели: около {dialogue_tokens} токенов "
+                    f"из {response.context_window}",
+                )
+                break
+        else:
+            await self._record(
+                listener,
+                file,
+                step,
+                StepKind.STAGE,
+                f"Достигнут потолок обращений: {self._max_steps}",
+            )
 
         return await self._conclude(
             file,
@@ -320,12 +362,16 @@ class AgenticCodeReviewer:
         file: ReviewFile,
         step: int,
         listener: InvestigationSink,
+        seen_calls: dict[str, int],
     ) -> tuple[LlmMessage, tuple[CodeFragment, ...]]:
         """Исполняет вызов и возвращает показанное вместе с ответом модели.
 
         Показанное копится не для отчёта: цитата из ответа инструмента —
         доказательство наравне с патчем, и проверить её потом можно только
         по тому, что инструмент действительно вернул (D-008).
+
+        Вызов с теми же именем и аргументами, что уже исполнялся, не
+        исполняется повторно: результат в диалоге есть.
         """
         await self._record(
             listener,
@@ -337,9 +383,16 @@ class AgenticCodeReviewer:
             arguments=call.arguments,
         )
 
-        started_at = time.monotonic()
-        result = await toolbox.execute(call)
-        duration_ms = int((time.monotonic() - started_at) * 1000)
+        signature = _call_signature(call)
+        earlier = seen_calls.get(signature)
+        if earlier is not None:
+            result = ToolExecutionResult(REPEATED_CALL_MESSAGE.format(step=earlier), is_error=True)
+            duration_ms = 0
+        else:
+            seen_calls[signature] = step
+            started_at = time.monotonic()
+            result = await toolbox.execute(call)
+            duration_ms = int((time.monotonic() - started_at) * 1000)
 
         await self._record(
             listener,
@@ -497,6 +550,7 @@ def _with_tool_calling(requirements: ModelRequirements) -> ModelRequirements:
         preferred_model=requirements.preferred_model,
         max_output_tokens=requirements.max_output_tokens,
         temperature=requirements.temperature,
+        session_key=requirements.session_key,
     )
 
 
@@ -549,6 +603,22 @@ def _refused(calls: tuple[ToolCall, ...]) -> list[LlmMessage]:
         )
         for call in calls
     ]
+
+
+def _window_nearly_full(dialogue_tokens: int, context_window: int) -> bool:
+    """Заполнен ли диалог до предела; при неизвестном окне или нулевом счёте — нет."""
+    if context_window <= 0 or dialogue_tokens <= 0:
+        return False
+    return dialogue_tokens >= context_window * WINDOW_FILL_LIMIT
+
+
+def _call_signature(call: ToolCall) -> str:
+    """Имя и аргументы вызова в каноническом виде: порядок ключей JSON не различается."""
+    try:
+        arguments = json.dumps(json.loads(call.arguments or "{}"), sort_keys=True)
+    except ValueError:
+        arguments = call.arguments
+    return f"{call.name}:{arguments}"
 
 
 def _add(total: LlmUsage, addition: LlmUsage) -> LlmUsage:

@@ -147,6 +147,7 @@ class RunReview(TransactionalUseCase):
                     allowed_trust=repository.egress_policy.max_trust,
                     preferred_model=run.preferred_model,
                     max_output_tokens=self._max_output_tokens,
+                    session_key=str(run.id),
                 ),
                 head_sha=run.head_sha,
                 repository_path=repository.local_path,

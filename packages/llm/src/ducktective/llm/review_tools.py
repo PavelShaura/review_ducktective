@@ -36,6 +36,7 @@ from ducktective.llm.tools import (
     NavigationToolbox,
     ToolExecutionResult,
     parse_arguments,
+    result_chars_for,
 )
 
 
@@ -133,6 +134,10 @@ class ReviewToolbox:
         self._history = history
         self._repository_id = repository_id
         self._result_chars = result_chars
+
+    def fit_window(self, context_window: int) -> None:
+        self._result_chars = result_chars_for(context_window)
+        self._navigation.fit_window(context_window)
 
     @property
     def specs(self) -> tuple[ToolSpec, ...]:

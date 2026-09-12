@@ -517,4 +517,5 @@ def _with_tool_calling(requirements: ModelRequirements) -> ModelRequirements:
         preferred_model=requirements.preferred_model,
         max_output_tokens=requirements.max_output_tokens,
         temperature=requirements.temperature,
+        session_key=requirements.session_key,
     )

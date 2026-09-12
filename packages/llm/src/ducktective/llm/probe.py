@@ -5,6 +5,9 @@ from dataclasses import (
 import httpx
 import litellm
 
+from ducktective.llm.headers import (
+    provider_headers,
+)
 from ducktective.llm.router import (
     ModelChoice,
 )
@@ -85,6 +88,9 @@ async def _minimal_call(choice: ModelChoice) -> ProbeResult:
         payload["api_base"] = choice.api_base
     if choice.api_key:
         payload["api_key"] = choice.api_key
+    headers = provider_headers(choice)
+    if headers:
+        payload["extra_headers"] = headers
 
     try:
         await litellm.acompletion(**payload)

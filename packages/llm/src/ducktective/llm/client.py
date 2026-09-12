@@ -40,6 +40,9 @@ from ducktective.core.llm.value_objects import (
 from ducktective.llm.cache import (
     build_cache_key,
 )
+from ducktective.llm.headers import (
+    provider_headers,
+)
 from ducktective.llm.router import (
     ModelRouter,
 )
@@ -278,6 +281,9 @@ class LiteLlmClient:
             payload["api_base"] = choice.api_base
         if choice.api_key:
             payload["api_key"] = choice.api_key
+        headers = provider_headers(choice, requirements.session_key)
+        if headers:
+            payload["extra_headers"] = headers
         if tools:
             payload["tools"] = [_tool_to_wire(tool) for tool in tools]
         if json_schema is not None:
@@ -456,6 +462,7 @@ class _StreamCollector:
             usage=self._usage,
             latency_ms=latency_ms,
             is_truncated=self._finish_reason == "length",
+            context_window=getattr(choice, "context_window", 0) or 0,
             tool_calls=tuple(
                 ToolCall(
                     id=call.get("id") or f"call_{index}",
@@ -564,6 +571,7 @@ def _build_response(completion: Any, choice: Any, latency_ms: int) -> LlmRespons
         ),
         latency_ms=latency_ms,
         is_truncated=getattr(choice_data, "finish_reason", None) == "length",
+        context_window=getattr(choice, "context_window", 0) or 0,
         tool_calls=_read_tool_calls(choice_data.message),
     )
 

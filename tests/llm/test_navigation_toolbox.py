@@ -9,7 +9,9 @@ from ducktective.core.retrieval.navigation import (
     ReferenceRelation,
 )
 from ducktective.llm.tools import (
+    MAX_TOOL_RESULT_CHARS,
     NavigationToolbox,
+    result_chars_for,
 )
 from tests.fakes import (
     StubNavigator,
@@ -94,3 +96,9 @@ async def test_the_tool_is_offered_to_the_model() -> None:
     toolbox = NavigationToolbox(RecordingNavigator())
 
     assert "find_references" in [spec.name for spec in toolbox.specs]
+
+
+def test_result_limit_grows_with_the_window_and_never_below_the_floor() -> None:
+    assert result_chars_for(0) == MAX_TOOL_RESULT_CHARS
+    assert result_chars_for(16384) == MAX_TOOL_RESULT_CHARS
+    assert result_chars_for(128000) == 12000
