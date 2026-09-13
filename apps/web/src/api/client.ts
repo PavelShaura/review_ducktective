@@ -188,7 +188,7 @@ export const api = {
   resolveRevision: (repositoryId: string, revision: string) =>
     request<ResolvedRevision>(
       `/repositories/${repositoryId}/revision` +
-        `&revision=${encodeURIComponent(revision)}`,
+        `?revision=${encodeURIComponent(revision)}`,
     ),
 
   startIndexing: (repositoryId: string, revision = "HEAD", embeddingBackend?: string) =>

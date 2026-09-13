@@ -137,7 +137,10 @@ FIND_CALLERS = ToolSpec(
 
 GET_FILE_CONTEXT = ToolSpec(
     name="get_file_context",
-    description="Show what surrounds a range of lines in a file of this repository.",
+    description=(
+        "Show what surrounds a range of lines in a file of this repository. Ask for the "
+        "whole range you need in one call - several hundred lines are fine."
+    ),
     parameters={
         "type": "object",
         "properties": {
@@ -179,7 +182,8 @@ READ_FILE = ToolSpec(
         "Read a range of lines of a file as plain lines. Use it for files that have no "
         "symbols to walk - a migration, a settings file, a template, a lock file - where "
         "get_file_context has nothing to answer with, and for reading a place you already "
-        "found by its line numbers."
+        "found by its line numbers. Ask for the whole range you need in one call - several "
+        "hundred lines are fine; the answer says so if it had to be cut."
     ),
     parameters={
         "type": "object",

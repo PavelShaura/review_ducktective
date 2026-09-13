@@ -138,6 +138,7 @@ class ScriptedLlmClient:
         self.calls: list[list[LlmMessage]] = []
         self.offered_tools: list[tuple[str, ...]] = []
         self.schemas: list[dict[str, Any] | None] = []
+        self.requirements: list[ModelRequirements] = []
 
     async def complete(
         self,
@@ -150,6 +151,7 @@ class ScriptedLlmClient:
         self.calls.append(list(messages))
         self.offered_tools.append(tuple(tool.name for tool in tools or ()))
         self.schemas.append(json_schema)
+        self.requirements.append(requirements)
         return self.responses[min(len(self.calls) - 1, len(self.responses) - 1)]
 
 
@@ -641,3 +643,34 @@ async def test_second_answer_without_json_falls_back() -> None:
     assert len(client.calls) == 3
     assert len(result.drafts) == 1
     assert sink.steps[-1].kind is StepKind.FALLBACK
+
+
+async def test_closing_answer_gets_an_output_budget_from_the_window() -> None:
+    """Рассуждающая модель думает в том же бюджете, что и пишет."""
+    client = ScriptedLlmClient(
+        [answer(calls=(call(),), context_window=128000), answer(FINDINGS_JSON)]
+    )
+
+    await review(build_reviewer(client, max_steps=1), FakeNavigator())
+
+    assert client.requirements[-1].max_output_tokens == 16000
+    assert client.requirements[0].max_output_tokens == 4096
+
+
+async def test_unknown_window_keeps_the_output_budget() -> None:
+    client = ScriptedLlmClient([answer(calls=(call(),)), answer(FINDINGS_JSON)])
+
+    await review(build_reviewer(client, max_steps=1), FakeNavigator())
+
+    assert client.requirements[-1].max_output_tokens == 4096
+
+
+async def test_truncated_closing_answer_is_asked_to_be_shorter() -> None:
+    client = ScriptedLlmClient(
+        [answer(calls=(call(),)), answer("", truncated=True), answer(FINDINGS_JSON)]
+    )
+
+    result = await review(build_reviewer(client, max_steps=1), FakeNavigator())
+
+    assert "at most five findings" in client.calls[2][-1].content
+    assert len(result.drafts) == 1

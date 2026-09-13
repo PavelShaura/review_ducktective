@@ -11,6 +11,7 @@ from uuid import (
 )
 
 from arq import (
+    Retry,
     func,
 )
 from arq.connections import (
@@ -253,6 +254,11 @@ async def build_pipeline(ctx: dict[str, Any], tenant_id: TenantId) -> LangGraphR
     )
 
 
+INDEX_WAIT_SECONDS = 15
+INDEX_WAIT_TRIES = 480
+"""Сколько раз прогон откладывается ради идущей сборки индекса: два часа по 15 секунд."""
+
+
 async def run_review_task(
     ctx: dict[str, Any],
     run_id: str,
@@ -277,6 +283,10 @@ async def run_review_task(
     ходом и двойным счётом токенов.
     """
     tenant = TenantId(UUID(tenant_id))
+    if await _index_in_progress(ctx, tenant, ReviewRunId(UUID(run_id))):
+        logger.info("review.waits_for_index", run_id=run_id)
+        raise Retry(defer=INDEX_WAIT_SECONDS)
+
     use_case = RunReview(
         SqlAlchemyUnitOfWork(ctx["session_factory"], tenant_id=tenant),
         RedisEventPublisher(ctx["redis"]),
@@ -358,6 +368,19 @@ async def forget_checkpoint_task(
     return {"run_id": run_id, "status": "forgotten"}
 
 
+async def _index_in_progress(ctx: dict[str, Any], tenant: TenantId, run_id: ReviewRunId) -> bool:
+    """Собирается ли сейчас индекс репозитория этого дела.
+
+    Прогон откладывается, а не идёт по git: сборку на его ревизию поставили
+    вместе с ним, и через минуты она даст граф вместо поиска по словам.
+    """
+    unit_of_work = SqlAlchemyUnitOfWork(ctx["session_factory"], tenant_id=tenant)
+    async with unit_of_work:
+        run = await unit_of_work.review_runs.get(run_id)
+        latest = await unit_of_work.index_snapshots.find_latest(run.repository_id)
+        return latest is not None and not latest.is_finished
+
+
 async def _mark_failed(
     ctx: dict[str, Any],
     run_id: str,
@@ -389,7 +412,7 @@ class WorkerSettings:
     """
 
     functions: ClassVar[list[Any]] = [
-        func(run_review_task, name=REVIEW_TASK_NAME),
+        func(run_review_task, name=REVIEW_TASK_NAME, max_tries=INDEX_WAIT_TRIES),
         func(forget_checkpoint_task, name=FORGET_CHECKPOINT_TASK_NAME),
     ]
     queue_name = REVIEW_QUEUE

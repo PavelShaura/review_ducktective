@@ -2,6 +2,9 @@ from uuid import (
     UUID,
 )
 
+from arq.connections import (
+    ArqRedis,
+)
 from fastapi import (
     APIRouter,
     HTTPException,
@@ -34,6 +37,9 @@ from ducktective.api.security import (
 )
 from ducktective.application.exceptions import (
     PermissionDeniedError,
+)
+from ducktective.application.indexing.ensure_for_revision import (
+    EnsureIndexForRevision,
 )
 from ducktective.application.review.cancel_run import (
     CancelReviewRun,
@@ -75,8 +81,13 @@ from ducktective.application.review.submit_feedback import (
 )
 from ducktective.config.queues import (
     FORGET_CHECKPOINT_TASK_NAME,
+    INDEX_QUEUE,
+    INDEX_TASK_NAME,
     REVIEW_QUEUE,
     REVIEW_TASK_NAME,
+)
+from ducktective.core.diff.ports import (
+    VcsProvider,
 )
 from ducktective.core.diff.value_objects import (
     DiffSide,
@@ -84,6 +95,13 @@ from ducktective.core.diff.value_objects import (
 from ducktective.core.exceptions import (
     EntityNotFoundError,
     VcsOperationError,
+)
+from ducktective.core.ports import (
+    EventPublisher,
+    UnitOfWork,
+)
+from ducktective.core.review.entities import (
+    ReviewRun,
 )
 from ducktective.core.review.value_objects import (
     ReviewStatus,
@@ -93,6 +111,7 @@ from ducktective.core.types import (
     RepositoryId,
     ReviewFileId,
     ReviewRunId,
+    TenantId,
 )
 
 
@@ -167,6 +186,8 @@ async def enqueue_review(
     run_id: UUID,
     member: MemberDependency,
     unit_of_work: TenantUnitOfWorkDependency,
+    event_publisher: EventPublisherDependency,
+    vcs_provider: VcsProviderDependency,
     task_queue: TaskQueueDependency,
 ) -> ReviewRunResponse:
     """Ставит прогон в очередь.
@@ -187,13 +208,50 @@ async def enqueue_review(
             f"Прогон в статусе {run.status} нельзя отправить на ревью",
         )
 
-    await task_queue.enqueue_job(
-        REVIEW_TASK_NAME,
-        str(run_id),
-        str(member.tenant_id),
-        _queue_name=REVIEW_QUEUE,
+    await _queue_review(
+        run, member.tenant_id, unit_of_work, event_publisher, vcs_provider, task_queue
     )
     return ReviewRunResponse.from_domain(run)
+
+
+async def _queue_review(
+    run: ReviewRun,
+    tenant_id: TenantId,
+    unit_of_work: UnitOfWork,
+    event_publisher: EventPublisher,
+    vcs_provider: VcsProvider,
+    task_queue: ArqRedis,
+) -> None:
+    """Индекс на ревизии дела — прежде ревью.
+
+    Сборка ставится в свою очередь, ревью — в свою; воркер ревью ждёт конца
+    сборки. Ошибка постановки сборки ревью не отменяет: без индекса прогон
+    идёт по git, как и раньше.
+    """
+    try:
+        snapshot_id = await EnsureIndexForRevision(
+            unit_of_work, event_publisher, vcs_provider
+        ).execute(tenant_id, run.repository_id, run.head_sha)
+    except (EntityNotFoundError, VcsOperationError):
+        snapshot_id = None
+
+    if snapshot_id is not None:
+        await task_queue.enqueue_job(
+            INDEX_TASK_NAME,
+            str(run.repository_id),
+            str(tenant_id),
+            run.head_sha,
+            str(snapshot_id),
+            None,
+            _queue_name=INDEX_QUEUE,
+        )
+
+    await task_queue.enqueue_job(
+        REVIEW_TASK_NAME,
+        str(run.id),
+        str(tenant_id),
+        _queue_name=REVIEW_QUEUE,
+    )
 
 
 @router.post(
@@ -206,6 +264,7 @@ async def restart_review(
     member: MemberDependency,
     unit_of_work: TenantUnitOfWorkDependency,
     event_publisher: EventPublisherDependency,
+    vcs_provider: VcsProviderDependency,
     task_queue: TaskQueueDependency,
 ) -> ReviewRunResponse:
     """Отправляет прекращённый или неудавшийся прогон на расследование заново.
@@ -225,11 +284,8 @@ async def restart_review(
     except RunNotRestartableError as error:
         raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
 
-    await task_queue.enqueue_job(
-        REVIEW_TASK_NAME,
-        str(run_id),
-        str(member.tenant_id),
-        _queue_name=REVIEW_QUEUE,
+    await _queue_review(
+        run, member.tenant_id, unit_of_work, event_publisher, vcs_provider, task_queue
     )
     return ReviewRunResponse.from_domain(run)
 

@@ -24,6 +24,9 @@ from ducktective.application.indexing.embedders import (
 from ducktective.application.indexing.enqueue import (
     EnqueueIndexing,
 )
+from ducktective.application.indexing.ensure_for_revision import (
+    EnsureIndexForRevision,
+)
 from ducktective.application.indexing.read_state import (
     GetIndexState,
 )
@@ -36,6 +39,7 @@ from ducktective.core.indexing.value_objects import (
     SnapshotStatus,
 )
 from ducktective.core.types import (
+    CommitSha,
     ContentHash,
     RepositoryId,
     TenantId,
@@ -498,3 +502,45 @@ def test_unknown_embedder_key_resolves_to_the_default() -> None:
     assert choices.resolve("gone").key == "fake-embedder"
     assert choices.resolve(None).key == "fake-embedder"
     assert choices.is_known("gpu-host")
+
+
+async def test_run_revision_without_a_snapshot_gets_one_queued() -> None:
+    """Индекс на другой ревизии ревью не использует — дело получает свой снимок."""
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, repository_id = prepare(unit_of_work)
+    vcs_provider = FakeVcsProvider(
+        tree={"app/report.py": ContentHash("hash-1")},
+        file_contents={"app/report.py": MODULE},
+    )
+    await build(unit_of_work, vcs_provider, tenant_id, repository_id)
+    ensure = EnsureIndexForRevision(unit_of_work, FakeEventPublisher(), vcs_provider)
+
+    queued = await ensure.execute(tenant_id, repository_id, CommitSha("feature"))
+    same_again = await ensure.execute(tenant_id, repository_id, CommitSha("feature"))
+
+    assert queued is not None
+    assert same_again is None
+    async with unit_of_work:
+        latest = await unit_of_work.index_snapshots.find_latest(repository_id)
+    assert latest is not None
+    assert latest.commit_sha == "sha-feature"
+    assert latest.is_finished is False
+
+
+async def test_run_revision_already_indexed_queues_nothing() -> None:
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, repository_id = prepare(unit_of_work)
+    vcs_provider = FakeVcsProvider(
+        tree={"app/report.py": ContentHash("hash-1")},
+        file_contents={"app/report.py": MODULE},
+    )
+    await build(unit_of_work, vcs_provider, tenant_id, repository_id)
+    async with unit_of_work:
+        ready = await unit_of_work.index_snapshots.find_latest_ready(repository_id)
+    assert ready is not None
+
+    queued = await EnsureIndexForRevision(unit_of_work, FakeEventPublisher(), vcs_provider).execute(
+        tenant_id, repository_id, ready.commit_sha
+    )
+
+    assert queued is None

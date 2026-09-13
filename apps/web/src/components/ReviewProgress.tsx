@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { api } from "@/api/client";
@@ -110,6 +110,33 @@ interface Props {
 }
 
 /**
+ * Чем занят индексатор, если прогон ждёт индекс на своей ревизии.
+ *
+ * Спрашивается только пока прогон в очереди: идущий прогон индекс уже
+ * получил или обошёлся без него. Сборка другой ревизии сюда не попадает —
+ * прогон её не ждёт.
+ */
+function useIndexingForRun(run: ReviewRun): string | null {
+  const index = useQuery({
+    queryKey: ["index-state", run.repository_id],
+    queryFn: () => api.getIndexState(run.repository_id),
+    enabled: run.status === "queued",
+    refetchInterval: run.status === "queued" ? 3000 : false,
+  });
+  const state = index.data;
+  if (run.status !== "queued" || !state || state.commit_sha !== run.head_sha) {
+    return null;
+  }
+  if (state.status === "pending") {
+    return "задача ждёт воркера индексации";
+  }
+  if (state.status === "running") {
+    return state.stage_title ?? "идёт сборка";
+  }
+  return null;
+}
+
+/**
  * Пока прогон не завершён, находок в базе нет вообще: они записываются одной
  * транзакцией в конце. Показывать «замечаний нет» до этого момента — врать.
  */
@@ -117,6 +144,7 @@ export function ReviewProgress({ run }: Props) {
   const current = useElapsedSeconds(run.started_at);
   const elapsed = Math.round(run.duration_ms / 1000) + current;
   const expected = run.files.length * AVERAGE_SECONDS_PER_FILE;
+  const indexing = useIndexingForRun(run);
 
   return (
     <section className="border border-brass/40 bg-brass/5 px-5 py-4">
@@ -124,12 +152,15 @@ export function ReviewProgress({ run }: Props) {
         <span aria-hidden className="animate-pulse text-brass">
           ●
         </span>
-        <h2 className="font-display text-2xl font-semibold text-paper">Расследование идёт</h2>
+        <h2 className="font-display text-2xl font-semibold text-paper">
+          {indexing ? "Собирается индекс на ревизии дела" : "Расследование идёт"}
+        </h2>
       </div>
 
       <p className="mt-2 text-[16px] text-paper-dim">
-        Модель читает {run.files.length} файл(ов) по очереди. Замечания появятся сразу все,
-        когда прогон закончится.
+        {indexing
+          ? `Индекс собран на другой ревизии, а ревью с чужим графом идёт хуже, чем без него. Сейчас: ${indexing}. Ревью начнётся сразу после.`
+          : `Модель читает ${run.files.length} файл(ов) по очереди. Замечания появятся сразу все, когда прогон закончится.`}
       </p>
 
       <div className="mt-3 flex flex-wrap items-end justify-between gap-4">

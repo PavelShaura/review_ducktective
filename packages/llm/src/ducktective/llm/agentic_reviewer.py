@@ -1,5 +1,8 @@
 import json
 import time
+from dataclasses import (
+    replace,
+)
 
 from ducktective.core.exceptions import (
     LlmContextOverflowError,
@@ -116,6 +119,20 @@ NOT_JSON_MESSAGE = (
     "Your reply contained no JSON object. Reply with the JSON object of findings only: "
     "no reasoning, no prose, no code fences."
 )
+
+TRUNCATED_ANSWER_MESSAGE = (
+    "Your reply hit the output token limit before the JSON object was complete. "
+    "Reply with the JSON object only, keep it short: at most five findings, one evidence "
+    "snippet each, no reasoning before it."
+)
+
+CLOSING_OUTPUT_TOKENS = 16384
+"""Верхняя граница бюджета выхода заключительного ответа.
+
+Заключительный ответ получает восьмую часть окна модели, но не меньше
+бюджета прогона и не больше этой границы: рассуждающая модель думает
+в том же бюджете, что и пишет.
+"""
 
 NOT_JSON_NOTE = "В ответе нет JSON — прошу вернуть только объект с находками"
 TRUNCATED_ANSWER_NOTE = (
@@ -254,6 +271,7 @@ class AgenticCodeReviewer:
         seen_calls: dict[str, int] = {}
         step = 0
         model = ""
+        context_window = 0
         nudged = False
 
         for attempt in range(1, self._max_steps + 1):
@@ -274,9 +292,10 @@ class AgenticCodeReviewer:
             )
             usage = _add(usage, response.usage)
             model = response.model
+            context_window = response.context_window
             step += 1
             if attempt == 1:
-                toolbox.fit_window(response.context_window)
+                toolbox.fit_window(context_window)
 
             if response.has_tool_calls and response.is_truncated:
                 messages.extend(
@@ -357,7 +376,7 @@ class AgenticCodeReviewer:
         return await self._conclude(
             file,
             messages=messages,
-            requirements=requirements,
+            requirements=_closing_requirements(requirements, context_window),
             usage=usage,
             model=model,
             step=step,
@@ -465,7 +484,12 @@ class AgenticCodeReviewer:
             closing.extend(
                 [
                     _assistant(response),
-                    LlmMessage(role=LlmRole.USER, content=NOT_JSON_MESSAGE),
+                    LlmMessage(
+                        role=LlmRole.USER,
+                        content=TRUNCATED_ANSWER_MESSAGE
+                        if response.is_truncated
+                        else NOT_JSON_MESSAGE,
+                    ),
                 ]
             )
             response = await self._complete_closing(closing, requirements)
@@ -599,6 +623,16 @@ def _with_tool_calling(requirements: ModelRequirements) -> ModelRequirements:
         temperature=requirements.temperature,
         session_key=requirements.session_key,
     )
+
+
+def _closing_requirements(
+    requirements: ModelRequirements, context_window: int
+) -> ModelRequirements:
+    """Требования заключительного ответа: бюджет выхода — восьмая часть окна."""
+    if context_window <= 0:
+        return requirements
+    budget = max(requirements.max_output_tokens, min(CLOSING_OUTPUT_TOKENS, context_window // 8))
+    return replace(requirements, max_output_tokens=budget)
 
 
 def _claims_unchecked_code(payload: ReviewPayload) -> bool:
