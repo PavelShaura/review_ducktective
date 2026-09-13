@@ -1,3 +1,4 @@
+import asyncio
 import os
 from contextlib import (
     AsyncExitStack,
@@ -254,6 +255,9 @@ async def build_pipeline(ctx: dict[str, Any], tenant_id: TenantId) -> LangGraphR
     )
 
 
+JOB_TIMEOUT_SECONDS = int(os.environ.get("REVIEW_JOB_TIMEOUT_SECONDS", "14400"))
+"""Предел одного прогона: агентный цикл тратит минуты на файл, дело на два десятка файлов — часы."""
+
 INDEX_WAIT_SECONDS = 15
 INDEX_WAIT_TRIES = 480
 """Сколько раз прогон откладывается ради идущей сборки индекса: два часа по 15 секунд."""
@@ -316,6 +320,10 @@ async def run_review_task(
         logger.exception("review.crashed", run_id=run_id, error=str(error))
         await _mark_failed(ctx, run_id, tenant, error)
         return {"run_id": run_id, "status": "failed", "error": str(error)}
+    except asyncio.CancelledError:
+        logger.warning("review.timed_out", run_id=run_id, limit_seconds=JOB_TIMEOUT_SECONDS)
+        await asyncio.shield(_mark_failed(ctx, run_id, tenant, _timeout_error()))
+        raise
 
     run = outcome.run
     logger.info(
@@ -381,13 +389,20 @@ async def _index_in_progress(ctx: dict[str, Any], tenant: TenantId, run_id: Revi
         return latest is not None and not latest.is_finished
 
 
+def _timeout_error() -> RuntimeError:
+    return RuntimeError(
+        f"Прогон не уложился в лимит времени воркера ({JOB_TIMEOUT_SECONDS // 60} мин, "
+        "REVIEW_JOB_TIMEOUT_SECONDS). Прочитанные файлы сохранены — нажмите «продолжить»"
+    )
+
+
 async def _mark_failed(
     ctx: dict[str, Any],
     run_id: str,
     tenant_id: TenantId,
     error: Exception,
 ) -> None:
-    """Переводит прогон в неуспешный после непредвиденной ошибки.
+    """Переводит прогон в неуспешный после непредвиденной ошибки или снятия по таймауту.
 
     Отдельной транзакцией и с подавлением собственных ошибок: упасть могла
     как раз работа с базой, и вторая попытка не должна маскировать первую
@@ -420,5 +435,5 @@ class WorkerSettings:
     on_shutdown = shutdown
     redis_settings = RedisSettings.from_dsn(os.environ.get("REDIS_URL", "redis://localhost:6379/0"))
     max_jobs = int(os.environ.get("REVIEW_MAX_JOBS", "2"))
-    job_timeout = int(os.environ.get("REVIEW_JOB_TIMEOUT_SECONDS", "1800"))
+    job_timeout = JOB_TIMEOUT_SECONDS
     keep_result = 3600

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/api/client";
 import type { DegradationKind, NodeDegradation, ReviewRun, ReviewStage } from "@/api/types";
 
-const AVERAGE_SECONDS_PER_FILE = 25;
+const AVERAGE_SECONDS_PER_FILE = 240;
 
 const REVIEWER_NAME_PREFIX = "reviewer:";
 
