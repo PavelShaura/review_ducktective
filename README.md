@@ -5,95 +5,340 @@
 <h1 align="center">review_ducktective</h1>
 
 <p align="center">
-  <b>An LLM reviewer. Sees everything. Quotes your code. Doesn't quack over trifles.</b>
+  <b>An LLM code reviewer that investigates instead of guessing.<br>
+  It walks the call graph, quotes the real code, and never lets your source leave the machine.</b>
 </p>
 
 <p align="center">
   <a href="https://github.com/PavelShaura/review_ducktective/actions"><img src="https://github.com/PavelShaura/review_ducktective/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/python-3.12-blue?logo=python&logoColor=white" alt="Python 3.12">
   <img src="https://img.shields.io/badge/FastAPI-async-009688?logo=fastapi&logoColor=white" alt="FastAPI">
+  <img src="https://img.shields.io/badge/LangGraph-agent%20graph-1C3C3C" alt="LangGraph">
   <img src="https://img.shields.io/badge/PostgreSQL-17%20%2B%20pgvector-336791?logo=postgresql&logoColor=white" alt="PostgreSQL + pgvector">
   <img src="https://img.shields.io/badge/100%25-offline%20capable-success?logo=ghostery&logoColor=white" alt="Offline capable">
   <br>
   <img src="https://img.shields.io/badge/linter-ruff-D7FF64?logo=ruff&logoColor=black" alt="Ruff">
-  <img src="https://img.shields.io/badge/types-mypy-2A6DB2" alt="mypy">
+  <img src="https://img.shields.io/badge/types-mypy%20strict-2A6DB2" alt="mypy">
+  <img src="https://img.shields.io/badge/layers-import--linter-8A2BE2" alt="import-linter">
   <img src="https://img.shields.io/badge/commits-conventional-FE5196?logo=conventionalcommits&logoColor=white" alt="Conventional Commits">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT">
 </p>
 
 ---
 
-An automated code review platform built on an LLM: it takes a diff, returns findings
-tied to specific lines of code, sorted by severity and backed by quotes from the
-real code.
+**review_ducktective** is a self-hosted code review platform. Give it a commit or a
+range of revisions and it returns findings pinned to lines of code, ranked by
+severity, each one backed by a quote from the actual source. Behind every finding is
+an investigation: the model reads the diff, asks who calls the changed function, looks
+at the neighbouring files of the same change, reads the definitions it depends on,
+checks what reviewers said about this file before — and only then speaks.
 
-It can run fully offline too — your codebase never leaves the machine.
+It is built for codebases that cannot leave the building. Everything from parsing to
+embeddings to the reviewer model can run on your own hardware; a repository marked
+`local_only` never produces a single outbound request. When you *do* want a stronger
+cloud model for an open-source repository, that is a per-repository policy and a
+per-run choice, not a global switch.
 
-## What it does
+## Table of contents
 
-- **Diff review** — parallel, specialized passes (correctness, security,
-  performance, project conventions) with a verification step on every finding.
-- **RAG over the codebase** — AST chunking via tree-sitter, a symbol graph, and
-  hybrid search (vector + lexical) with reranking.
-- **Diff-first retrieval** — context is gathered starting from the changed symbol:
-  what it calls, and who calls it. The model sees the fallout of a change, not just
-  the diff.
-- **Chat with your project** — ask anything in plain language, streamed over WebSocket.
-- **MCP server** — lets external agents navigate the index: semantic search,
-  definitions, call graph.
-- **Air-gapped mode** — local models through Ollama, not a single request going out.
+- [Why it is different](#why-it-is-different)
+- [A tour](#a-tour)
+- [How a review works](#how-a-review-works)
+- [The index](#the-index)
+- [Models, trust and privacy](#models-trust-and-privacy)
+- [Chat with the codebase](#chat-with-the-codebase)
+- [MCP server](#mcp-server)
+- [Organizations and sign-in](#organizations-and-sign-in)
+- [Review from the terminal](#review-from-the-terminal)
+- [Quality evaluation](#quality-evaluation)
+- [Architecture](#architecture)
+- [Technology stack](#technology-stack)
+- [Quick start](#quick-start)
+- [Configuration](#configuration)
+- [Development](#development)
 
-## Stack
+## Why it is different
 
-Python 3.12, FastAPI, LangGraph, SQLAlchemy 2.0 (async), PostgreSQL 17 + pgvector,
-Redis, arq, LiteLLM, tree-sitter, React + TypeScript.
+- **Findings are proven, not asserted.** A finding must quote a fragment of code
+  that exists at the reviewed revision — in the diff or in something the model actually
+  read through a tool. Findings that fail the check are discarded before you see them,
+  and the case card reports how many were thrown away and why.
+- **The reviewer is an agent with a map of your repository.** The diff is where it
+  starts, not where it stops: tree-sitter parses the codebase into symbols, a call graph
+  links them, and the model navigates that graph with tools — `find_callers`,
+  `get_definition`, `find_references`, `get_file_outline`, `read_file` — while you watch
+  every step in the UI.
+- **A change is reviewed as a whole.** The reviewer sees the list of other files in
+  the same change and can open their patches, so "the callers were not updated" is
+  checked against the change itself before it becomes a finding.
+- **Offline is a first-class mode, not a demo.** Local models via Ollama or LM Studio
+  through one OpenAI-compatible path, embeddings served by a container in `compose`,
+  fonts bundled, nothing fetched from a CDN. The egress policy of a repository is a
+  domain invariant, enforced by the model router.
+- **It learns what you think.** Every finding can be marked *confirmed*, *false trail*
+  or *dismissed*; the reviewer reads those marks on the next run of the same file, and
+  the *marks* page turns them into a precision figure you can watch move.
+- **Production discipline from day one.** Layered DDD with an explicit Unit of Work,
+  `import-linter` contracts in CI, strict `mypy`, 660+ tests, Conventional Commits with
+  a generated changelog, row-level security in Postgres, structured logging.
 
-## Requirements
+## A tour
 
-- Python 3.12+
-- [uv](https://docs.astral.sh/uv/)
-- Docker and Docker Compose
+The screenshots follow one case from start to verdict. The reviewed repository is
+this one.
 
-## Quick start
+### 1. Open a case
 
-```bash
-uv sync --all-packages
+<p align="center">
+  <img src="docs/screenshots/new-review.webp" alt="New review form" width="900">
+</p>
 
-cp .env.example .env
+A case is a repository plus what to review — a single commit or a range of revisions.
+The form already knows the state of the index (files, revision, when it was built),
+lets you pick **which server computes the vectors** (the Ollama that ships in
+`compose`, or a faster model on a GPU host — both write into one vector set) and
+**which model reviews**, with its trust level spelled out next to the name:
+*does not train on requests* versus *free tier, learns on your prompts*.
 
-docker compose --env-file .env -f deploy/compose/docker-compose.dev.yml up -d
+If the index was built on a different revision than the one you are about to
+review, the form says so and offers to index that revision in one click. This also
+happens on its own: a run queues an incremental build for its revision and waits for
+it, so the reviewer works with a graph that describes exactly the code under review —
+a graph from another commit is worse than none, because the symbols of the change are
+simply not in it.
 
-uv run alembic upgrade head
+### 2. Watch the investigation
 
-uv run ducktective dev
+<p align="center">
+  <img src="docs/screenshots/case-investigation.webp" alt="A case while the investigation runs" width="900">
+</p>
+
+The case card shows the change (revisions, files, when it was opened), the live
+progress, and the **investigation trail**: every thought of the model, every tool it
+called with its arguments, every answer it got with its source and timing. The trail
+streams over a WebSocket as it happens — you can see the reviewer read
+`get_diff_summary`, open the patch of a neighbouring file, look up callers, and
+decide it has seen enough.
+
+Below the trail is the diff itself, rendered by changed blocks with the collapsed
+stretches expandable on demand; the lines come from the revision, not from the patch.
+
+### 3. Read a finding — and its proof
+
+<p align="center">
+  <img src="docs/screenshots/finding-evidence.webp" alt="A finding with its evidence and verdict buttons" width="900">
+</p>
+
+A finding sits on the lines it is about. It carries severity (`critical` / `major` /
+`minor` / `nitpick`), a category (`correctness`, `security`, `performance`,
+`architecture`, `tests`, `style`), which reviewer produced it, the model's confidence,
+a plain-language explanation and the **evidence**: the fragment of code the claim
+rests on. The fragment was verified against the reviewed revision before the finding
+was allowed in.
+
+Three buttons close the loop: **confirm**, **false trail**, **dismiss**. The latest
+verdict on a finding is what the reviewer sees the next time it reads that file
+(the `past_findings` tool), and what the *marks* page counts.
+
+### 4. Ask the codebase a question
+
+<p align="center">
+  <img src="docs/screenshots/chat.webp" alt="Chat with the codebase" width="900">
+</p>
+
+The same agent, the same tools, a different question. Ask "what comes up in
+compose — anything about auth?" and get an answer that names the services, the
+config file and the exact variables, with the seven tool calls behind it folded into
+one line above the reply. Attach a document — a spec, a ticket — and the agent gets a
+`search_document` tool over it. If the chosen model refuses mid-way (a free tier hit
+its quota), the reply continues on the next model that fits the repository's policy,
+and the switch is announced in the conversation rather than hidden.
+
+### 5. Keep the index alive
+
+<p align="center">
+  <img src="docs/screenshots/indexes.webp" alt="Indexes page" width="900">
+</p>
+
+Every registered repository with its index: files, symbols, fragments, resolved call
+edges, the revision, and the two layers of the index — *symbols and graph* (ready
+first) and *vectors* (computed after, by the server you chose). Builds are
+incremental, cancellable, and show what they are doing — parsing, storing, linking,
+embedding — with a moving counter, because a bar that stops moving looks like a hang.
+
+### 6. Connect models
+
+<p align="center">
+  <img src="docs/screenshots/models.webp" alt="Models page" width="900">
+</p>
+
+A local model is always there. Remote ones come as **connections**: one key gives
+you every model of a provider, refreshed from the provider itself. Presets for the
+usual suspects (OpenRouter, Groq, Google AI Studio, Cerebras, Anthropic, OpenCode,
+any OpenAI-compatible server) come with an honest note of what you pay with — money,
+a daily quota, or your prompts. Keys are stored encrypted and are never shown back.
+
+### 7. Work as a team
+
+<p align="center">
+  <img src="docs/screenshots/organization.webp" alt="Organization page" width="900">
+</p>
+
+Sign-in goes through Keycloak (OpenID Connect). An organization owns repositories,
+runs, conversations and model connections; members join by invitation, owners
+decide the egress policy of a repository and the model connections — both are
+decisions about where code may travel. Isolation is enforced by row-level security
+in Postgres, not only by filters in code.
+
+## How a review works
+
+A run is a [LangGraph](https://github.com/langchain-ai/langgraph) graph with typed
+state and a Postgres checkpointer. Here is what happens between "start review" and
+the findings appearing.
+
+```
+open case ──▶ parse diff ──▶ ensure index at revision ──▶ plan
+                                                            │
+              ┌─────────────────────────────────────────────┘
+              ▼
+   per file (fan-out) ──▶ agentic investigation ──▶ structured verdict
+              │
+              ▼
+   aggregate ──▶ verify evidence ──▶ deduplicate ──▶ persist ──▶ notify
 ```
 
-Compose brings up Postgres, Redis, Keycloak and an Ollama that serves the embedding
-model: `ollama-pull` fetches it into a volume on the first start (about 270 MB), so
-vectors never depend on a GPU host being awake. For an air-gapped install, fill the
-`ollama_models` volume beforehand. A faster embedding server — the same weights on
-a GPU host — goes into `embedding_backends.json` (see the example file) and becomes a
-choice in the index panel; servers that share a `vector_set` write into one set of
-vectors.
+**Parse the diff.** The unified diff is split into files and hunks and stored; every
+file knows its language, change type and line counts. Binary and generated files are
+recognised and not sent to the model.
 
-One command brings up the API, both workers, and the frontend, merges their logs
-into a single stream tagged by source, and shuts everyone down on Ctrl+C. The
-processes stay separate, though — indexing and review have different load profiles
-(D-013).
+**Ensure the index.** If there is no ready index at the reviewed revision, an
+incremental build is queued and the review waits for it (the job defers itself every
+15 seconds instead of holding a worker slot). Only changed files are re-parsed;
+vectors are reused by content hash.
 
-```bash
-uv run ducktective dev --reload        # restart the API on changes
-uv run ducktective dev --no-web        # without the frontend
-uv run ducktective dev --no-workers    # API only
-```
+**Plan.** The planner decides the mode — agentic when a tool-capable model within
+the repository's policy exists, single-pass otherwise — and the budgets.
 
-Or one at a time, when you want to watch just one of them:
+**Investigate, one file at a time.** Each file is a dialogue with the model. The
+model gets the patch, a system prompt describing what a good finding is, and a
+toolbox:
 
-```bash
-uv run ducktective serve --reload
-uv run arq ducktective.reviewer.worker.WorkerSettings   # review
-uv run arq ducktective.indexer.worker.WorkerSettings    # indexing
-```
+| Tool | What it answers |
+|---|---|
+| `get_diff_summary`, `get_file_diff` | what else changed in this same change, and the patch of any of it |
+| `search_code` | where is this done — hybrid search, by meaning and by literal |
+| `find_symbol`, `get_definition`, `get_file_outline` | what is this thing, what does a file define |
+| `find_callers`, `find_references` | who depends on it — call graph, inheritance, imports |
+| `get_file_context`, `read_file` | the code around these lines / these exact lines |
+| `list_files`, `project_docs`, `describe_repository` | what is in the repository and what its docs say |
+| `past_findings` | what reviewers found here before and what the humans said about it |
+
+Every answer is stamped with its source — *project index (symbols and call graph)*
+or *git at the reviewed revision, word search without a graph* — because an empty
+result means different things in each case, and the model has to know which.
+
+The loop's limits derive from the model's context window, not from constants: each
+tool result may take a thirty-second of the window, the dialogue stops when it fills
+three quarters of it, and a step ceiling (`AGENT_MAX_STEPS`) only catches a model going
+in circles. A repeated call with the same arguments is refused with a pointer to the
+step that already holds the answer. When the loop ends, the model is asked for its
+verdict as a JSON object; a reasoning model gets an output budget of an eighth of its
+window for that, because it thinks in the same budget it writes in.
+
+**Fall back honestly.** No tool-capable model, a dialogue that outgrew the window,
+a verdict that would not parse — the file gets a single-pass review of its diff
+instead, and the trail says so. A file without a review must never look like a file
+without findings.
+
+**Verify.** Every proposed finding passes four gates before it is stored:
+it must point inside the diff; its evidence must be a real quote from the reviewed
+revision or from something a tool returned; a claim about code outside the diff
+("this breaks all callers") must be backed by a tool call that looked at that code —
+the model is sent back once to check, then the claim is dropped; and duplicates of one
+defect from several angles are merged, keeping the best-supported representative.
+The case card reports the counts: proposed, discarded outside the diff, discarded
+without evidence, discarded as unproven, merged as duplicates.
+
+**Persist and notify.** Findings and the trail are written in one transaction; the
+UI gets the news over Redis pub/sub → WebSocket. A run can be **stopped** between
+model calls, **resumed** from its checkpoint (files already read stay read), or
+**restarted** from scratch. A run that outlives the worker's time limit is marked
+failed with the reason and can be resumed.
+
+## The index
+
+The index is what turns "review this diff" into "review this change in this
+codebase". It lives entirely in PostgreSQL.
+
+**Parsing.** [tree-sitter](https://tree-sitter.github.io/) grammars for Python,
+JavaScript and TypeScript produce symbols (modules, classes, functions, methods) with
+exact byte and line ranges, signatures and docstrings. HTML, CSS/SCSS, Markdown, YAML,
+TOML, JSON, Dockerfiles and plain text are chunked by blank lines with a hard cap, so
+a minified file does not become a single 4 000-token fragment.
+
+**Graph.** References found during parsing become edges: calls, inheritance,
+imports. Edges are resolved against the symbol table in a second pass, so a call to
+`ReportBuilder.build` links to the definition wherever it lives; unresolved names are
+kept as names — a partial graph of a dynamic language is still worth a lot.
+
+**Chunks and search.** Every symbol body and every text block is a chunk with a
+`tsvector` for lexical search and a 768-dimensional vector in
+[pgvector](https://github.com/pgvector/pgvector). Search is **hybrid**: lexical and
+vector results are fused with reciprocal rank fusion, weighted by how the question
+looks — an identifier leans on words, a sentence leans on meaning. Prose questions are
+first translated into candidate identifiers by a small model call before hitting the
+index.
+
+**Vectors.** Embeddings come from `nomic-embed-text` (137M parameters, 768
+dimensions). A quantised copy runs in the Ollama container that `compose` starts, on
+CPU, with all cores; a faster server with the same weights — LM Studio on a GPU host —
+can be added to `embedding_backends.json` and chosen per build. Servers that declare
+the same `vector_set` write into one set of vectors, so nothing is recomputed when you
+switch. Generated and vendored paths (migrations, fixtures, minified assets, lock
+files) get no vectors at all: the graph and word search still cover them, semantic
+search never needed them.
+
+**Incremental and honest.** Files are compared by the content hash git already has;
+an unchanged file is not even read. The two layers of the index are reported
+separately — *symbols and graph* are ready first and useful on their own, *vectors*
+follow — and the UI says "computing", "stopped" or "not started" only when the server
+says so, never by guessing from a percentage.
+
+## Models, trust and privacy
+
+All model access goes through [LiteLLM](https://github.com/BerriAI/litellm), so
+Ollama, LM Studio, vLLM, llama.cpp, OpenRouter, Groq, Gemini, Cerebras, Anthropic and
+any OpenAI-compatible server speak one protocol. Above it sits a **ModelRouter** that
+chooses a model per node of the graph from what the node needs (tool calling, a
+minimum window, deep reasoning) and what the repository allows.
+
+Three trust levels describe every model:
+
+| Level | Meaning | Examples |
+|---|---|---|
+| `local` | code never leaves the machine | Ollama, LM Studio |
+| `private_remote` | a provider that promises not to train on requests | Anthropic, OpenCode Go, paid tiers |
+| `training_remote` | no such promise — assumed to learn on your prompts | free tiers of OpenRouter, Gemini, Groq |
+
+Every repository has an **egress policy** that sets the highest level it accepts.
+The router never picks above it, the UI only offers models within it, and a model the
+user picked explicitly is honoured only if it passes. Model connections belong to the
+organization: one key, every model of the provider, encrypted at rest with a master
+secret that stays outside the database. Provider-specific requirements — OpenCode Go
+wants a stable session id and a named user agent — are handled in the client, keyed by
+the run or conversation.
+
+The reviewer model, the chat model and the embedding model are configured
+independently; the defaults are local.
+
+## Chat with the codebase
+
+The chat is the review agent turned towards a question instead of a diff: the same
+navigation tools, the same window budgeting, the same trail — streamed over a
+WebSocket, token by token. A conversation remembers its history and its chosen model;
+a document attached to it becomes searchable with a dedicated tool rather than pasted
+into the prompt whole. Conversations belong to a repository and inherit its egress
+policy.
 
 ## MCP server
 
@@ -101,8 +346,6 @@ Ducktective parses your codebase and builds a reference book out of it: where ea
 symbol starts and ends, who calls whom, which fragment is about what. The MCP server
 opens that reference book up — Claude Code, Cursor, and other clients can look things
 up in it.
-
-Five tools:
 
 | Tool | Answers the question |
 |---|---|
@@ -114,27 +357,22 @@ Five tools:
 
 Where it shines is the connections `grep` chokes on: "who calls this," "where else
 is this done," "what covers these lines." Same-named symbols all come back; graph
-neighbors come back as a signature, without the body.
+neighbours come back as a signature, without the body.
 
-What it deliberately won't do: **git history** (branches, commits, authors — your
-client already has `git log`), **the working copy** (answers describe a committed
-revision; mixing in half-written code would stop the index from being trustworthy),
-and **review runs** (findings, severity, and marks live in other tables — this
-server doesn't read them).
+What it deliberately won't do: **git history** (your client already has `git log`),
+**the working copy** (answers describe a committed revision; mixing in half-written
+code would stop the index from being trustworthy), and **review runs** (findings and
+marks live in other tables — this server doesn't read them). Every answer is stamped
+with the index revision and build date.
 
-Every answer is stamped with the index revision and build date, so you can tell how
-fresh it is. After commits, the index gets rebuilt — `ducktective index .`.
-
-The default transport is stdio — the client starts the server itself. That makes the
-client's directory the working directory, so you point at your `.env` explicitly:
+The default transport is stdio — the client starts the server itself, so you point at
+your `.env` explicitly:
 
 ```bash
 claude mcp add ducktective -- \
   /path/to/review_ducktective/.venv/bin/ducktective-mcp \
   --env-file /path/to/review_ducktective/.env
 ```
-
-Same thing via client config:
 
 ```json
 {
@@ -153,50 +391,21 @@ A standalone service runs off the same executable:
 uv run ducktective-mcp --transport http --port 8090
 ```
 
-The settings file is set with `--env-file` or the `DUCKTECTIVE_ENV_FILE` variable;
-the named file overrides the environment. The tenant is set with `--tenant` or
-`MCP_TENANT_ID`: stdio has no caller identity, so the server runs as whoever started
-it. Tools accept a repository by name or by ID.
+The tenant is set with `--tenant` or `MCP_TENANT_ID`: stdio has no caller identity,
+so the server runs as whoever started it.
 
-## Indexing
+## Organizations and sign-in
 
-Before review can lean on the codebase, it has to be parsed:
+Sign-in is OpenID Connect through **Keycloak**, which `compose` starts with a
+pre-imported realm. The first sign-in creates a user and an organization; further
+members join by invitation link. Roles are *owner* and *member*: owners change the
+egress policy of a repository and manage model connections — the two operations that
+decide where code goes.
 
-```bash
-ducktective index .                    # current revision
-ducktective index . --revision HEAD~5  # any other one
-ducktective index . --skip-embeddings  # no vectors: parsing and the graph don't need them
-```
-
-From the UI, indexing kicks off in the same place you open a case: under the
-repository picker you can see whether the index is built, and refresh it without
-dropping to the terminal. Review will still run without an index — but one diff at
-a time, with no surroundings, and the UI will say so.
-
-A re-run only parses the files that changed — the hashes come straight from git, so
-an unchanged file isn't even read. Vectors are computed by the embedding model from
-compose (`LOCAL_EMBEDDING_MODEL`, `LOCAL_EMBEDDING_BASE_URL`, CPU is enough); if it's
-unavailable, the index still gets built and the vectors are filled in on the next run.
-
-## Quality evaluation
-
-The case sets with known-good answers live outside the repo — they contain code that
-has no business being here. A run measures recall on the planted defects and the
-false-alarm rate on diffs that are known to be clean:
-
-```bash
-ducktective eval cases.json --label baseline --repeat 3 --save
-
-# with context from the index — this is how you measure the retrieval effect
-ducktective eval cases.json --label with-context --repeat 3 \
-  --repository . --tenant <id> --save
-```
-
-`--repeat` isn't about reliability: the model answers the same prompt differently
-each time, and a single run measures luck. The report prints the spread next to the
-average, and the "cases with context" line shows whether the index actually took
-part — a "with context" run where it didn't come together is supposed to give itself
-away.
+Multi-tenancy is enforced twice: use cases check ownership and explain a refusal,
+and PostgreSQL **row-level security** policies on every organization-scoped table
+catch a forgotten filter. The CLI signs in with the OAuth device flow
+(`ducktective login`) and works as that user.
 
 ## Review from the terminal
 
@@ -204,30 +413,15 @@ Standalone mode: no database, no Redis, no running API. All you need is a local
 model — the code goes nowhere.
 
 ```bash
-# what you're about to commit
-ducktective review --staged --no-store
-
-# a range of revisions
+ducktective review --staged --no-store                        # what you're about to commit
 ducktective review /path/to/repo --no-store --base HEAD~1 --head HEAD
-
-# a report for a pull request description
-ducktective review --staged --no-store --format markdown
+ducktective review --staged --no-store --format markdown      # a report for a pull request
 ```
 
-Output formats: `rich` (default), `json`, `markdown`.
-
-A big commit can be narrowed down to the part you care about — `--include` takes
-patterns and can be repeated. `*` spans directory separators too, so `src/report/*`
-will find files at any depth:
-
-```bash
-ducktective review /path/to/repo --no-store \
-  --base a1b2c3d~1 --head a1b2c3d \
-  --include 'src/report/*' --include '*.py'
-```
-
-With `--fail-on`, the command returns a non-zero exit code if it finds problems at
-the given level or above — which makes it usable as a git hook and in CI:
+Output formats: `rich` (default), `json`, `markdown`. `--include` narrows a big
+commit to the part you care about (`*` spans directory separators). With
+`--fail-on`, the command returns a non-zero exit code at the given severity or above,
+which makes it a git hook and a CI gate:
 
 ```bash
 ducktective review --staged --no-store --fail-on major
@@ -244,68 +438,160 @@ ducktective review --staged --no-store --fail-on major
       pass_filenames: false
 ```
 
-Stored mode (without `--no-store`) writes runs and findings to the database, needs a
-`--tenant` and running infrastructure — it's there so you can label findings and
-build up data for quality evaluation.
+Stored mode (without `--no-store`) writes runs and findings to the database — that
+is how findings get marked and quality gets measured.
 
-Health check: http://localhost:8000/health, API docs: http://localhost:8000/docs
-
-## Web UI
+Indexing from the terminal:
 
 ```bash
-cd apps/web
-npm install
-npm run dev
+ducktective index .                    # current revision
+ducktective index . --revision HEAD~5  # any other one
+ducktective index . --skip-embeddings  # parsing and the graph only
 ```
 
-Opens at http://localhost:5173, with requests to the API proxied to port 8000 — no
-CORS to configure. The tenant is set by `VITE_TENANT_ID`, the backend address by
-`VITE_API_TARGET`.
+## Quality evaluation
 
-The diff is shown by changed blocks; the collapsed stretches between them expand on
-demand — the lines are read from the revision, not shipped along with the patch.
-
-The "marks" section collects everything you tagged with the buttons on finding
-cards: how many were confirmed, how many turned out to be a false trail, and what
-share ends up confirmed. This is the raw material for evaluating the reviewer, and
-without it the labeling would pile up blind.
-
-Fonts are bundled as packages and served from the same host: the UI never reaches
-out to an external CDN, same as the rest of the system.
+Case sets with known-good answers live outside the repository — they contain code
+that has no business being here. A run measures recall on planted defects and the
+false-alarm rate on diffs known to be clean:
 
 ```bash
-npm run build       # build
-npm run typecheck   # types
-npm run codegen     # refresh API types from openapi.json
+ducktective eval cases.json --label baseline --repeat 3 --save
+
+# with context from the index — this is how you measure the retrieval effect
+ducktective eval cases.json --label with-context --repeat 3 \
+  --repository . --tenant <id> --save
 ```
 
-The API schema is regenerated from the app:
+`--repeat` is not about reliability: the model answers the same prompt differently
+each time, and a single run measures luck. The report prints the spread next to the
+average, and the "cases with context" line shows whether the index actually took
+part.
 
-```bash
-uv run python -c "import json; from ducktective.api.main import create_app; \
-  print(json.dumps(create_app().openapi(), ensure_ascii=False))" > apps/web/openapi.json
+The *marks* page is the other half of evaluation: verdicts left by humans on real
+findings, counted per repository, with the share of confirmed ones.
+
+## Architecture
+
+Layered DDD. `apps` depend on `application`, `application` on `core`; infrastructure
+packages implement the ports the domain declares. Data access goes only through
+aggregate repositories, and every transaction boundary is an explicit **Unit of
+Work** opened in a use case — repositories never commit, and nothing inside an open
+transaction calls a model, git or a linter. The dependency rule is enforced by
+eleven `import-linter` contracts in CI.
+
+```
+packages/core           domain: aggregates, value objects, events, ports, verification rules
+packages/application    use cases and transaction boundaries
+packages/storage        SQLAlchemy 2.0 async models, repositories, Unit of Work, Alembic migrations, RLS
+packages/indexing       tree-sitter parsers, chunking, symbol graph, hashing
+packages/retrieval      hybrid search, diff-first context builder, navigators (index and git)
+packages/llm            LiteLLM client, ModelRouter, agentic reviewer and chat agent, toolboxes, cache
+packages/review_graph   LangGraph nodes, state, checkpointing, pipeline port implementation
+packages/vcs            git: diffs, revisions, trees, a git-backed navigator for unindexed revisions
+packages/auth           OIDC, sessions, device flow
+packages/evals          case sets, harness, metrics, reports
+packages/config         settings, queues, model and embedder registries
+packages/observability  structured logging
+apps/api                FastAPI: REST, WebSocket streams, CLI entry points
+apps/indexer            arq worker: build_index_task
+apps/reviewer           arq worker: run_review_task, checkpoint cleanup
+apps/mcp_server         MCP tools over the index
+apps/web                React + TypeScript + Vite interface
 ```
 
-## Migrations
+Two workers with separate queues, because indexing and review have different load
+profiles; each can be scaled on its own. Domain events are published after commit
+and fanned out through Redis to WebSocket subscribers. Run state between graph
+super-steps is held by the LangGraph Postgres checkpointer — that is what makes
+*stop* and *resume* possible.
+
+Decisions and their rejected alternatives are recorded as numbered ADRs in
+`docs/adr/`, starting with the one on layering and the Unit of Work.
+
+## Technology stack
+
+| Area | Choice | Why this one |
+|---|---|---|
+| Language | Python 3.12+, fully typed, `mypy` strict | domain logic reads like the docs that describe it |
+| API | FastAPI, Pydantic v2 | async end to end, OpenAPI schema drives the frontend types |
+| Agent graph | LangGraph with a Postgres checkpointer | typed state, fan-out per file, resumable runs |
+| Model access | LiteLLM | one protocol for local and remote providers, structured output, tool calls |
+| Storage | PostgreSQL 17 + pgvector | vectors, the symbol graph, findings and checkpoints in one transactional store — no second database to keep consistent |
+| Queue and events | Redis + arq | small, async, retries and deferral built in; pub/sub for live streams |
+| Parsing | tree-sitter | exact symbol ranges across languages without running the code |
+| Embeddings | nomic-embed-text via Ollama (CPU) or any OpenAI-compatible server | 768 dimensions, Apache 2.0, runs anywhere |
+| Sign-in | Keycloak, OpenID Connect | organizations and invitations without writing an auth server |
+| ORM and migrations | SQLAlchemy 2.0 async, Alembic | explicit sessions, explicit transactions |
+| Frontend | React, TypeScript, Vite, TanStack Query | generated API types, no CDN at runtime |
+| Quality | ruff, isort, mypy, import-linter, pytest, testcontainers, pre-commit, commitizen | the layers and the commit history stay honest |
+
+## Quick start
+
+Requirements: Python 3.12+, [uv](https://docs.astral.sh/uv/), Docker with Compose.
 
 ```bash
+uv sync --all-packages
+cp .env.example .env
+
+docker compose --env-file .env -f deploy/compose/docker-compose.dev.yml up -d
 uv run alembic upgrade head
-uv run alembic revision --autogenerate -m "description"
-uv run alembic downgrade -1
+uv run ducktective dev
 ```
 
-Alembic reads `DATABASE_URL` from the environment — you need to export it or run the
-commands through `uv run --env-file .env`.
+Compose brings up Postgres, Redis, Keycloak and an Ollama that serves the embedding
+model: `ollama-pull` fetches it into a volume on the first start (about 270 MB) and
+builds the quantised copy, so vectors never depend on a GPU host being awake. For an
+air-gapped install, fill the `ollama_models` volume beforehand.
+
+`ducktective dev` starts the API, both workers and the frontend, merges their logs
+into one stream tagged by source, and shuts everyone down on Ctrl+C:
+
+```bash
+uv run ducktective dev --reload        # restart the API on changes
+uv run ducktective dev --no-web        # without the frontend
+uv run ducktective dev --no-workers    # API only
+```
+
+Or one at a time:
+
+```bash
+uv run ducktective serve --reload
+uv run arq ducktective.reviewer.worker.WorkerSettings   # review
+uv run arq ducktective.indexer.worker.WorkerSettings    # indexing
+cd apps/web && npm install && npm run dev               # interface on :5173, proxied to :8000
+```
+
+Then open http://localhost:5173, sign in (the dev realm lets you register), register a
+repository by its local path, and open a case. Health: http://localhost:8000/health,
+API docs: http://localhost:8000/docs.
+
+## Configuration
+
+Everything is in `.env` (see `.env.example`, every variable is explained there).
+The ones you will touch first:
+
+| Variable | What it does |
+|---|---|
+| `LOCAL_LLM_PROVIDER`, `LOCAL_LLM_BASE_URL`, `LOCAL_REVIEW_MODEL` | the local reviewer model — Ollama on this machine or LM Studio on a GPU host |
+| `LOCAL_REVIEW_MODEL_CONTEXT_WINDOW`, `LOCAL_REVIEW_MODEL_SUPPORTS_TOOLS` | what the loaded model can do; the router decides the mode from this |
+| `LOCAL_EMBEDDING_MODEL`, `LOCAL_EMBEDDING_BASE_URL`, `LOCAL_EMBEDDING_VECTOR_SET` | the default embedding server and the name of its vector set |
+| `EMBEDDING_BACKENDS_FILE` | extra embedding servers offered in the index panel (`embedding_backends.example.json`) |
+| `REMOTE_MODELS_FILE` | installation-wide remote models (`remote_models.example.json`); organizations add their own in the UI |
+| `MODELS_SECRET_KEY` | encrypts provider keys at rest — losing it means re-entering the keys |
+| `AGENT_MAX_STEPS`, `LLM_MAX_OUTPUT_TOKENS` | the agent's step ceiling and output budget |
+| `REVIEW_JOB_TIMEOUT_SECONDS`, `REVIEW_MAX_JOBS`, `INDEX_MAX_JOBS` | worker limits |
+| `KEYCLOAK_*` | the sign-in realm |
 
 ## Development
 
 ```bash
 uv run pre-commit install --install-hooks
 uv run pre-commit install --hook-type commit-msg   # commit convention check
-uv run pytest                 # all tests
-uv run pytest -m "not integration"   # no containers, fast
-uv run mypy .                 # types
-uv run lint-imports           # layer boundary check
+uv run pytest -m "not integration"                 # fast, no containers
+uv run pytest                                      # everything, with testcontainers
+uv run mypy .
+uv run lint-imports
 ```
 
 Formatting — strictly in this order, isort first:
@@ -314,32 +600,25 @@ Formatting — strictly in this order, isort first:
 uv run isort . && uv run ruff format . && uv run ruff check --fix .
 ```
 
-Imports are laid out one name per line inside parentheses (`force_grid_wrap = 1`).
-The `I` rule in ruff is deliberately off: ruff doesn't support this style, so isort
-owns the sorting.
+Migrations:
+
+```bash
+uv run alembic upgrade head
+uv run alembic revision --autogenerate -m "description"
+```
+
+Frontend:
+
+```bash
+cd apps/web
+npm run typecheck
+npm run build
+npm run codegen     # refresh API types from openapi.json
+```
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org/); the
 version and CHANGELOG are generated automatically.
 
-## Architecture
+## License
 
-Layered DDD: `apps` → `application` → `core` (domain). Infrastructure implements the
-domain's ports. Data access goes through aggregate repositories; transaction
-boundaries are an explicit Unit of Work. The dependency rule is enforced by
-`import-linter` in CI.
-
-```
-packages/core          domain: aggregates, value objects, events, ports
-packages/application   use cases, transaction boundaries
-packages/storage       SQLAlchemy, repositories, UnitOfWork, migrations
-packages/indexing      tree-sitter, chunking, symbol graph, embeddings
-packages/retrieval     hybrid search, reranking, diff-first retriever
-packages/llm           LiteLLM, ModelRouter, cache, structured output
-packages/review_graph  LangGraph nodes and graph assembly
-apps/api               FastAPI: REST + WebSocket
-apps/indexer           indexing worker
-apps/reviewer          review worker
-apps/mcp_server        MCP tools for navigating the index
-```
-
-Code-level decisions live in `docs/adr/`.
+MIT.
