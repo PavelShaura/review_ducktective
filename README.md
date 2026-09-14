@@ -14,7 +14,11 @@
   <img src="https://img.shields.io/badge/python-3.12-blue?logo=python&logoColor=white" alt="Python 3.12">
   <img src="https://img.shields.io/badge/FastAPI-async-009688?logo=fastapi&logoColor=white" alt="FastAPI">
   <img src="https://img.shields.io/badge/LangGraph-agent%20graph-1C3C3C" alt="LangGraph">
+  <img src="https://img.shields.io/badge/LiteLLM-model%20routing-0A7EA4" alt="LiteLLM">
   <img src="https://img.shields.io/badge/PostgreSQL-17%20%2B%20pgvector-336791?logo=postgresql&logoColor=white" alt="PostgreSQL + pgvector">
+  <img src="https://img.shields.io/badge/RAG-hybrid%20search%20%2B%20call%20graph-6F42C1" alt="RAG">
+  <img src="https://img.shields.io/badge/tree--sitter-AST%20parsing-2D3748" alt="tree-sitter">
+  <img src="https://img.shields.io/badge/MCP-server-000000" alt="MCP">
   <img src="https://img.shields.io/badge/100%25-offline%20capable-success?logo=ghostery&logoColor=white" alt="Offline capable">
   <br>
   <img src="https://img.shields.io/badge/linter-ruff-D7FF64?logo=ruff&logoColor=black" alt="Ruff">
@@ -41,6 +45,7 @@ per-run choice, not a global switch.
 
 ## Table of contents
 
+- [The LLM engineering inside](#the-llm-engineering-inside)
 - [Why it is different](#why-it-is-different)
 - [A tour](#a-tour)
 - [How a review works](#how-a-review-works)
@@ -56,6 +61,66 @@ per-run choice, not a global switch.
 - [Quick start](#quick-start)
 - [Configuration](#configuration)
 - [Development](#development)
+
+## The LLM engineering inside
+
+The project is an end-to-end application of the techniques that make an LLM
+system dependable, not a wrapper around one prompt. Each row names the technique,
+where it works in this codebase, and the reason it is there.
+
+### Agents and tool use
+
+| Technique | Where it lives | Why |
+|---|---|---|
+| **Agentic loop with tool calling** — the model asks for tools, the runtime executes them, results go back into the dialogue | `packages/llm/agentic_reviewer.py`, `chat_agent.py`; 13 tools in `tools.py`, `review_tools.py` | a diff alone does not say who calls the changed function; letting the model *look* replaces guessing with reading |
+| **LangGraph** state graph with typed state, fan-out per file, a Postgres checkpointer | `packages/review_graph/` — nodes `context → plan → review (Send) → aggregate → verify → report` | a review is a workflow with parallel branches and a resumable state, and the graph makes that explicit and testable |
+| **Structured output** — the verdict is requested as a JSON object against a Pydantic schema; a non-JSON reply is retried once with a tighter instruction | `LiteLlmClient.complete(json_schema=…)`, `parse_payload` in `code_reviewer.py` | findings are data with line numbers and evidence, not prose to parse afterwards |
+| **Context-window budgeting** — tool results, stop condition and the closing output budget derive from the model's window; a step ceiling only catches loops | `agentic_reviewer.py`: `result_chars_for`, `WINDOW_FILL_LIMIT`, `_closing_requirements` | the same code serves a 16k local model and a 128k cloud one without hand-tuned constants |
+| **Self-correction nudges** — a claim about code the model never opened is sent back once; a repeated tool call is refused with a pointer | `UNPROVEN_CLAIM_MESSAGE`, `REPEATED_CALL_MESSAGE` | cheap round-trips that remove whole classes of hallucinated findings |
+| **Model Context Protocol server** — the index exposed as MCP tools to Claude Code, Cursor and other agents | `apps/mcp_server/` | the same navigation that helps the reviewer helps any external agent |
+
+### Retrieval (RAG) over a codebase
+
+| Technique | Where it lives | Why |
+|---|---|---|
+| **AST parsing with tree-sitter** — Python, JavaScript, TypeScript into symbols with exact ranges | `packages/indexing/python_parser.py`, `script_parser.py` | chunks that follow code structure instead of line counts; definitions can be quoted whole |
+| **Symbol graph** — calls, inheritance and imports resolved into edges in Postgres | `packages/indexing/references.py`, `symbol_edge` table | "who calls this" and "what breaks" are graph queries, not text searches |
+| **Embeddings** — `nomic-embed-text`, 768 dimensions, served locally (Ollama on CPU, or LM Studio on a GPU) with named vector sets | `packages/llm/embedder.py`, `deploy/compose/ollama/prepare.sh` | semantic search over code that never leaves the machine; the same weights on two servers share one vector set |
+| **pgvector** — cosine similarity in PostgreSQL next to the graph, findings and checkpoints | `chunk_embedding` table, `packages/retrieval/vector.py` | one transactional store: no separate vector database to keep in sync |
+| **Hybrid search with reciprocal rank fusion** — `tsvector` lexical hits and vector hits fused, weights chosen by the shape of the query | `packages/retrieval/hybrid.py`, `lexical.py` | identifiers want exact matches, questions want meaning; RRF takes both without tuning scores |
+| **Query expansion** — a prose question is turned into candidate identifiers by a small model call before the search | `packages/llm/query_expansion.py` | "where is upload size checked" has no words in common with `MAX_UPLOAD_BYTES` |
+| **Diff-first retrieval** — context for a single-pass review starts from the changed symbols and expands along the graph under a token budget | `packages/retrieval/diff_context.py` | the fallout of a change matters more than a generic top-k over the repository |
+| **Incremental indexing** — files compared by git content hash; only changed files parsed, vectors reused by hash; a run indexes its own revision | `packages/application/indexing/` | an index at another commit is worse than none for a review; keeping it fresh must be cheap |
+
+### Grounding and verification
+
+| Technique | Where it lives | Why |
+|---|---|---|
+| **Evidence gates** — a finding must quote code that exists at the reviewed revision, in the diff or in a tool result; otherwise it is discarded and counted | `packages/core/review/verification.py`, `verify` node | the reviewer's word is not enough; the quote is the proof |
+| **Deduplication by defect, not by line** | `aggregate` node | the same defect seen from two files must be one finding |
+| **Human feedback loop** — confirmed / false trail / dismissed verdicts fed back to the reviewer as a tool and aggregated into a precision figure | `past_findings` tool, *marks* page | the reviewer learns the team's judgement without fine-tuning |
+| **Evaluation harness** — recall on planted defects, false-alarm rate on clean diffs, repeated runs with spread, with and without retrieval | `packages/evals/`, `ducktective eval` | you cannot improve a reviewer you cannot measure; retrieval's effect must be a number |
+
+### Model operations
+
+| Technique | Where it lives | Why |
+|---|---|---|
+| **LiteLLM** as the single model gateway — Ollama, LM Studio, vLLM, OpenAI-compatible servers, Anthropic, Gemini, OpenRouter, Groq, Cerebras | `packages/llm/client.py` | one client, one retry policy, one place for provider quirks |
+| **Model routing by requirements and trust** — a node declares tool calling, a minimum window, deep reasoning; the router picks within the repository's egress policy | `packages/llm/router.py`, `EgressPolicy`, `ModelTrust` | privacy is a domain invariant, not a checkbox; local when possible, remote when allowed |
+| **Fallbacks, cooldowns, back-off** — a model that refuses is replaced mid-stream by the next allowed one; rate-limited models rest; retryable errors back off exponentially | `LiteLlmClient.stream`, `_start_cooldown`, `RETRYABLE_ERRORS` | free tiers count requests and an agent spends one per step |
+| **Response cache** keyed by model, prompt version, messages and tools, in Redis | `packages/llm/cache.py` | a re-run of the same diff should not pay twice; prompt versions keep old answers from leaking into new prompts |
+| **Provider connections with encrypted keys**, presets that state what you pay with — money, quota or your prompts | `provider_connection` table, `packages/core/llm/presets.py` | choosing a model is choosing where code goes; the UI says so |
+| **Local inference** — Ollama and LM Studio through the OpenAI-compatible path, a q8 quantised embedding model with all CPU cores | `compose`, `LOCAL_*` settings | the whole system runs on a laptop and in an air-gapped room |
+
+### Streaming, state and the platform
+
+| Technique | Where it lives | Why |
+|---|---|---|
+| **Streaming** — chat tokens and the investigation trail over WebSocket, fanned out through Redis pub/sub from the workers | `apps/api` WebSocket routes, `RedisStepBroadcaster` | an agent whose steps are invisible is indistinguishable from a hang |
+| **Checkpointing and resumption** — LangGraph's Postgres saver keeps run state between super-steps; stop, resume, restart are first-class | `packages/review_graph/checkpointing.py` | a forty-minute run must survive a worker restart and a change of mind |
+| **Background workers** on arq with separate queues for indexing and review, deferral while an index builds, time limits that mark the run failed instead of leaving it running | `apps/indexer`, `apps/reviewer` | indexing and review have different load profiles; a stuck run must say why |
+| **Multi-tenancy** — Keycloak OpenID Connect, organizations and invitations, PostgreSQL row-level security on every organization-scoped table | `packages/auth`, migration `0022` | a forgotten filter in code must not leak another team's findings |
+| **Layered DDD** with aggregates, ports, an explicit Unit of Work and eleven `import-linter` contracts; strict `mypy`; 660+ tests with testcontainers | `packages/core` → `application` → `apps` | the domain rules — evidence, egress, verdicts — stay readable and testable apart from any framework |
 
 ## Why it is different
 
