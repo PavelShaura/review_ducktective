@@ -139,7 +139,11 @@ def _legacy_remote_models(settings: Settings) -> list[RemoteModel]:
 
 async def startup(ctx: dict[str, Any]) -> None:
     settings = Settings()
-    configure_logging(level=settings.app_log_level, json_output=settings.app_env != "dev")
+    configure_logging(
+        level=settings.app_log_level,
+        json_output=settings.app_env != "dev",
+        file=settings.app_log_file,
+    )
 
     engine = build_engine(
         settings.require_database_url(),

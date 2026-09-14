@@ -39,6 +39,13 @@ class Settings(BaseSettings):
 
     app_env: str = "dev"
     app_log_level: str = "INFO"
+    app_log_file: Path | None = None
+    """Файл, куда дописываются логи в формате JSON Lines.
+
+    Не задан по умолчанию: в контейнере логи собирают со stdout, и второй
+    файл там только занимал бы диск. При локальном запуске без сборщика
+    файл — единственное место, где прогон остаётся после закрытия терминала.
+    """
 
     database_url: str = ""
     database_pool_size: int = 10
