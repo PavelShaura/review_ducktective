@@ -55,6 +55,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_logging(
         level=settings.app_log_level,
         json_output=settings.app_env != "dev",
+        file=settings.app_log_file,
     )
     engine = build_engine(
         settings.require_database_url(),

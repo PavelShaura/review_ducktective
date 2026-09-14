@@ -41,6 +41,7 @@ def main() -> None:
         level=settings.app_log_level,
         json_output=settings.app_env != "dev",
         stream=sys.stderr,
+        file=settings.app_log_file,
     )
 
     asyncio.run(_serve(settings, arguments))
