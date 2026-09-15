@@ -149,8 +149,9 @@ where it works in this codebase, and the reason it is there.
 
 ## A tour
 
-The screenshots follow one case from start to verdict. The reviewed repository is
-this one.
+The screenshots follow one case from start to verdict on a small sandbox
+repository with a planted defect. The interface speaks English and Russian — the
+switch is in the top bar.
 
 ### 1. Open a case
 
@@ -159,18 +160,17 @@ this one.
 </p>
 
 A case is a repository plus what to review — a single commit or a range of revisions.
-The form already knows the state of the index (files, revision, when it was built),
-lets you pick **which server computes the vectors** (the Ollama that ships in
-`compose`, or a faster model on a GPU host — both write into one vector set) and
-**which model reviews**, with its trust level spelled out next to the name:
-*does not train on requests* versus *free tier, learns on your prompts*.
+A repository is registered right here, by its path on the machine that runs the
+service, and the first decision about it is **where its code is allowed to go**:
+local model only, remote models that promise not to train, or any remote model
+including free tiers. That choice is the repository's egress policy; every later
+model pick is checked against it.
 
-If the index was built on a different revision than the one you are about to
-review, the form says so and offers to index that revision in one click. This also
-happens on its own: a run queues an incremental build for its revision and waits for
-it, so the reviewer works with a graph that describes exactly the code under review —
-a graph from another commit is worse than none, because the symbols of the change are
-simply not in it.
+For a registered repository the form shows the state of its index and **which model
+reviews**, with the trust level spelled out next to the name. If the index was built
+on a different revision than the one under review, the run queues an incremental
+build for its revision and waits for it — a graph from another commit is worse than
+none, because the symbols of the change are simply not in it.
 
 ### 2. Watch the investigation
 
@@ -179,11 +179,11 @@ simply not in it.
 </p>
 
 The case card shows the change (revisions, files, when it was opened), the live
-progress, and the **investigation trail**: every thought of the model, every tool it
-called with its arguments, every answer it got with its source and timing. The trail
-streams over a WebSocket as it happens — you can see the reviewer read
-`get_diff_summary`, open the patch of a neighbouring file, look up callers, and
-decide it has seen enough.
+progress with an estimate, and the **investigation trail**: every call to the model,
+every tool it asked for with its arguments, every answer it got with its source and
+timing. The trail streams over a WebSocket as it happens — you can see the reviewer
+list the files, read the ones it cares about, look up callers, and decide it has seen
+enough.
 
 Below the trail is the diff itself, rendered by changed blocks with the collapsed
 stretches expandable on demand; the lines come from the revision, not from the patch.
@@ -194,14 +194,15 @@ stretches expandable on demand; the lines come from the revision, not from the p
   <img src="docs/screenshots/finding-evidence.webp" alt="A finding with its evidence and verdict buttons" width="900">
 </p>
 
-A finding sits on the lines it is about. It carries severity (`critical` / `major` /
-`minor` / `nitpick`), a category (`correctness`, `security`, `performance`,
-`architecture`, `tests`, `style`), which reviewer produced it, the model's confidence,
-a plain-language explanation and the **evidence**: the fragment of code the claim
-rests on. The fragment was verified against the reviewed revision before the finding
-was allowed in.
+A closed case: findings sit on the lines they are about, filtered by severity with
+one click. Each carries severity (`critical` / `major` / `minor` / `nitpick`), a
+category (`correctness`, `security`, `performance`, `architecture`, `tests`, `style`),
+which reviewer produced it, the model's confidence, a plain-language explanation and
+a code block — here, the fix the model proposes. Before the finding was allowed in,
+its **evidence** — the quoted fragment the claim rests on — was verified against the
+reviewed revision; the header shows how many findings the case kept.
 
-Three buttons close the loop: **confirm**, **false trail**, **dismiss**. The latest
+Three buttons close the loop: **confirm**, **false lead**, **defer**. The latest
 verdict on a finding is what the reviewer sees the next time it reads that file
 (the `past_findings` tool), and what the *marks* page counts.
 
@@ -211,10 +212,11 @@ verdict on a finding is what the reviewer sees the next time it reads that file
   <img src="docs/screenshots/chat.webp" alt="Chat with the codebase" width="900">
 </p>
 
-The same agent, the same tools, a different question. Ask "what comes up in
-compose — anything about auth?" and get an answer that names the services, the
-config file and the exact variables, with the seven tool calls behind it folded into
-one line above the reply. Attach a document — a spec, a ticket — and the agent gets a
+The same agent, the same tools, a different question. Ask "how is the API string
+passed in the application?" and get an answer that quotes `app/orders.py:1-4`, names
+the functions that do not take it, and says outright that `find_references` came back
+empty — with the eight codebase lookups behind it folded into one line above the
+reply. Attach a document — a spec, a ticket — and the agent gets a
 `search_document` tool over it. If the chosen model refuses mid-way (a free tier hit
 its quota), the reply continues on the next model that fits the repository's policy,
 and the switch is announced in the conversation rather than hidden.
@@ -226,10 +228,12 @@ and the switch is announced in the conversation rather than hidden.
 </p>
 
 Every registered repository with its index: files, symbols, fragments, resolved call
-edges, the revision, and the two layers of the index — *symbols and graph* (ready
-first) and *vectors* (computed after, by the server you chose). Builds are
-incremental, cancellable, and show what they are doing — parsing, storing, linking,
-embedding — with a moving counter, because a bar that stops moving looks like a hang.
+edges, the revision, and **which server computes the vectors** — the Ollama that
+ships in `compose`, or a faster model on a GPU host; both write into one vector set.
+The two layers of the index are reported separately: *symbols and graph* are ready
+first, *vectors* follow. Builds are incremental, cancellable, and show what they are
+doing — parsing, storing, linking, embedding — with a moving counter, because a bar
+that stops moving looks like a hang.
 
 ### 6. Connect models
 
