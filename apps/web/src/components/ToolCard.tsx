@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 
 interface Props {
   name: string;
@@ -7,19 +8,25 @@ interface Props {
   dense?: boolean;
 }
 
-const TOOL_LABEL: Record<string, string> = {
-  search_code: "ищет по смыслу",
-  get_definition: "читает определение",
-  find_callers: "смотрит, кто вызывает",
-  get_file_context: "смотрит окружение",
-  find_symbol: "ищет символ",
-  read_file: "читает файл",
-  list_files: "смотрит, что есть",
-  get_file_outline: "смотрит состав файла",
-  describe_repository: "осматривается",
-  project_docs: "читает документацию",
-  search_document: "ищет в документе",
-};
+const KNOWN_TOOLS = [
+  "search_code",
+  "get_definition",
+  "find_callers",
+  "get_file_context",
+  "find_symbol",
+  "read_file",
+  "list_files",
+  "get_file_outline",
+  "describe_repository",
+  "project_docs",
+  "search_document",
+] as const;
+
+type KnownTool = (typeof KNOWN_TOOLS)[number];
+
+function isKnownTool(name: string): name is KnownTool {
+  return (KNOWN_TOOLS as readonly string[]).includes(name);
+}
 
 /**
  * Что агент спросил у кодовой базы и что получил.
@@ -29,7 +36,8 @@ const TOOL_LABEL: Record<string, string> = {
  */
 export function ToolCard({ name, arguments: args, result, dense = false }: Props) {
   const [isOpen, setIsOpen] = useState(false);
-  const label = TOOL_LABEL[name] ?? name;
+  const { t } = useTranslation();
+  const label = isKnownTool(name) ? t(`tool.${name}`) : name;
 
   return (
     <div className={dense ? "tool-card px-2.5 py-1" : "tool-card px-3 py-2"}>
@@ -49,7 +57,11 @@ export function ToolCard({ name, arguments: args, result, dense = false }: Props
             dense ? "text-[11px]" : "text-[12px]"
           }`}
         >
-          {result ? (isOpen ? "свернуть −" : "показать +") : "ищу…"}
+          {result
+            ? isOpen
+              ? t("common.collapseLess")
+              : t("common.expandMore")
+            : t("tool.searching")}
         </span>
       </button>
 

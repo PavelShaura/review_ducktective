@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { useNavigate } from "react-router";
 
 import { api, ApiError } from "@/api/client";
@@ -13,6 +15,7 @@ import { shortSha } from "@/lib/format";
 const EMPTY_DRAFT: NewRepositoryDraft = { localPath: "", name: "", egressPolicy: "local_only" };
 
 export default function NewCasePage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const repositories = useQuery({ queryKey: ["repositories"], queryFn: api.listRepositories });
@@ -68,11 +71,8 @@ export default function NewCasePage() {
 
   return (
     <div className="mx-auto max-w-2xl">
-      <h1 className="font-display text-4xl font-semibold text-paper">Новое ревью</h1>
-      <p className="mt-2 text-[16px] text-paper-dim">
-        Укажите репозиторий и что ревьюить: один коммит целиком или диапазон ревизий.
-        Прогон выполнит фоновый воркер, страница обновится сама.
-      </p>
+      <h1 className="font-display text-4xl font-semibold text-paper">{t("newCase.title")}</h1>
+      <p className="mt-2 text-[16px] text-paper-dim">{t("newCase.intro")}</p>
 
       <form
         className="mt-8 space-y-5"
@@ -108,23 +108,23 @@ export default function NewCasePage() {
         <ModePicker mode={mode} onChange={setMode} />
 
         {mode === "commit" ? (
-          <Field label="коммит">
+          <Field label={t("newCase.commit")}>
             <TextInput
               value={commit}
               onChange={setCommit}
-              placeholder="784418ca23a или HEAD"
+              placeholder={t("newCase.commitPlaceholder")}
             />
           </Field>
         ) : (
           <div className="grid grid-cols-2 gap-4">
-            <Field label="от ревизии">
+            <Field label={t("newCase.fromRevision")}>
               <TextInput
                 value={base}
                 onChange={setBase}
                 placeholder="HEAD~1"
               />
             </Field>
-            <Field label="до ревизии">
+            <Field label={t("newCase.toRevision")}>
               <TextInput
                 value={head}
                 onChange={setHead}
@@ -145,14 +145,14 @@ export default function NewCasePage() {
           disabled={start.isPending || !isReady}
           className="action-brass"
         >
-          {start.isPending ? "запускаю ревью…" : "запустить ревью"}
+          {start.isPending ? t("newCase.starting") : t("newCase.start")}
         </button>
 
         <ContextWarning state={index.data} />
 
         {start.isError ? (
           <p className="border-l-2 border-critical bg-critical/5 px-3 py-2 text-[14px] text-paper">
-            {describeError(start.error)}
+            {describeError(t, start.error)}
           </p>
         ) : null}
       </form>
@@ -182,18 +182,17 @@ interface AddRepositoryHintProps {
  * первого прогона поздно: этот прогон уже пройдёт без окружения.
  */
 function AddRepositoryHint({ isReady, isPending, onAdd }: AddRepositoryHintProps) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border border-tweed-dim bg-ink-sunken px-4 py-3">
-      <span className="text-[14px] text-paper-dim">
-        Проиндексировать проект.
-      </span>
+      <span className="text-[14px] text-paper-dim">{t("newCase.indexHint")}</span>
       <button
         type="button"
         onClick={onAdd}
         disabled={!isReady || isPending}
         className="ml-auto rounded-case border border-tweed-dim px-3 py-1 font-mono text-[12px] tracking-wide text-paper-dim transition-colors hover:border-brass hover:text-brass disabled:opacity-40"
       >
-        {isPending ? "завожу…" : "завести репозиторий"}
+        {isPending ? t("newCase.adding") : t("newCase.addRepository")}
       </button>
     </div>
   );
@@ -227,15 +226,15 @@ function TextInput({ value, onChange, placeholder }: TextInputProps) {
   );
 }
 
-function describeError(error: unknown): string {
+function describeError(t: TFunction, error: unknown): string {
   if (!(error instanceof ApiError)) {
-    return "Не удалось начать ревью. Проверьте, что API и воркер запущены.";
+    return t("newCase.startFailed");
   }
   if (error.status === 409) {
-    return "Репозиторий с таким названием уже заведён — выберите его из списка.";
+    return t("newCase.conflict");
   }
   if (error.status === 422) {
-    return "Между указанными ревизиями нет изменений.";
+    return t("newCase.noChanges");
   }
   return error.message;
 }
@@ -254,6 +253,7 @@ interface ContextWarningProps {
  * об этом человек должен узнать до нажатия, а не из результата.
  */
 function ContextWarning({ state }: ContextWarningProps) {
+  const { t } = useTranslation();
   const building = state?.status === "pending" || state?.status === "running";
   if (!building) {
     return null;
@@ -262,16 +262,14 @@ function ContextWarning({ state }: ContextWarningProps) {
   if (state?.context_ready) {
     return (
       <p className="border-l-2 border-tweed-dim px-3 py-2 text-[13px] text-paper-dim">
-        Индекс пересобирается — расследованию это не мешает. Окружение возьмётся
-        из прошлой сборки, новое подхватят следующие дела.
+        {t("newCase.rebuilding")}
       </p>
     );
   }
 
   return (
     <p className="border-l-2 border-brass bg-brass/5 px-3 py-2 text-[13px] text-paper">
-      Индекс ещё собирается, и готового окружения пока нет: расследование пройдёт
-      по одному диффу и найдёт заметно меньше. Дождитесь конца сборки, если важна полнота.
+      {t("newCase.building")}
     </p>
   );
 }
@@ -306,6 +304,7 @@ function StaleIndexWarning({
   repositoryId: string;
 }) {
   const queryClient = useQueryClient();
+  const { t } = useTranslation();
   const isSettled =
     Boolean(state?.is_ready) && state?.status !== "running" && state?.status !== "pending";
 
@@ -329,17 +328,20 @@ function StaleIndexWarning({
 
   return (
     <p className="border border-tweed-dim bg-ink-raised px-4 py-3 text-paper-dim">
-      Ревью пойдёт по {shortSha(wanted)}
-      {head.trim() === wanted ? "" : ` (${head.trim()})`}, а индекс собран на{" "}
-      {shortSha(indexed)}. Инструменты прочитают нужный коммит через git — без графа
-      вызовов.{" "}
+      {t("newCase.stale", {
+        wanted: shortSha(wanted),
+        alias: head.trim() === wanted ? "" : ` (${head.trim()})`,
+        indexed: shortSha(indexed),
+      })}
       <button
         type="button"
         onClick={() => reindex.mutate()}
         disabled={reindex.isPending}
         className="text-brass underline-offset-2 hover:underline disabled:opacity-50"
       >
-        {reindex.isPending ? "ставлю в очередь…" : `проиндексировать ${shortSha(wanted)}`}
+        {reindex.isPending
+          ? t("newCase.queueing")
+          : t("newCase.indexRevision", { sha: shortSha(wanted) })}
       </button>
     </p>
   );
@@ -355,9 +357,10 @@ type DiffMode = "commit" | "range";
  * ему приходится выдумывать.
  */
 function ModePicker({ mode, onChange }: { mode: DiffMode; onChange: (mode: DiffMode) => void }) {
+  const { t } = useTranslation();
   const options: Array<{ value: DiffMode; label: string }> = [
-    { value: "commit", label: "один коммит" },
-    { value: "range", label: "диапазон ревизий" },
+    { value: "commit", label: t("newCase.modeCommit") },
+    { value: "range", label: t("newCase.modeRange") },
   ];
 
   return (

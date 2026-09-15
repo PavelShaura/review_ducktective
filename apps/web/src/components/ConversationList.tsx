@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 
 import { api } from "@/api/client";
 import { formatDateTime } from "@/lib/format";
@@ -27,6 +28,7 @@ export function ConversationList({
   reusedHint,
 }: Props) {
   const queryClient = useQueryClient();
+  const { t } = useTranslation();
 
   const conversations = useQuery({
     queryKey: ["conversations", repositoryId],
@@ -46,20 +48,22 @@ export function ConversationList({
   return (
     <aside className="flex h-full min-h-0 flex-col gap-3">
       <button type="button" onClick={onStart} disabled={isStarting} className="action-brass w-full">
-        {isStarting ? "завожу…" : "+ новый разговор"}
+        {isStarting ? t("conversations.starting") : t("conversations.newConversation")}
       </button>
 
       {reusedHint ? (
         <p className="rounded-case border border-brass-dim bg-brass/10 px-3 py-2 text-[13px] text-brass">
-          Этот разговор уже заведён и пока пуст — задайте вопрос в нём.
+          {t("conversations.reusedHint")}
         </p>
       ) : null}
 
-      <p className="case-label px-1">разговоров: {conversations.data?.length ?? 0}</p>
+      <p className="case-label px-1">
+        {t("conversations.count", { count: conversations.data?.length ?? 0 })}
+      </p>
 
       {conversations.data?.length === 0 ? (
         <p className="rounded-case border border-dashed border-tweed-dim px-3 py-4 text-[13px] text-paper-dim">
-          Разговоров ещё не было. Заведите первый — история сохранится.
+          {t("conversations.empty")}
         </p>
       ) : null}
 
@@ -73,7 +77,7 @@ export function ConversationList({
               className="thread-card min-w-0 flex-1"
             >
               <span className="line-clamp-2 text-[13px] leading-snug">
-                {conversation.title || "без вопроса"}
+                {conversation.title || t("conversations.untitled")}
               </span>
               <span className="mt-2 flex items-center justify-between gap-2">
                 <span className="case-label">{formatDateTime(conversation.updated_at)}</span>
@@ -82,8 +86,8 @@ export function ConversationList({
             </button>
             <button
               type="button"
-              title="удалить разговор"
-              aria-label="удалить разговор"
+              title={t("conversations.delete")}
+              aria-label={t("conversations.delete")}
               onClick={() => remove.mutate(conversation.id)}
               className="thread-remove self-start"
             >

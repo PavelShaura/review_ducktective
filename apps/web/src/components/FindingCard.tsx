@@ -1,14 +1,10 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 
 import { api } from "@/api/client";
 import type { FeedbackVerdict, Finding } from "@/api/types";
 import { FindingOrigin } from "@/components/FindingOrigin";
-import {
-  SEVERITY_BORDER,
-  SEVERITY_LABEL,
-  SEVERITY_NOTE,
-  SEVERITY_TEXT,
-} from "@/components/SeverityMark";
+import { SEVERITY_BORDER, SEVERITY_NOTE, SEVERITY_TEXT } from "@/components/SeverityMark";
 import { VerdictStamp } from "@/components/VerdictStamp";
 
 interface Props {
@@ -18,6 +14,7 @@ interface Props {
 
 export function FindingCard({ runId, finding }: Props) {
   const queryClient = useQueryClient();
+  const { t } = useTranslation();
 
   const feedback = useMutation({
     mutationFn: (verdict: FeedbackVerdict) =>
@@ -37,7 +34,7 @@ export function FindingCard({ runId, finding }: Props) {
         <div className="min-w-0">
           <p className="case-label mb-1">
             <span className={SEVERITY_TEXT[finding.severity]}>
-              {SEVERITY_LABEL[finding.severity]}
+              {t(`severity.${finding.severity}`)}
             </span>
             <span className="mx-2 opacity-40">·</span>
             <FindingOrigin
@@ -45,8 +42,9 @@ export function FindingCard({ runId, finding }: Props) {
               producerName={finding.producer_name}
             />
             <span className="mx-2 opacity-40">·</span>
-            строки {finding.line_start}
-            {finding.line_end === finding.line_start ? "" : `–${finding.line_end}`}
+            {finding.line_end === finding.line_start
+              ? t("finding.lines", { start: finding.line_start })
+              : t("finding.linesRange", { start: finding.line_start, end: finding.line_end })}
           </p>
           <h3 className="font-display text-[19px] leading-snug font-semibold text-paper">
             {finding.title}
@@ -65,21 +63,21 @@ export function FindingCard({ runId, finding }: Props) {
 
       <footer className="mt-3 flex flex-wrap items-center gap-2 border-t border-tweed-dim px-5 py-2.5">
         <VerdictButton
-          label="Подтвердить"
+          label={t("finding.confirm")}
           active={verdict === "useful"}
           activeClass="text-confirmed"
           disabled={feedback.isPending}
           onClick={() => feedback.mutate("useful")}
         />
         <VerdictButton
-          label="Ложный след"
+          label={t("finding.falsePositive")}
           active={verdict === "false_positive"}
           activeClass="text-dismissed"
           disabled={feedback.isPending}
           onClick={() => feedback.mutate("false_positive")}
         />
         <VerdictButton
-          label="Отложить"
+          label={t("finding.defer")}
           active={verdict === "wontfix"}
           activeClass="text-minor"
           disabled={feedback.isPending}
@@ -88,14 +86,14 @@ export function FindingCard({ runId, finding }: Props) {
 
         {finding.confidence === null ? null : (
           <span className="case-label ml-auto">
-            уверенность {Math.round(finding.confidence * 100)}%
+            {t("finding.confidence", { percent: Math.round(finding.confidence * 100) })}
           </span>
         )}
       </footer>
 
       {feedback.isError ? (
         <p className="px-5 pb-3 font-mono text-[12px] text-critical">
-          Оценка не сохранилась. Проверьте, что сервис доступен, и повторите.
+          {t("finding.saveFailed")}
         </p>
       ) : null}
     </article>

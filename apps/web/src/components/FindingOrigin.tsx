@@ -1,25 +1,28 @@
+import { useTranslation } from "react-i18next";
+
 import type { FindingCategory } from "@/api/types";
 
-const CATEGORY_LABEL: Record<FindingCategory, string> = {
-  correctness: "корректность",
-  security: "безопасность",
-  performance: "производительность",
-  style: "стиль",
-  tests: "тесты",
-  architecture: "архитектура",
-};
+const KNOWN_KINDS = new Set([
+  "correctness",
+  "security",
+  "performance",
+  "style",
+  "tests",
+  "architecture",
+  "conventions",
+]);
 
-const REVIEWER_LABEL: Record<string, string> = {
-  correctness: "корректность",
-  security: "безопасность",
-  performance: "производительность",
-  conventions: "соглашения",
-};
+type KnownKind =
+  | "correctness"
+  | "security"
+  | "performance"
+  | "style"
+  | "tests"
+  | "architecture"
+  | "conventions";
 
-/** Прогоны, снятые до появления специализаций, несут прежние имена. */
-function reviewerLabel(producerName: string): string {
-  const kind = producerName.replace(/^reviewer:/, "");
-  return REVIEWER_LABEL[kind] ?? kind;
+function isKnown(kind: string): kind is KnownKind {
+  return KNOWN_KINDS.has(kind);
 }
 
 interface Props {
@@ -36,16 +39,20 @@ interface Props {
  * вынес.
  */
 export function FindingOrigin({ category, producerName }: Props) {
-  const type = CATEGORY_LABEL[category] ?? category;
-  const reviewer = reviewerLabel(producerName);
+  const { t } = useTranslation();
+  const type = t(`category.${category}`);
+
+  /* Прогоны, снятые до появления специализаций, несут прежние имена. */
+  const kind = producerName.replace(/^reviewer:/, "");
+  const reviewer = isKnown(kind) ? t(`category.${kind}`) : kind;
 
   return (
     <>
-      тип: {type}
+      {t("finding.type", { type })}
       {reviewer === type ? null : (
         <>
           <span className="mx-2 opacity-40">·</span>
-          ревьюер: {reviewer}
+          {t("finding.reviewer", { reviewer })}
         </>
       )}
     </>

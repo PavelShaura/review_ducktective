@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { ToolCard } from "@/components/ToolCard";
 
@@ -29,6 +30,7 @@ interface Props {
  */
 export function ToolTrail({ tools, isLive }: Props) {
   const [isOpen, setIsOpen] = useState(false);
+  const { t } = useTranslation();
 
   if (tools.length === 0) {
     return null;
@@ -52,10 +54,10 @@ export function ToolTrail({ tools, isLive }: Props) {
       >
         <span className="trail-count">{tools.length}</span>
         <span className="truncate">
-          {isLive ? "спрашивает кодовую базу" : "обращений к кодовой базе"}
+          {isLive ? t("toolTrail.asking") : t("toolTrail.calls")}
         </span>
         <span className="ml-auto shrink-0 text-paper-dim/70">
-          {isOpen ? "свернуть −" : "показать +"}
+          {isOpen ? t("common.collapseLess") : t("common.expandMore")}
         </span>
       </button>
 

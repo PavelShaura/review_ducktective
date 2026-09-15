@@ -1,9 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
 import { api } from "@/api/client";
 import type { EmbedderChoice, IndexState as State } from "@/api/types";
 import { formatDateTime, shortSha } from "@/lib/format";
+import { stageTitle } from "@/lib/stage";
 
 interface Props {
   repositoryId: string;
@@ -38,6 +41,7 @@ const BUTTON = "card-action";
 export function IndexState({ repositoryId }: Props) {
   const queryClient = useQueryClient();
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+  const { t } = useTranslation();
 
   const state = useQuery({
     queryKey: ["index", repositoryId],
@@ -91,8 +95,8 @@ export function IndexState({ repositoryId }: Props) {
   return (
     <div className="rounded-case border border-tweed-dim bg-ink-sunken px-4 py-3">
       <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-        <span className="case-label">индекс</span>
-        <span className="font-mono text-[13px] text-paper">{describe(data, start.isPending)}</span>
+        <span className="case-label">{t("index.label")}</span>
+        <span className="font-mono text-[13px] text-paper">{describe(t, data, start.isPending)}</span>
       </div>
 
       {running ? <Progress state={data} /> : null}
@@ -103,21 +107,20 @@ export function IndexState({ repositoryId }: Props) {
 
       {data?.status === "cancelled" ? (
         <p className="mt-2 text-[13px] text-paper-dim">
-          Последняя сборка отменена — записанное откатилось
-          {data.context_ready ? ", ревью работает по прежнему индексу." : ", индекса нет."}
+          {t("index.cancelled")}
+          {data.context_ready ? t("index.cancelledReady") : t("index.cancelledNone")}
         </p>
       ) : null}
 
       {cancel.data?.cancelled === false ? (
         <p className="mt-2 text-[13px] text-paper-dim">
-          Отменять было нечего — сборка успела закончиться.
+          {t("index.nothingToCancel")}
         </p>
       ) : null}
 
       {remove.data && !hasIndex && !busy ? (
         <p className="mt-2 text-[13px] text-paper-dim">
-          Индекс стёрт: снапшотов удалено {remove.data.removed_snapshots}. Соберите заново,
-          чтобы ревью снова видело окружение.
+          {t("index.removed", { count: remove.data.removed_snapshots })}
         </p>
       ) : null}
 
@@ -125,8 +128,7 @@ export function IndexState({ repositoryId }: Props) {
 
       {data?.embedding_stopped ? (
         <p className="mt-2 text-[13px] text-paper-dim">
-          Досчёт векторов остановлен — посчитанное сохранено, остаток доедет при
-          следующей сборке. Поиск по смыслу пока неполный.
+          {t("index.embeddingStopped")}
         </p>
       ) : null}
 
@@ -155,7 +157,9 @@ export function IndexState({ repositoryId }: Props) {
           <CancelButton
             onCancel={() => cancel.mutate()}
             isPending={cancel.isPending}
-            label={queued ? "в очереди…" : running ? "собирается…" : "считаю векторы…"}
+            label={
+              queued ? t("index.inQueue") : running ? t("index.building") : t("index.embedding")
+            }
           />
         ) : (
           <button
@@ -165,10 +169,10 @@ export function IndexState({ repositoryId }: Props) {
             className={`${BUTTON} card-action-primary ${busy ? "card-action-busy" : ""}`}
           >
             {start.isPending
-              ? "ставлю в очередь…"
+              ? t("index.queueing")
               : data?.is_ready
-                ? "обновить"
-                : "проиндексировать"}
+                ? t("index.refresh")
+                : t("index.build")}
           </button>
         )}
       </div>
@@ -191,6 +195,7 @@ interface EmbedderPickerProps {
  * соседнем хосте» решает, стоит ли вообще нажимать.
  */
 function EmbedderPicker({ choices, value, onChange }: EmbedderPickerProps) {
+  const { t } = useTranslation();
   const chosen = choices.find((choice) => choice.key === value) ?? choices[0];
   if (!chosen) {
     return null;
@@ -198,7 +203,7 @@ function EmbedderPicker({ choices, value, onChange }: EmbedderPickerProps) {
 
   return (
     <label className="mt-3 block space-y-1.5">
-      <span className="case-label">векторы считает</span>
+      <span className="case-label">{t("index.embedderLabel")}</span>
       <select
         value={chosen.key}
         onChange={(event) => onChange(event.target.value)}
@@ -236,6 +241,7 @@ interface DeleteProps {
  * шаг человека, а не смысл нажатия.
  */
 function DeleteIndexButton({ isConfirming, onAsk, onDismiss, onDelete, isPending }: DeleteProps) {
+  const { t } = useTranslation();
   if (!isConfirming) {
     return (
       <button
@@ -243,14 +249,14 @@ function DeleteIndexButton({ isConfirming, onAsk, onDismiss, onDelete, isPending
         onClick={onAsk}
         className={`${BUTTON} card-action-danger`}
       >
-        удалить индекс
+        {t("index.deleteIndex")}
       </button>
     );
   }
 
   return (
     <span className="flex items-center gap-2">
-      <span className="case-label text-dismissed">стереть индекс целиком?</span>
+      <span className="case-label text-dismissed">{t("index.deleteConfirm")}</span>
       <button
         type="button"
         onClick={onDelete}
@@ -259,14 +265,14 @@ function DeleteIndexButton({ isConfirming, onAsk, onDismiss, onDelete, isPending
           isPending ? "card-action-busy" : ""
         }`}
       >
-        {isPending ? "стираю…" : "стереть"}
+        {isPending ? t("index.deleting") : t("index.delete")}
       </button>
       <button
         type="button"
         onClick={onDismiss}
         className={BUTTON}
       >
-        отмена
+        {t("common.cancel")}
       </button>
     </span>
   );
@@ -285,6 +291,7 @@ interface CancelProps {
  * взгляд прикован именно к этому месту.
  */
 function CancelButton({ onCancel, isPending, label }: CancelProps) {
+  const { t } = useTranslation();
   return (
     <button
       type="button"
@@ -292,8 +299,8 @@ function CancelButton({ onCancel, isPending, label }: CancelProps) {
       disabled={isPending}
       className={`group/cancel ${BUTTON} card-action-danger card-action-busy`}
     >
-      <span className="group-hover/cancel:hidden">{isPending ? "отменяю…" : label}</span>
-      <span className="hidden group-hover/cancel:inline">отменить</span>
+      <span className="group-hover/cancel:hidden">{isPending ? t("index.cancelling") : label}</span>
+      <span className="hidden group-hover/cancel:inline">{t("index.cancelAction")}</span>
     </button>
   );
 }
@@ -309,12 +316,13 @@ interface ProgressProps {
  * не говорит о том, почему это долго. Пояснение снимает главный вопрос
  * человека у экрана — идёт работа или всё встало.
  */
-const STAGE_NOTES: Record<string, string> = {
-  parsing: "читаю изменившиеся файлы и разбираю их на символы",
-  storing: "записываю символы и фрагменты в базу пачками по 200 файлов",
-  linking: "связываю вызовы с определениями по всей кодовой базе",
-  embedding: "считаю векторы для поиска по смыслу — обращается к модели",
-};
+const NOTED_STAGES = ["parsing", "storing", "linking", "embedding"] as const;
+
+type NotedStage = (typeof NOTED_STAGES)[number];
+
+function isNotedStage(stage: string): stage is NotedStage {
+  return (NOTED_STAGES as readonly string[]).includes(stage);
+}
 
 /**
  * Ход сборки.
@@ -327,8 +335,9 @@ const STAGE_NOTES: Record<string, string> = {
  * шкала выглядит поломкой, а идущий счётчик — работой.
  */
 function Progress({ state }: ProgressProps) {
+  const { t } = useTranslation();
   const stage = state?.stage ?? "parsing";
-  const title = state?.stage_title ?? "разбираю файлы";
+  const title = stageTitle(t, state) ?? t("index.defaultStage");
   const measured = measure(state);
 
   return (
@@ -346,12 +355,18 @@ function Progress({ state }: ProgressProps) {
 
       <p className="case-label mt-1.5">
         {title}
-        {measured ? ` · ${measured.done} из ${measured.total} · ${measured.percent}%` : ""}
+        {measured
+          ? t("index.progressOf", {
+              done: measured.done,
+              total: measured.total,
+              percent: measured.percent,
+            })
+          : ""}
         <Elapsed since={state?.started_at ?? null} />
       </p>
 
-      {STAGE_NOTES[stage] ? (
-        <p className="mt-1 text-[12px] text-paper-dim">{STAGE_NOTES[stage]}</p>
+      {isNotedStage(stage) ? (
+        <p className="mt-1 text-[12px] text-paper-dim">{t(`index.stageNote.${stage}`)}</p>
       ) : null}
     </div>
   );
@@ -398,6 +413,7 @@ interface VectorsProps {
  * а снаружи «векторы 12%» не объясняет ни что уже работает, ни чего ждать.
  */
 function Vectors({ state }: VectorsProps) {
+  const { t } = useTranslation();
   const { chunks, embedded } = state.vectors;
   const percent = Math.min(100, Math.round((embedded / chunks) * 100));
   const stalled = Boolean(state.failure_reason);
@@ -412,23 +428,20 @@ function Vectors({ state }: VectorsProps) {
         />
       </div>
       <p className="case-label mt-1.5">
-        символы и граф готовы · векторы {embedded} из {chunks} · {percent}%
-        {stalled ? " · досчёт остановлен" : idle ? " · досчёт не идёт" : ""}
+        {t("index.vectors", { embedded, chunks, percent })}
+        {stalled ? t("index.stalled") : idle ? t("index.idle") : ""}
         {state.is_embedding ? <Elapsed since={state.finished_at} /> : null}
       </p>
       {stalled ? (
         <p className="mt-1.5 text-[13px] text-critical">{state.failure_reason}</p>
       ) : null}
       <p className="mt-1 text-[12px] leading-relaxed text-paper-dim">
-        Индекс складывается из двух слоёв. Первый — символы и граф вызовов, он уже
-        готов: по нему ревью отвечает, кто вызывает изменённый код и что покрывает
-        эти строки. Второй — векторы, они дают поиск по смыслу, когда нужное место
-        называется иначе, чем запрос.{" "}
+        {t("index.layers")}
         {stalled
-          ? "Досчёт оборвался, сам он не возобновится: почините доступ к модели и соберите индекс заново — посчитанное сохранено, пойдёт только остаток."
+          ? t("index.stalledAdvice")
           : idle
-            ? "Векторов текущей модели не хватает — они посчитаны другой моделью или досчёт не был доведён до конца. Нажмите «обновить»: посчитанное сохранено, пойдёт только остаток."
-            : "Пока векторы считаются, ревью опирается на слова и граф: оно работает, но похожие места находит хуже."}
+            ? t("index.idleAdvice")
+            : t("index.embeddingAdvice")}
       </p>
     </div>
   );
@@ -442,22 +455,39 @@ interface QueuedProps {
  * Почему задача стоит в очереди.
  *
  * Ожидание бывает двух видов, и лечатся они противоположно: занятый воркер
- * требует терпения, отсутствующий — запуска. Занятость снаружи не видна —
- * очередь живёт в Redis, а не в состоянии индекса, — поэтому названы обе
- * причины и срок, после которого верить второй.
+ * требует терпения, отсутствующий — запуска. Сервер заглядывает в очередь
+ * и называет, за кем стоит сборка и сколько та уже идёт; пустая очередь
+ * при ожидающем снапшоте — единственный признак того, что воркера нет,
+ * и только тогда подсказывается команда запуска.
  */
 function Queued({ state }: QueuedProps) {
+  const { t } = useTranslation();
   if (state?.is_embedding) {
     return (
       <p className="mt-2 text-[13px] text-paper-dim">
-        Воркер досчитывает векторы прошлой сборки — задача пойдёт следом.
+        {t("index.queuedEmbedding")}
+      </p>
+    );
+  }
+
+  if (state?.queue) {
+    return (
+      <p className="mt-2 text-[13px] text-paper-dim">
+        {state.queue.busy_with
+          ? t("index.queuedBehind", {
+              name: state.queue.busy_with,
+              duration: formatDuration(t, secondsSince(state.queue.busy_since)),
+              position: state.queue.position,
+            })
+          : t("index.queuedBehindUnknown", { position: state.queue.position })}{" "}
+        {t("index.queuedBehindHint")}
       </p>
     );
   }
 
   return (
     <p className="mt-2 text-[13px] text-paper-dim">
-      Задача в очереди. Если она не двигается, воркер индексации не запущен:{" "}
+      {t("index.queued")}
       <code className="text-brass">{WORKER_HINT}</code>
     </p>
   );
@@ -476,6 +506,7 @@ interface ElapsedProps {
  */
 function Elapsed({ since }: ElapsedProps) {
   const [now, setNow] = useState(() => Date.now());
+  const { t } = useTranslation();
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -487,45 +518,65 @@ function Elapsed({ since }: ElapsedProps) {
   }
 
   const seconds = Math.max(0, Math.floor((now - new Date(since).getTime()) / 1000));
-  return <span> · идёт {formatDuration(seconds)}</span>;
+  return <span>{t("index.elapsed", { duration: formatDuration(t, seconds) })}</span>;
 }
 
-function formatDuration(seconds: number): string {
+function secondsSince(since: string | null): number {
+  if (!since) {
+    return 0;
+  }
+  return Math.max(0, Math.floor((Date.now() - new Date(since).getTime()) / 1000));
+}
+
+function formatDuration(t: TFunction, seconds: number): string {
   const minutes = Math.floor(seconds / 60);
   if (minutes < 1) {
-    return `${seconds} с`;
+    return t("duration.seconds", { count: seconds });
   }
   if (minutes < 60) {
-    return `${minutes} мин ${String(seconds % 60).padStart(2, "0")} с`;
+    return t("duration.minutesSeconds", {
+      minutes,
+      seconds: String(seconds % 60).padStart(2, "0"),
+    });
   }
-  return `${Math.floor(minutes / 60)} ч ${String(minutes % 60).padStart(2, "0")} мин`;
+  return t("duration.hoursMinutes", {
+    hours: Math.floor(minutes / 60),
+    minutes: String(minutes % 60).padStart(2, "0"),
+  });
 }
 
 function isBusy(state: State | undefined): boolean {
   return state?.status === "pending" || state?.status === "running";
 }
 
-function describe(state: State | undefined, isStarting: boolean): string {
+function describe(t: TFunction, state: State | undefined, isStarting: boolean): string {
   if (isStarting) {
-    return "ставлю в очередь";
+    return t("index.describe.queueing");
   }
   if (state?.status === "pending") {
-    return "ждёт воркера";
+    return t("index.describe.waitingWorker");
   }
   if (state?.status === "running") {
-    return "идёт сборка";
+    return t("index.describe.building");
   }
   if (state?.status === "failed") {
-    return "последняя попытка не удалась";
+    return t("index.describe.failed");
   }
   if (!state?.is_ready || !state.stats) {
     return state?.context_ready
-      ? `индекс прежний · ${state.totals.files} файлов`
-      : "не собран — ревью пойдёт по одному диффу, без окружения";
+      ? t("index.describe.previous", { count: state.totals.files })
+      : t("index.describe.notBuilt");
   }
 
-  const when = state.finished_at ? ` · собран ${formatDateTime(state.finished_at)}` : "";
-  return `${state.stats.files_total} файлов · ревизия ${shortSha(state.commit_sha ?? "")}${when}`;
+  const when = state.finished_at
+    ? t("index.describe.builtAt", { date: formatDateTime(state.finished_at) })
+    : "";
+  return (
+    t("index.describe.summary", {
+      count: state.stats.files_total,
+      sha: shortSha(state.commit_sha ?? ""),
+    }) + when
+  );
 }
 
 /**

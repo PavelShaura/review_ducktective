@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { api } from "@/api/client";
 import { ConversationList } from "@/components/ConversationList";
@@ -21,6 +22,7 @@ import { ModelPicker } from "@/components/ModelPicker";
  */
 export default function ChatPage() {
   const queryClient = useQueryClient();
+  const { t } = useTranslation();
   const [repositoryId, setRepositoryId] = useState<string>("");
   const [model, setModel] = useState("");
   const [conversationId, setConversationId] = useState<string>("");
@@ -49,26 +51,22 @@ export default function ChatPage() {
   });
 
   if (repositories.isPending) {
-    return <p className="case-label py-16 text-center">поднимаю картотеку…</p>;
+    return <p className="case-label py-16 text-center">{t("chat.loading")}</p>;
   }
 
   if (repositories.isError) {
-    return <p className="py-20 text-center text-paper-dim">Сервис не отвечает.</p>;
+    return <p className="py-20 text-center text-paper-dim">{t("common.serviceDown")}</p>;
   }
 
   if (repositories.data.length === 0) {
-    return (
-      <p className="py-20 text-center text-paper-dim">
-        Говорить пока не о чем: ни одного репозитория не заведено.
-      </p>
-    );
+    return <p className="py-20 text-center text-paper-dim">{t("chat.nothingToTalk")}</p>;
   }
 
   return (
     <div className="grid h-[calc(100vh-11rem)] min-h-[34rem] gap-5 lg:grid-cols-[minmax(0,17rem)_minmax(0,1fr)]">
       <aside className="flex min-h-0 flex-col gap-4 overflow-y-auto pr-1">
         <label className="block space-y-1.5">
-          <span className="case-label">репозиторий</span>
+          <span className="case-label">{t("chat.repository")}</span>
           <select
             value={repositoryId}
             onChange={(event) => {
@@ -77,7 +75,7 @@ export default function ChatPage() {
             }}
             className="w-full rounded-case border border-tweed-dim bg-ink-sunken px-2 py-1.5 font-mono text-[13px] text-paper"
           >
-            <option value="">выберите репозиторий</option>
+            <option value="">{t("chat.choose")}</option>
             {repositories.data.map((repository) => (
               <option key={repository.id} value={repository.id}>
                 {repository.name}
@@ -136,18 +134,13 @@ export default function ChatPage() {
  * ровно один раз — в первый.
  */
 function EmptyState({ hasRepository }: { hasRepository: boolean }) {
+  const { t } = useTranslation();
   return (
     <div className="flex h-full flex-col items-center justify-center gap-3 rounded-case border border-dashed border-tweed-dim px-6 py-16 text-center">
-      <p className="font-display text-2xl text-paper">Чат по кодовой базе</p>
-      <p className="max-w-md text-[14px] leading-relaxed text-paper-dim">
-        Спрашивайте своими словами. Агент ищет по смыслу,
-        читает определения и смотрит, кто что вызывает, и отвечает со ссылками на файлы
-        и строки. Отвечает он по индексу, то есть по зафиксированной ревизии.
-      </p>
+      <p className="font-display text-2xl text-paper">{t("chat.emptyTitle")}</p>
+      <p className="max-w-md text-[14px] leading-relaxed text-paper-dim">{t("chat.emptyBody")}</p>
       <p className="case-label mt-2">
-        {hasRepository
-          ? "откройте прошлый разговор слева или заведите новый"
-          : "выберите репозиторий слева"}
+        {hasRepository ? t("chat.openOrNew") : t("chat.chooseLeft")}
       </p>
     </div>
   );

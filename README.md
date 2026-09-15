@@ -10,6 +10,7 @@
 </p>
 
 <p align="center">
+  <img src="https://img.shields.io/badge/languages-RU%20%C2%B7%20EN-C9A227" alt="Interface languages: Russian and English">
   <a href="https://github.com/PavelShaura/review_ducktective/actions"><img src="https://github.com/PavelShaura/review_ducktective/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/python-3.12-blue?logo=python&logoColor=white" alt="Python 3.12">
   <img src="https://img.shields.io/badge/FastAPI-async-009688?logo=fastapi&logoColor=white" alt="FastAPI">
@@ -22,8 +23,6 @@
   <img src="https://img.shields.io/badge/100%25-offline%20capable-success?logo=ghostery&logoColor=white" alt="Offline capable">
   <br>
   <img src="https://img.shields.io/badge/linter-ruff-D7FF64?logo=ruff&logoColor=black" alt="Ruff">
-  <img src="https://img.shields.io/badge/types-mypy%20strict-2A6DB2" alt="mypy">
-  <img src="https://img.shields.io/badge/layers-import--linter-8A2BE2" alt="import-linter">
   <img src="https://img.shields.io/badge/commits-conventional-FE5196?logo=conventionalcommits&logoColor=white" alt="Conventional Commits">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT">
 </p>
@@ -611,6 +610,7 @@ Decisions and their rejected alternatives are recorded as numbered ADRs in
 | Sign-in | Keycloak, OpenID Connect | organizations and invitations without writing an auth server |
 | ORM and migrations | SQLAlchemy 2.0 async, Alembic | explicit sessions, explicit transactions |
 | Frontend | React, TypeScript, Vite, TanStack Query | generated API types, no CDN at runtime |
+| Interface languages | Russian and English, `i18next` + `react-i18next` | the switch sits in the header and takes effect instantly; the choice is remembered in the browser, and dictionary keys are checked by `tsc` so a missing translation fails the build |
 | Quality | ruff, isort, mypy, import-linter, pytest, testcontainers, pre-commit, commitizen | the layers and the commit history stay honest |
 
 ## Quick start

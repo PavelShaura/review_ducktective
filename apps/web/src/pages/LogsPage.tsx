@@ -1,19 +1,16 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
 import { ApiError, api } from "@/api/client";
 import type { LogFilter, LogLevel, LogRecord, LogTail } from "@/api/types";
+import { currentLocale } from "@/i18n";
 
 const LIVE_INTERVAL_MS = 3000;
 const TYPING_PAUSE_MS = 400;
 
-const LEVELS: { value: LogLevel | null; label: string }[] = [
-  { value: null, label: "все уровни" },
-  { value: "debug", label: "debug и выше" },
-  { value: "info", label: "info и выше" },
-  { value: "warning", label: "warning и выше" },
-  { value: "error", label: "error и выше" },
-];
+const LEVELS: (LogLevel | null)[] = [null, "debug", "info", "warning", "error"];
 
 const LIMITS = [100, 200, 500, 1000];
 
@@ -36,6 +33,7 @@ const DEFAULT_FILTER: LogFilter = { limit: 200, level: null, logger: "", q: "" }
  * Живое обновление включается отдельно — на время, пока смотришь прогон.
  */
 export default function LogsPage() {
+  const { t } = useTranslation();
   const [filter, setFilter] = useState<LogFilter>(DEFAULT_FILTER);
   const [isLive, setIsLive] = useState(false);
   const applied = useDebounced(filter, TYPING_PAUSE_MS);
@@ -51,11 +49,8 @@ export default function LogsPage() {
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="font-display text-3xl font-semibold text-paper">Журнал установки</h1>
-        <p className="mt-2 max-w-2xl text-[15px] text-paper-dim">
-          Последние записи из общего файла журнала: api, воркеры ревью и индексации.
-          Каждая строка — отдельное событие с контекстом, в котором оно случилось.
-        </p>
+        <h1 className="font-display text-3xl font-semibold text-paper">{t("logs.title")}</h1>
+        <p className="mt-2 max-w-2xl text-[15px] text-paper-dim">{t("logs.intro")}</p>
       </header>
 
       <Filters
@@ -68,17 +63,17 @@ export default function LogsPage() {
       />
 
       {tail.isPending ? (
-        <p className="case-label py-16 text-center">открываю журнал…</p>
+        <p className="case-label py-16 text-center">{t("logs.opening")}</p>
       ) : tail.isError ? (
         <p className="border border-tweed-dim bg-ink-raised px-5 py-6 text-[15px] text-paper-dim">
-          {describeError(tail.error)}
+          {describeError(t, tail.error)}
         </p>
       ) : (
         <>
           <Summary tail={tail.data} />
           {tail.data.records.length === 0 ? (
             <p className="border border-tweed-dim bg-ink-raised px-5 py-6 text-[15px] text-paper-dim">
-              Под эти условия не подошла ни одна запись.
+              {t("logs.noMatch")}
             </p>
           ) : (
             <ol className="space-y-1">
@@ -103,10 +98,11 @@ interface FiltersProps {
 }
 
 function Filters({ filter, onChange, isLive, onLiveChange, isFetching, onRefresh }: FiltersProps) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-wrap items-end gap-3 border border-tweed-dim bg-ink-raised px-5 py-4">
       <label className="space-y-2">
-        <span className="case-label">уровень</span>
+        <span className="case-label">{t("logs.level")}</span>
         <select
           value={filter.level ?? ""}
           onChange={(event) =>
@@ -115,15 +111,15 @@ function Filters({ filter, onChange, isLive, onLiveChange, isFetching, onRefresh
           className={INPUT_CLASS}
         >
           {LEVELS.map((level) => (
-            <option key={level.label} value={level.value ?? ""}>
-              {level.label}
+            <option key={level ?? "all"} value={level ?? ""}>
+              {level ? t("logs.levelFrom", { level }) : t("logs.levelAll")}
             </option>
           ))}
         </select>
       </label>
 
       <label className="min-w-48 space-y-2">
-        <span className="case-label">логгер</span>
+        <span className="case-label">{t("logs.logger")}</span>
         <input
           value={filter.logger}
           onChange={(event) => onChange({ ...filter, logger: event.target.value })}
@@ -134,18 +130,18 @@ function Filters({ filter, onChange, isLive, onLiveChange, isFetching, onRefresh
       </label>
 
       <label className="min-w-64 flex-1 space-y-2">
-        <span className="case-label">поиск по строке</span>
+        <span className="case-label">{t("logs.search")}</span>
         <input
           value={filter.q}
           onChange={(event) => onChange({ ...filter, q: event.target.value })}
-          placeholder="run_id, модель, текст ошибки…"
+          placeholder={t("logs.searchPlaceholder")}
           spellCheck={false}
           className={INPUT_CLASS}
         />
       </label>
 
       <label className="space-y-2">
-        <span className="case-label">записей</span>
+        <span className="case-label">{t("logs.records")}</span>
         <select
           value={filter.limit}
           onChange={(event) => onChange({ ...filter, limit: Number(event.target.value) })}
@@ -166,9 +162,9 @@ function Filters({ filter, onChange, isLive, onLiveChange, isFetching, onRefresh
         className={`case-label rounded-case border px-4 py-2 ${
           isLive ? "border-brass text-brass" : "border-tweed-dim text-paper hover:text-brass"
         }`}
-        title="Перечитывать журнал каждые несколько секунд"
+        title={t("logs.liveTitle")}
       >
-        {isLive ? "● живой" : "○ живой"}
+        {isLive ? t("logs.liveOn") : t("logs.liveOff")}
       </button>
 
       <button
@@ -177,7 +173,7 @@ function Filters({ filter, onChange, isLive, onLiveChange, isFetching, onRefresh
         disabled={isFetching}
         className="case-label rounded-case border border-tweed-dim px-4 py-2 text-paper hover:text-brass disabled:opacity-40"
       >
-        {isFetching ? "читаю…" : "обновить"}
+        {isFetching ? t("logs.reading") : t("logs.refresh")}
       </button>
     </div>
   );
@@ -204,21 +200,23 @@ function useDebounced<T>(value: T, delayMs: number): T {
 }
 
 function Summary({ tail }: { tail: LogTail }) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 font-mono text-[13px] text-paper-dim">
       <span className="truncate" title={tail.file}>
         {tail.file}
       </span>
       <span className="opacity-40">·</span>
-      <span>{formatBytes(tail.size_bytes)}</span>
+      <span>{formatBytes(t, tail.size_bytes)}</span>
       <span className="opacity-40">·</span>
       <span>
-        показано <span className="tabular-nums text-paper">{tail.records.length}</span>
-        {tail.truncated ? " — раньше есть ещё, сузьте условия или поднимите лимит" : ""}
+        {t("logs.shown")} <span className="tabular-nums text-paper">{tail.records.length}</span>
+        {tail.truncated ? t("logs.truncated") : ""}
       </span>
       {tail.skipped_lines > 0 ? (
         <span className="text-major">
-          пропущено строк не в JSON: <span className="tabular-nums">{tail.skipped_lines}</span>
+          {t("logs.skipped")}
+          <span className="tabular-nums">{tail.skipped_lines}</span>
         </span>
       ) : null}
     </div>
@@ -226,6 +224,7 @@ function Summary({ tail }: { tail: LogTail }) {
 }
 
 function LogRow({ record }: { record: LogRecord }) {
+  const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   const fields = Object.entries(record.fields);
   const hasDetails = record.exception !== null || fields.length > 0;
@@ -251,7 +250,9 @@ function LogRow({ record }: { record: LogRecord }) {
         <span className="shrink-0 font-mono text-[12px] text-tweed">{record.logger ?? "—"}</span>
         <span className="min-w-0 flex-1 truncate text-[14px] text-paper">{record.event}</span>
         {hasDetails ? (
-          <span className="case-label shrink-0 text-paper-dim/60">{isOpen ? "свернуть" : "…"}</span>
+          <span className="case-label shrink-0 text-paper-dim/60">
+            {isOpen ? t("common.collapse") : "…"}
+          </span>
         ) : null}
       </button>
 
@@ -286,7 +287,7 @@ function formatTimestamp(value: string | null): string {
   if (Number.isNaN(date.getTime())) {
     return value;
   }
-  return date.toLocaleString("ru-RU", {
+  return date.toLocaleString(currentLocale(), {
     day: "2-digit",
     month: "2-digit",
     hour: "2-digit",
@@ -299,18 +300,18 @@ function formatValue(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 
-function formatBytes(size: number): string {
-  if (size < 1024) return `${size} Б`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} КБ`;
-  return `${(size / (1024 * 1024)).toFixed(1)} МБ`;
+function formatBytes(t: TFunction, size: number): string {
+  if (size < 1024) return t("logs.bytes", { value: size });
+  if (size < 1024 * 1024) return t("logs.kilobytes", { value: (size / 1024).toFixed(1) });
+  return t("logs.megabytes", { value: (size / (1024 * 1024)).toFixed(1) });
 }
 
-function describeError(error: unknown): string {
+function describeError(t: TFunction, error: unknown): string {
   if (error instanceof ApiError) {
     if (error.status === 403) {
-      return "Журнал доступен только администратору установки.";
+      return t("logs.forbidden");
     }
     return error.message;
   }
-  return "Не удалось прочитать журнал: API не отвечает.";
+  return t("logs.unavailable");
 }

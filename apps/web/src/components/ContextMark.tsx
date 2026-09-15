@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+
 import type { ReviewRun } from "@/api/types";
 
 interface Props {
@@ -26,28 +28,29 @@ const SETTLED_STATUSES = new Set(["completed", "failed"]);
  * и полный охват выглядел как «13 из 14».
  */
 export function ContextMark({ run }: Props) {
+  const { t } = useTranslation();
   const reviewable = run.reviewable_files;
   const covered = run.files_with_context;
 
   if (covered > 0) {
     return (
       <span className="case-label text-confirmed">
-        с контекстом · {covered} из {reviewable}
+        {t("contextMark.withContext", { covered, total: reviewable })}
       </span>
     );
   }
 
   if (run.status === "cancelled") {
-    return <span className="case-label text-paper-dim">окружение не досчитано</span>;
+    return <span className="case-label text-paper-dim">{t("contextMark.notCounted")}</span>;
   }
 
   if (!SETTLED_STATUSES.has(run.status)) {
-    return <span className="case-label text-paper-dim">контекст собирается</span>;
+    return <span className="case-label text-paper-dim">{t("contextMark.collecting")}</span>;
   }
 
   return (
-    <span className="case-label text-paper-dim" title="Соберите индекс, чтобы ревьюер видел окружение">
-      без индекса · только дифф
+    <span className="case-label text-paper-dim" title={t("contextMark.noIndexTitle")}>
+      {t("contextMark.noIndex")}
     </span>
   );
 }

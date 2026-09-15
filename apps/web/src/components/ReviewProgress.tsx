@@ -1,31 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
 import { api } from "@/api/client";
-import type { DegradationKind, NodeDegradation, ReviewRun, ReviewStage } from "@/api/types";
+import type { DegradationKind, NodeDegradation, ReviewRun } from "@/api/types";
+import { stageTitle } from "@/lib/stage";
 
 const AVERAGE_SECONDS_PER_FILE = 240;
 
 const REVIEWER_NAME_PREFIX = "reviewer:";
-
-const STAGE_LABELS: Record<ReviewStage, string> = {
-  build_context: "окружение",
-  plan_review: "план",
-  review: "ревью",
-  aggregate: "слияние",
-  verify: "проверка",
-};
-
-const KIND_LABELS: Record<DegradationKind, string> = {
-  context_overflow: "не поместился в окно",
-  output_exhausted: "ответ оборван",
-  invalid_output: "ответ не разобран",
-  timeout: "не ответила",
-  rate_limited: "частота запросов",
-  provider_unavailable: "модель недоступна",
-  context_unavailable: "окружение не собралось",
-  unknown: "сбой",
-};
 
 /**
  * Причины разделены переносом строки, но в делах, заведённых раньше, они
@@ -34,76 +18,72 @@ const KIND_LABELS: Record<DegradationKind, string> = {
  */
 const REASON_SEPARATOR = /\n|;\s+(?=\S+:\s)/;
 
+/** Во что упёрлась модель: показывается своей подписью и числом. */
+interface Limit {
+  kind: "window" | "answer" | "timeout";
+  value: string;
+}
+
 /**
  * Сбои модели, у которых есть разбираемая структура. Порядок важен: строка
  * проверяется до первого совпадения. Всё, что не совпало, показывается текстом.
+ *
+ * Образцы — формулировки сервера, они на русском независимо от языка
+ * интерфейса: причина хранится в базе текстом, и разбирается тот текст,
+ * который туда записан. Разобранное дальше подписывается по виду сбоя,
+ * а вид уже переводится.
  */
 const FAILURE_PATTERNS: {
   pattern: RegExp;
-  reason: string;
-  read: (match: RegExpExecArray) => { model: string; prompt: string | null; limit: string };
+  kind: DegradationKind;
+  read: (match: RegExpExecArray) => { model: string; prompt: string | null; limit: Limit | null };
 }[] = [
   {
     pattern: /модели (\S+): (\d+) токенов при окне (\d+)/,
-    reason: "не поместился в окно",
-    read: (match) => ({ model: match[1]!, prompt: match[2]!, limit: `окно ${match[3]!}` }),
+    kind: "context_overflow",
+    read: (match) => ({
+      model: match[1]!,
+      prompt: match[2]!,
+      limit: { kind: "window", value: match[3]! },
+    }),
   },
   {
     pattern: /Модель (\S+) исчерпала лимит ответа в (\d+) токенов/,
-    reason: "ответ оборван",
-    read: (match) => ({ model: match[1]!, prompt: null, limit: `ответ ${match[2]!}` }),
+    kind: "output_exhausted",
+    read: (match) => ({ model: match[1]!, prompt: null, limit: { kind: "answer", value: match[2]! } }),
   },
   {
     /* Формулировка до 2026-08-02: дела, заведённые раньше, лежат в базе с ней. */
     pattern: /Модель (\S+) оборвала ответ на лимите (\d+) токенов/,
-    reason: "ответ оборван",
-    read: (match) => ({ model: match[1]!, prompt: null, limit: `ответ ${match[2]!}` }),
+    kind: "output_exhausted",
+    read: (match) => ({ model: match[1]!, prompt: null, limit: { kind: "answer", value: match[2]! } }),
   },
   {
     pattern: /Модель (\S+) не ответила за (\d+) с/,
-    reason: "не ответила",
-    read: (match) => ({ model: match[1]!, prompt: null, limit: `таймаут ${match[2]!} с` }),
+    kind: "timeout",
+    read: (match) => ({ model: match[1]!, prompt: null, limit: { kind: "timeout", value: match[2]! } }),
   },
   {
     pattern: /Модель (\S+) ограничивает частоту/,
-    reason: "частота запросов",
-    read: (match) => ({ model: match[1]!, prompt: null, limit: "—" }),
+    kind: "rate_limited",
+    read: (match) => ({ model: match[1]!, prompt: null, limit: null }),
   },
 ];
 
-/** Что делать с каждым видом сбоя. Совет привязан к виду, а не к формулировке. */
-const KIND_ADVICE: Partial<Record<DegradationKind, string>> = {
-  context_overflow:
-    "Подсказка не влезла в контекстное окно модели. Поднимите окно (n_ctx) до 16384 — " +
-    "меньше для ревью не хватает — или уменьшите CONTEXT_TOKEN_BUDGET в .env, пожертвовав " +
-    "окружением из индекса.",
-  output_exhausted:
-    "Модель исписала весь отведённый ответ и не закончила. Место под ответ резервируется " +
-    "в окне: системный промпт (~1300 токенов) + CONTEXT_TOKEN_BUDGET + LLM_MAX_OUTPUT_TOKENS " +
-    "вычитаются из окна, остаток — всё, что осталось на дифф. Поднимите окно модели; " +
-    "если она рассуждает вслух, снижать LLM_MAX_OUTPUT_TOKENS бесполезно — размышления " +
-    "занимают большую часть ответа.",
-  timeout:
-    "Модель не уложилась в отведённое время. Поднимите LLM_TIMEOUT_SECONDS в .env либо " +
-    "возьмите модель полегче: при 19 токенах в секунду один файл занимает две-три минуты.",
-  rate_limited:
-    "Провайдер ограничил частоту обращений. Подождите и отправьте дело на расследование заново.",
-  context_unavailable:
-    "Окружение из индекса собрать не удалось, и эти файлы прочитаны по одному диффу — " +
-    "качество на них ниже обычного. Проверьте состояние индекса репозитория и соберите " +
-    "его заново.",
-};
+/** Виды сбоя, у которых есть совет. Совет привязан к виду, а не к формулировке. */
+const ADVISED_KINDS = [
+  "context_overflow",
+  "output_exhausted",
+  "timeout",
+  "rate_limited",
+  "context_unavailable",
+] as const;
 
-/**
- * Тот же совет для дел, заведённых до появления отметок по узлам: у них вид
- * сбоя приходится узнавать по формулировке, а ключ здесь — подпись причины.
- */
-const FAILURE_ADVICE: Record<string, string | undefined> = {
-  "не поместился в окно": KIND_ADVICE.context_overflow,
-  "ответ оборван": KIND_ADVICE.output_exhausted,
-  "не ответила": KIND_ADVICE.timeout,
-  "частота запросов": KIND_ADVICE.rate_limited,
-};
+type AdvisedKind = (typeof ADVISED_KINDS)[number];
+
+function isAdvised(kind: DegradationKind | null): kind is AdvisedKind {
+  return kind !== null && (ADVISED_KINDS as readonly string[]).includes(kind);
+}
 
 interface Props {
   run: ReviewRun;
@@ -116,7 +96,7 @@ interface Props {
  * получил или обошёлся без него. Сборка другой ревизии сюда не попадает —
  * прогон её не ждёт.
  */
-function useIndexingForRun(run: ReviewRun): string | null {
+function useIndexingForRun(run: ReviewRun, t: TFunction): string | null {
   const index = useQuery({
     queryKey: ["index-state", run.repository_id],
     queryFn: () => api.getIndexState(run.repository_id),
@@ -128,10 +108,10 @@ function useIndexingForRun(run: ReviewRun): string | null {
     return null;
   }
   if (state.status === "pending") {
-    return "задача ждёт воркера индексации";
+    return t("review.indexWaiting");
   }
   if (state.status === "running") {
-    return state.stage_title ?? "идёт сборка";
+    return stageTitle(t, state) ?? t("review.indexBuilding");
   }
   return null;
 }
@@ -141,10 +121,11 @@ function useIndexingForRun(run: ReviewRun): string | null {
  * транзакцией в конце. Показывать «замечаний нет» до этого момента — врать.
  */
 export function ReviewProgress({ run }: Props) {
+  const { t } = useTranslation();
   const current = useElapsedSeconds(run.started_at);
   const elapsed = Math.round(run.duration_ms / 1000) + current;
   const expected = run.files.length * AVERAGE_SECONDS_PER_FILE;
-  const indexing = useIndexingForRun(run);
+  const indexing = useIndexingForRun(run, t);
 
   return (
     <section className="border border-brass/40 bg-brass/5 px-5 py-4">
@@ -153,20 +134,23 @@ export function ReviewProgress({ run }: Props) {
           ●
         </span>
         <h2 className="font-display text-2xl font-semibold text-paper">
-          {indexing ? "Собирается индекс на ревизии дела" : "Расследование идёт"}
+          {indexing ? t("review.titleIndexing") : t("review.titleRunning")}
         </h2>
       </div>
 
       <p className="mt-2 text-[16px] text-paper-dim">
         {indexing
-          ? `Индекс собран на другой ревизии, а ревью с чужим графом идёт хуже, чем без него. Сейчас: ${indexing}. Ревью начнётся сразу после.`
-          : `Модель читает ${run.files.length} файл(ов) по очереди. Замечания появятся сразу все, когда прогон закончится.`}
+          ? t("review.bodyIndexing", { stage: indexing })
+          : t("review.bodyRunning", { count: run.files.length })}
       </p>
 
       <div className="mt-3 flex flex-wrap items-end justify-between gap-4">
         <dl className="flex flex-wrap gap-x-8 gap-y-1">
-          <Fact label="идёт" value={formatDuration(elapsed)} />
-          <Fact label="ожидаемо" value={`около ${formatDuration(expected)}`} />
+          <Fact label={t("review.elapsed")} value={formatDuration(t, elapsed)} />
+          <Fact
+            label={t("review.expected")}
+            value={t("review.about", { duration: formatDuration(t, expected) })}
+          />
         </dl>
         <StopButton runId={run.id} />
       </div>
@@ -176,6 +160,7 @@ export function ReviewProgress({ run }: Props) {
 
 function StopButton({ runId }: { runId: string }) {
   const queryClient = useQueryClient();
+  const { t } = useTranslation();
   const stop = useMutation({
     mutationFn: () => api.cancelRun(runId),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["run", runId] }),
@@ -188,20 +173,17 @@ function StopButton({ runId }: { runId: string }) {
       disabled={stop.isPending}
       className="case-label border border-paper-dim/40 px-3 py-1 text-paper-dim transition hover:border-critical/60 hover:text-critical disabled:opacity-50"
     >
-      {stop.isPending ? "прекращаю…" : "прекратить"}
+      {stop.isPending ? t("review.stopping") : t("review.stop")}
     </button>
   );
 }
 
 export function ReviewCancelled({ run }: Props) {
+  const { t } = useTranslation();
   return (
     <section className="border border-paper-dim/30 bg-paper/5 px-5 py-4">
-      <h2 className="font-display text-2xl font-semibold text-paper">Расследование прекращено</h2>
-      <p className="mt-2 text-[16px] text-paper-dim">
-        Замечания не сохранились: они пишутся все сразу в конце прогона. Дифф разобран
-        и остался на месте. Продолжение дочитает файлы, до которых прогон не дошёл;
-        заново — прочитает все.
-      </p>
+      <h2 className="font-display text-2xl font-semibold text-paper">{t("review.cancelledTitle")}</h2>
+      <p className="mt-2 text-[16px] text-paper-dim">{t("review.cancelledBody")}</p>
       <RestartButton runId={run.id} />
     </section>
   );
@@ -214,6 +196,7 @@ export function ReviewCancelled({ run }: Props) {
  */
 function RestartButton({ runId }: { runId: string }) {
   const queryClient = useQueryClient();
+  const { t } = useTranslation();
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["run", runId] });
   const resume = useMutation({ mutationFn: () => api.resumeRun(runId), onSuccess: invalidate });
   const restart = useMutation({ mutationFn: () => api.restartRun(runId), onSuccess: invalidate });
@@ -227,7 +210,7 @@ function RestartButton({ runId }: { runId: string }) {
         disabled={busy}
         className="case-label border border-brass/50 px-4 py-1.5 text-brass transition hover:bg-brass/10 disabled:opacity-50"
       >
-        {resume.isPending ? "продолжаю…" : "продолжить"}
+        {resume.isPending ? t("review.resuming") : t("review.resume")}
       </button>
       <button
         type="button"
@@ -235,10 +218,10 @@ function RestartButton({ runId }: { runId: string }) {
         disabled={busy}
         className="case-label border border-paper-dim/40 px-4 py-1.5 text-paper-dim transition hover:border-brass/60 hover:text-brass disabled:opacity-50"
       >
-        {restart.isPending ? "поднимаю дело…" : "расследовать заново"}
+        {restart.isPending ? t("review.restarting") : t("review.restart")}
       </button>
       {restart.isError || resume.isError ? (
-        <p className="case-label w-full text-critical">не вышло — проверьте, что сервис на месте</p>
+        <p className="case-label w-full text-critical">{t("review.actionFailed")}</p>
       ) : null}
     </div>
   );
@@ -250,6 +233,7 @@ function RestartButton({ runId }: { runId: string }) {
  * как «всё чисто».
  */
 export function ReviewDegraded({ run }: Props) {
+  const { t } = useTranslation();
   if (!run.failure_reason && run.degradations.length === 0) {
     return null;
   }
@@ -260,7 +244,7 @@ export function ReviewDegraded({ run }: Props) {
   return (
     <section className="border border-brass/50 bg-brass/10 px-5 py-4">
       <h2 className="font-display text-2xl font-semibold text-paper">
-        {filesWereLost ? "Расследование прошло не полностью" : "Расследование прошло без окружения"}
+        {filesWereLost ? t("review.degradedPartial") : t("review.degradedNoContext")}
       </h2>
       <Failures run={run} />
     </section>
@@ -268,17 +252,18 @@ export function ReviewDegraded({ run }: Props) {
 }
 
 export function ReviewFailure({ run }: Props) {
+  const { t } = useTranslation();
   return (
     <section className="border-2 border-critical/70 bg-critical/10 px-5 py-4">
-      <span className="stamp inline-block text-[12px] text-critical">провал</span>
+      <span className="stamp inline-block text-[12px] text-critical">{t("review.failStamp")}</span>
       <h2 className="mt-2 font-display text-3xl font-semibold text-critical">
-        Расследование не удалось
+        {t("review.failedTitle")}
       </h2>
       {run.failure_reason || run.degradations.length > 0 ? (
         <Failures run={run} />
       ) : (
         <p className="mt-2 text-[16px] text-paper-dim">
-          Причина не сохранилась. Загляните в журнал воркера — там будет подробность.
+          {t("review.noReason")}
         </p>
       )}
       <RestartButton runId={run.id} />
@@ -326,15 +311,16 @@ function summaryOf(failureReason: string | null): string[] {
 }
 
 function DegradationTable({ marks }: { marks: NodeDegradation[] }) {
+  const { t } = useTranslation();
   return (
     <div className="overflow-x-auto">
       <table className="w-full border-collapse text-left">
         <thead>
           <tr className="rule border-b">
-            <th className="case-label py-1.5 pr-4 font-normal">файл</th>
-            <th className="case-label py-1.5 pr-4 font-normal">кто</th>
-            <th className="case-label py-1.5 pr-4 font-normal">причина</th>
-            <th className="case-label py-1.5 font-normal">модель</th>
+            <th className="case-label py-1.5 pr-4 font-normal">{t("review.table.file")}</th>
+            <th className="case-label py-1.5 pr-4 font-normal">{t("review.table.who")}</th>
+            <th className="case-label py-1.5 pr-4 font-normal">{t("review.table.reason")}</th>
+            <th className="case-label py-1.5 font-normal">{t("review.table.model")}</th>
           </tr>
         </thead>
         <tbody>
@@ -343,9 +329,9 @@ function DegradationTable({ marks }: { marks: NodeDegradation[] }) {
               <td className="py-2 pr-4">
                 <span className="file-chip">{mark.file_path}</span>
               </td>
-              <td className="py-2 pr-4 text-[14px] text-paper-dim">{actorOf(mark)}</td>
+              <td className="py-2 pr-4 text-[14px] text-paper-dim">{actorOf(t, mark)}</td>
               <td className="py-2 pr-4">
-                <span className="text-[14px] text-paper">{KIND_LABELS[mark.kind]}</span>
+                <span className="text-[14px] text-paper">{t(`review.kind.${mark.kind}`)}</span>
                 <span className="mt-0.5 block text-[13px] leading-snug text-paper-dim/80">
                   {mark.detail}
                 </span>
@@ -360,21 +346,29 @@ function DegradationTable({ marks }: { marks: NodeDegradation[] }) {
 }
 
 function KindAdvice({ marks }: { marks: NodeDegradation[] }) {
-  const advice = [...new Set(marks.map((mark) => KIND_ADVICE[mark.kind]))].filter(
-    (text): text is string => text !== undefined,
-  );
+  return <AdviceList kinds={marks.map((mark) => mark.kind)} />;
+}
 
-  if (advice.length === 0) {
+/**
+ * Что делать с этими сбоями. Причина названа кодом настройки, а не намёком:
+ * все они лечатся правкой `.env` или окна модели, и человек должен уйти
+ * отсюда со строкой, которую можно вписать, а не с догадкой.
+ */
+function AdviceList({ kinds }: { kinds: (DegradationKind | null)[] }) {
+  const { t } = useTranslation();
+  const advised = [...new Set(kinds.filter(isAdvised))];
+
+  if (advised.length === 0) {
     return null;
   }
 
   return (
     <div className="rule border-t pt-3">
-      <p className="case-label">что с этим делать</p>
+      <p className="case-label">{t("review.whatToDo")}</p>
       <ul className="mt-1.5 space-y-1.5">
-        {advice.map((text) => (
-          <li key={text} className="text-[14px] leading-relaxed text-paper-dim">
-            {text}
+        {advised.map((kind) => (
+          <li key={kind} className="text-[14px] leading-relaxed text-paper-dim">
+            {t(`review.advice.${kind}`)}
           </li>
         ))}
       </ul>
@@ -386,11 +380,11 @@ function KindAdvice({ marks }: { marks: NodeDegradation[] }) {
  * Ревьюер важнее этапа: на этапе ревью он и есть тот, кто упал, а имя этапа
  * там ничего не добавляет. Остальные этапы называются своим именем.
  */
-function actorOf(mark: NodeDegradation): string {
+function actorOf(t: TFunction, mark: NodeDegradation): string {
   if (mark.reviewer) {
     return mark.reviewer.replace(REVIEWER_NAME_PREFIX, "");
   }
-  return STAGE_LABELS[mark.stage];
+  return t(`review.stage.${mark.stage}`);
 }
 
 /**
@@ -417,50 +411,25 @@ function Reasons({ text }: { text: string }) {
       ))}
 
       {failures.length > 0 ? <ReasonTable rows={failures} /> : null}
-      <Advice rows={failures} />
-    </div>
-  );
-}
-
-/**
- * Что делать с этими сбоями. Причина названа кодом настройки, а не намёком:
- * все три лечатся правкой `.env` или окна модели, и человек должен уйти
- * отсюда со строкой, которую можно вписать, а не с догадкой.
- */
-function Advice({ rows }: { rows: ParsedReason[] }) {
-  const advice = [...new Set(rows.map((row) => FAILURE_ADVICE[row.detail]))].filter(
-    (text): text is string => text !== undefined,
-  );
-
-  if (advice.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className="rule border-t pt-3">
-      <p className="case-label">что с этим делать</p>
-      <ul className="mt-1.5 space-y-1.5">
-        {advice.map((text) => (
-          <li key={text} className="text-[14px] leading-relaxed text-paper-dim">
-            {text}
-          </li>
-        ))}
-      </ul>
+      <AdviceList kinds={failures.map((row) => row.kind)} />
     </div>
   );
 }
 
 function ReasonTable({ rows }: { rows: ParsedReason[] }) {
+  const { t } = useTranslation();
   return (
     <div className="overflow-x-auto">
       <table className="w-full border-collapse text-left">
         <thead>
           <tr className="rule border-b">
-            <th className="case-label py-1.5 pr-4 font-normal">файл</th>
-            <th className="case-label py-1.5 pr-4 font-normal">причина</th>
-            <th className="case-label py-1.5 pr-4 font-normal">модель</th>
-            <th className="case-label py-1.5 pr-4 text-right font-normal">промпт, токенов</th>
-            <th className="case-label py-1.5 text-right font-normal">упёрлось в</th>
+            <th className="case-label py-1.5 pr-4 font-normal">{t("review.table.file")}</th>
+            <th className="case-label py-1.5 pr-4 font-normal">{t("review.table.reason")}</th>
+            <th className="case-label py-1.5 pr-4 font-normal">{t("review.table.model")}</th>
+            <th className="case-label py-1.5 pr-4 text-right font-normal">
+              {t("review.table.prompt")}
+            </th>
+            <th className="case-label py-1.5 text-right font-normal">{t("review.table.limit")}</th>
           </tr>
         </thead>
         <tbody>
@@ -475,20 +444,20 @@ function ReasonTable({ rows }: { rows: ParsedReason[] }) {
                 </td>
               ) : (
                 <>
-                  <td className="py-2 pr-4 text-[14px] text-paper-dim">{row.detail}</td>
+                  <td className="py-2 pr-4 text-[14px] text-paper-dim">
+                    {row.kind ? t(`review.kind.${row.kind}`) : row.detail}
+                  </td>
                   <td className="py-2 pr-4 font-mono text-[13px] text-paper-dim">{row.model}</td>
                   <td
                     className="py-2 pr-4 text-right font-mono text-[14px] text-critical"
-                    title={
-                      row.prompt === null
-                        ? "Размер подсказки называет только сервер и только когда она не поместилась в окно"
-                        : undefined
-                    }
+                    title={row.prompt === null ? t("review.promptUnknown") : undefined}
                   >
                     {row.prompt ?? "—"}
                   </td>
                   <td className="py-2 text-right font-mono text-[14px] text-paper">
-                    {row.limit ?? "—"}
+                    {row.limit
+                      ? t(`review.limit.${row.limit.kind}`, { value: row.limit.value })
+                      : "—"}
                   </td>
                 </>
               )}
@@ -502,10 +471,12 @@ function ReasonTable({ rows }: { rows: ParsedReason[] }) {
 
 interface ParsedReason {
   path: string | null;
+  /** Текст причины как записан; при узнанном виде сбоя показывается его подпись. */
   detail: string;
+  kind: DegradationKind | null;
   model: string | null;
   prompt: string | null;
-  limit: string | null;
+  limit: Limit | null;
 }
 
 function parseReason(line: string): ParsedReason {
@@ -513,18 +484,18 @@ function parseReason(line: string): ParsedReason {
   const path = separator === -1 ? null : line.slice(0, separator);
 
   if (path === null || path.includes(" ")) {
-    return { path: null, detail: line, model: null, prompt: null, limit: null };
+    return { path: null, detail: line, kind: null, model: null, prompt: null, limit: null };
   }
 
   const detail = line.slice(separator + 2);
-  for (const { pattern, reason, read } of FAILURE_PATTERNS) {
+  for (const { pattern, kind, read } of FAILURE_PATTERNS) {
     const match = pattern.exec(detail);
     if (match !== null) {
-      return { path, detail: reason, ...read(match) };
+      return { path, detail, kind, ...read(match) };
     }
   }
 
-  return { path, detail, model: null, prompt: null, limit: null };
+  return { path, detail, kind: null, model: null, prompt: null, limit: null };
 }
 
 function Fact({ label, value }: { label: string; value: string }) {
@@ -560,11 +531,13 @@ function useElapsedSeconds(startedAt: string | null): number {
   return Math.max(0, Math.round((now - new Date(startedAt).getTime()) / 1000));
 }
 
-function formatDuration(seconds: number): string {
+function formatDuration(t: TFunction, seconds: number): string {
   if (seconds < 60) {
-    return `${seconds} с`;
+    return t("duration.seconds", { count: seconds });
   }
   const minutes = Math.floor(seconds / 60);
   const rest = seconds % 60;
-  return rest === 0 ? `${minutes} мин` : `${minutes} мин ${rest} с`;
+  return rest === 0
+    ? t("duration.minutes", { count: minutes })
+    : t("duration.minutesSeconds", { minutes, seconds: rest });
 }

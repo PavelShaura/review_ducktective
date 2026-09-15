@@ -1,13 +1,6 @@
-import type { ReviewStatus } from "@/api/types";
+import { useTranslation } from "react-i18next";
 
-const STATUS_LABEL: Record<ReviewStatus, string> = {
-  queued: "в очереди",
-  indexing: "индексация",
-  running: "расследуется",
-  completed: "закрыто",
-  failed: "провалено",
-  cancelled: "отозвано",
-};
+import type { ReviewStatus } from "@/api/types";
 
 const STATUS_STYLE: Record<ReviewStatus, string> = {
   queued: "text-paper-dim",
@@ -25,6 +18,7 @@ export function isInProgress(status: ReviewStatus): boolean {
 }
 
 export function StatusMark({ status }: { status: ReviewStatus }) {
+  const { t } = useTranslation();
   return (
     <span className={`case-label ${STATUS_STYLE[status]}`}>
       {isInProgress(status) ? (
@@ -32,7 +26,7 @@ export function StatusMark({ status }: { status: ReviewStatus }) {
           ●
         </span>
       ) : null}
-      {STATUS_LABEL[status]}
+      {t(`status.${status}`)}
     </span>
   );
 }

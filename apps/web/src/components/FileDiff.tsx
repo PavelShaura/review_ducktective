@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { HunkData } from "react-diff-view";
 import {
   Decoration,
@@ -25,12 +26,13 @@ interface Props {
   findings: Finding[];
 }
 
-const CHANGE_LABEL: Record<string, string> = {
-  added: "добавлен",
-  modified: "изменён",
-  deleted: "удалён",
-  renamed: "переименован",
-};
+const CHANGE_KINDS = ["added", "modified", "deleted", "renamed"] as const;
+
+type ChangeKind = (typeof CHANGE_KINDS)[number];
+
+function isChangeKind(value: string): value is ChangeKind {
+  return (CHANGE_KINDS as readonly string[]).includes(value);
+}
 
 /** Тип изменения различается цветом штампа, а не только словом. */
 const CHANGE_TAG: Record<string, string> = {
@@ -47,6 +49,7 @@ const MAX_EXPAND_LINES = 400;
 
 export function FileDiff({ runId, file, findings }: Props) {
   const [isOpen, setIsOpen] = useState(findings.length > 0);
+  const { t } = useTranslation();
 
   /* Файл раскрывается сам, когда под текущий фильтр попали его замечания:
      иначе включённый фильтр показывал бы список свёрнутых файлов. */
@@ -70,12 +73,16 @@ export function FileDiff({ runId, file, findings }: Props) {
         <span className="truncate font-mono text-[14px] font-bold">{file.path}</span>
         <span className="ml-auto flex shrink-0 items-center gap-1.5">
           <span className={`tag tag-stamp ${CHANGE_TAG[file.change_type] ?? "tag-modified"}`}>
-            {CHANGE_LABEL[file.change_type] ?? file.change_type}
+            {isChangeKind(file.change_type)
+              ? t(`fileDiff.change.${file.change_type}`)
+              : file.change_type}
           </span>
           <span className="tag tag-add">+{file.added_lines}</span>
           <span className="tag tag-del">−{file.removed_lines}</span>
           {findings.length > 0 ? (
-            <span className="tag tag-findings">находок {findings.length}</span>
+            <span className="tag tag-findings">
+              {t("fileDiff.findings", { count: findings.length })}
+            </span>
           ) : null}
         </span>
       </button>
@@ -86,6 +93,7 @@ export function FileDiff({ runId, file, findings }: Props) {
 }
 
 function FileBody({ runId, file, findings }: Props) {
+  const { t } = useTranslation();
   const patch = useQuery({
     queryKey: ["patch", runId, file.id],
     queryFn: () => api.getFilePatch(runId, file.id),
@@ -117,22 +125,21 @@ function FileBody({ runId, file, findings }: Props) {
     return (
       <div className="border-t border-tweed-dim">
         <p className="px-5 py-4 text-[15px] text-paper-dim">
-          Файл слишком велик для показа. Замечания по нему собраны ниже, сам дифф удобнее
-          смотреть в редакторе.
+          {t("fileDiff.tooLarge")}
         </p>
-        <DetachedFindings runId={runId} findings={findings} title="Замечания по файлу" />
+        <DetachedFindings runId={runId} findings={findings} title={t("fileDiff.fileFindings")} />
       </div>
     );
   }
 
   if (patch.isPending) {
-    return <p className="case-label border-t border-tweed-dim px-5 py-4">читаю файл…</p>;
+    return <p className="case-label border-t border-tweed-dim px-5 py-4">{t("fileDiff.reading")}</p>;
   }
 
   if (patch.isError || !patchData || !parsed) {
     return (
       <p className="border-t border-tweed-dim px-5 py-4 text-[15px] text-critical">
-        Не удалось получить дифф этого файла.
+        {t("fileDiff.patchFailed")}
       </p>
     );
   }
@@ -169,7 +176,7 @@ function FileBody({ runId, file, findings }: Props) {
                     <Decoration key="tail" className="diff-hunk-header">
                       <span className="diff-hunk-header-content flex flex-wrap items-center gap-3 font-mono">
                         <ExpandControls gap={tail} isBusy={isBusy} onExpand={expand} />
-                        <span>до конца файла</span>
+                        <span>{t("fileDiff.toEnd")}</span>
                       </span>
                     </Decoration>,
                   ]
@@ -181,14 +188,14 @@ function FileBody({ runId, file, findings }: Props) {
 
       {hasFailed ? (
         <p className="border-t border-tweed-dim px-5 py-3 text-[14px] text-critical">
-          Не удалось прочитать файл в этой ревизии — контекст не раскрыт.
+          {t("fileDiff.contextFailed")}
         </p>
       ) : null}
 
       <DetachedFindings
         runId={runId}
         findings={placement.detached}
-        title="Замечания вне показанных строк"
+        title={t("fileDiff.outside")}
       />
     </div>
   );
@@ -247,6 +254,7 @@ interface ExpandControlsProps {
  * с изменением, обычно нужнее той, что лежит в середине пропуска.
  */
 function ExpandControls({ gap, isBusy, onExpand }: ExpandControlsProps) {
+  const { t } = useTranslation();
   if (!gap) {
     return null;
   }
@@ -254,7 +262,7 @@ function ExpandControls({ gap, isBusy, onExpand }: ExpandControlsProps) {
   if (gap.lines <= EXPAND_STEP) {
     return (
       <ExpandButton
-        label={`показать ${gap.lines}`}
+        label={t("fileDiff.show", { count: gap.lines })}
         isBusy={isBusy}
         onClick={() => onExpand(gap, gap.lines, false)}
       />
@@ -264,18 +272,18 @@ function ExpandControls({ gap, isBusy, onExpand }: ExpandControlsProps) {
   return (
     <span className="flex flex-wrap items-center gap-2">
       <ExpandButton
-        label={`${EXPAND_STEP} сверху`}
+        label={t("fileDiff.above", { count: EXPAND_STEP })}
         isBusy={isBusy}
         onClick={() => onExpand(gap, EXPAND_STEP, false)}
       />
       <ExpandButton
-        label={`${EXPAND_STEP} снизу`}
+        label={t("fileDiff.below", { count: EXPAND_STEP })}
         isBusy={isBusy}
         onClick={() => onExpand(gap, EXPAND_STEP, true)}
       />
       {gap.lines <= MAX_EXPAND_LINES ? (
         <ExpandButton
-          label={`все ${gap.lines}`}
+          label={t("fileDiff.all", { count: gap.lines })}
           isBusy={isBusy}
           onClick={() => onExpand(gap, gap.lines, false)}
         />
