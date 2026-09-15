@@ -5,13 +5,14 @@ import { Link, NavLink, Route, Routes } from "react-router";
 
 import { api } from "@/api/client";
 import { provideAccessToken } from "@/api/token";
-import type { CurrentUser, TenantRole } from "@/api/types";
+import type { CurrentUser } from "@/api/types";
 import { SignInGate } from "@/auth/SignInGate";
 
 const CaseListPage = lazy(() => import("@/pages/CaseListPage"));
 const ChatPage = lazy(() => import("@/pages/ChatPage"));
 const CasePage = lazy(() => import("@/pages/CasePage"));
 const IndexesPage = lazy(() => import("@/pages/IndexesPage"));
+const LogsPage = lazy(() => import("@/pages/LogsPage"));
 const MarksPage = lazy(() => import("@/pages/MarksPage"));
 const ModelsPage = lazy(() => import("@/pages/ModelsPage"));
 const NewCasePage = lazy(() => import("@/pages/NewCasePage"));
@@ -30,7 +31,9 @@ export function App() {
  * Рабочий стол вошедшего.
  *
  * Пока организации нет, показывается только её заведение: репозитории,
- * дела и разговоры принадлежат ей, и без неё им негде лежать.
+ * дела и разговоры принадлежат ей, и без неё им негде лежать. Исключение —
+ * журнал установки: он принадлежит установке, и администратор открывает
+ * его, даже не состоя ни в одной организации.
  */
 function Workspace() {
   const auth = useAuth();
@@ -62,7 +65,15 @@ function Workspace() {
               <Route path="/chat" element={<ChatPage />} />
               <Route path="/models" element={<ModelsPage />} />
               <Route path="/organization" element={<OrganizationPage />} />
+              {currentUser.data.is_installation_admin ? (
+                <Route path="/logs" element={<LogsPage />} />
+              ) : null}
               <Route path="*" element={<NotFound />} />
+            </Routes>
+          ) : currentUser.data?.is_installation_admin ? (
+            <Routes>
+              <Route path="/logs" element={<LogsPage />} />
+              <Route path="*" element={<OnboardingPage />} />
             </Routes>
           ) : (
             <OnboardingPage />
@@ -73,17 +84,20 @@ function Workspace() {
   );
 }
 
-const ROLE_LABEL: Record<TenantRole, string> = {
-  owner: "владелец",
-  member: "участник",
-};
-
 /**
  * Разделы по порядку работы: сначала дела, потом то, на чём они держатся —
- * индекс и модели, — и в конце накопленные отметки.
+ * индекс и модели, — затем накопленные отметки и в конце — кто всем этим
+ * занимается.
  *
  * Разговор помечен живым огоньком: это единственный раздел, где что-то
  * происходит в реальном времени.
+ *
+ * Слева только разделы, справа только действия: пока имя организации стояло
+ * справа карточкой, она единственная умела сжиматься и первой теряла текст
+ * при каждом новом пункте. Имя и роль показывает сама страница состава.
+ *
+ * Журнала здесь нет: он виден не всем и добавляется после общих разделов.
+ * На ширине `xl` у него один глиф — подпись не помещается вместе с остальными.
  */
 const SECTIONS: {
   to: string;
@@ -97,6 +111,12 @@ const SECTIONS: {
   { to: "/indexes", label: "индексы", title: "Что разобрано, когда и чем собрать заново", glyph: "≡" },
   { to: "/models", label: "модели", title: "Подключения к провайдерам моделей", glyph: "◈" },
   { to: "/marks", label: "отметки", title: "Картотека вердиктов по находкам", glyph: "✓" },
+  {
+    to: "/organization",
+    label: "состав",
+    title: "Состав организации: участники, роли и приглашения",
+    glyph: "⌂",
+  },
 ];
 
 function Header({ user }: { user?: CurrentUser }) {
@@ -143,27 +163,26 @@ function Header({ user }: { user?: CurrentUser }) {
               {section.label}
             </NavLink>
           ))}
+
+          {user?.is_installation_admin ? (
+            <NavLink
+              to="/logs"
+              className="menu-link"
+              title="Журнал установки: api и воркеры, только для администратора"
+              aria-label="журнал"
+            >
+              <span className="menu-glyph" aria-hidden>
+                ¶
+              </span>
+              <span className="hidden 2xl:inline">журнал</span>
+            </NavLink>
+          ) : null}
         </nav>
 
         <span className="ml-auto flex min-w-0 items-center gap-3">
           <NavLink to="/cases/new" className="menu-action shrink-0" title="Запустить ревью диффа">
             + новое ревью
           </NavLink>
-
-          <span className="menu-divider hidden xl:block" aria-hidden />
-
-          {user?.organization ? (
-            <NavLink
-              to="/organization"
-              className="nav-org hidden min-w-0 xl:inline-flex"
-              title="Состав организации: участники, роли и приглашения"
-            >
-              <span className="nav-org-name">{user.organization.name}</span>
-              <span className="nav-org-meta">
-                состав · {user.member ? ROLE_LABEL[user.member.role] : "участник"}
-              </span>
-            </NavLink>
-          ) : null}
 
           <button
             type="button"

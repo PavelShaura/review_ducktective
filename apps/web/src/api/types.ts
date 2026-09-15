@@ -361,6 +361,38 @@ export interface CurrentUser {
   subject: string;
   organization: Organization | null;
   member: Member | null;
+  /** Видит журнал установки: право не зависит от организации. */
+  is_installation_admin: boolean;
+}
+
+export type LogLevel = "debug" | "info" | "warning" | "error" | "critical";
+
+/** Одна строка журнала; в `fields` — контекст события, свой у каждого. */
+export interface LogRecord {
+  timestamp: string | null;
+  level: string | null;
+  logger: string | null;
+  event: string;
+  exception: string | null;
+  fields: Record<string, unknown>;
+}
+
+export interface LogTail {
+  file: string;
+  size_bytes: number;
+  scanned_lines: number;
+  /** Строки, не разобранные как JSON: в файл писал кто-то ещё или он повреждён. */
+  skipped_lines: number;
+  /** Отбор остановлен по лимиту — раньше в файле есть ещё подходящие записи. */
+  truncated: boolean;
+  records: LogRecord[];
+}
+
+export interface LogFilter {
+  limit: number;
+  level: LogLevel | null;
+  logger: string;
+  q: string;
 }
 
 export interface Invitation {

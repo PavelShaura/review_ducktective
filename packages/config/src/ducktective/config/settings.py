@@ -46,6 +46,14 @@ class Settings(BaseSettings):
     файл там только занимал бы диск. При локальном запуске без сборщика
     файл — единственное место, где прогон остаётся после закрытия терминала.
     """
+    installation_admin_emails: str = ""
+    """Почты администраторов установки через запятую.
+
+    Журнал общий для всех организаций, поэтому владельцу организации его
+    показывать нельзя: рядом лежат строки чужих прогонов. Администратор
+    установки стоит над организациями, и его список живёт в настройках,
+    а не в базе — там нет строки, которой он принадлежал бы.
+    """
 
     database_url: str = ""
     database_pool_size: int = 10
@@ -209,6 +217,15 @@ class Settings(BaseSettings):
             note=self.local_embedding_note,
         )
         return (default, *load_embedding_backends(self.embedding_backends_file))
+
+    @property
+    def installation_admins(self) -> frozenset[str]:
+        """Почты администраторов в нижнем регистре: провайдер отдаёт их как есть."""
+        return frozenset(
+            email.strip().lower()
+            for email in self.installation_admin_emails.split(",")
+            if email.strip()
+        )
 
     def require_database_url(self) -> str:
         """Адреса хранилищ не обязательны: автономный режим CLI работает без них."""
