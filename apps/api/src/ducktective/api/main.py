@@ -45,6 +45,9 @@ from ducktective.storage.database import (
     build_engine,
     build_session_factory,
 )
+from ducktective.storage.schema import (
+    ensure_schema,
+)
 
 
 logger = get_logger(__name__)
@@ -62,6 +65,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings.require_database_url(),
         pool_size=settings.database_pool_size,
         max_overflow=settings.database_pool_max_overflow,
+    )
+    await ensure_schema(
+        engine,
+        database_url=settings.require_database_url(),
+        auto_migrate=settings.database_auto_migrate,
     )
     if not settings.authentication_required:
         raise RuntimeError(

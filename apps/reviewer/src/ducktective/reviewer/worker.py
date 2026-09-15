@@ -110,6 +110,9 @@ from ducktective.storage.locks import (
 from ducktective.storage.repositories.investigation import (
     SqlAlchemyInvestigationLog,
 )
+from ducktective.storage.schema import (
+    ensure_schema,
+)
 from ducktective.storage.unit_of_work import (
     SqlAlchemyUnitOfWork,
 )
@@ -149,6 +152,11 @@ async def startup(ctx: dict[str, Any]) -> None:
         settings.require_database_url(),
         pool_size=settings.database_pool_size,
         max_overflow=settings.database_pool_max_overflow,
+    )
+    await ensure_schema(
+        engine,
+        database_url=settings.require_database_url(),
+        auto_migrate=settings.database_auto_migrate,
     )
     redis_client = Redis.from_url(settings.require_redis_url(), decode_responses=True)
 

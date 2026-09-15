@@ -67,6 +67,9 @@ from ducktective.storage.database import (
 from ducktective.storage.events.redis_publisher import (
     RedisEventPublisher,
 )
+from ducktective.storage.schema import (
+    ensure_schema,
+)
 from ducktective.storage.unit_of_work import (
     SqlAlchemyUnitOfWork,
 )
@@ -90,6 +93,11 @@ async def startup(ctx: dict[str, Any]) -> None:
         settings.require_database_url(),
         pool_size=settings.database_pool_size,
         max_overflow=settings.database_pool_max_overflow,
+    )
+    await ensure_schema(
+        engine,
+        database_url=settings.require_database_url(),
+        auto_migrate=settings.database_auto_migrate,
     )
     ctx["settings"] = settings
     ctx["engine"] = engine
