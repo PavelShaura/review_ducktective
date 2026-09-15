@@ -21,6 +21,7 @@ from fastapi.security import (
 
 from ducktective.api.dependencies import (
     EventPublisherDependency,
+    SettingsDependency,
     UnitOfWorkDependency,
 )
 from ducktective.application.tenancy.sign_in import (
@@ -123,6 +124,23 @@ async def current_owner(
     return member
 
 
+async def installation_admin(
+    identity: Annotated[VerifiedIdentity, Depends(authenticated_identity)],
+    settings: SettingsDependency,
+) -> VerifiedIdentity:
+    """Администратор установки — тот, чья почта названа в настройках.
+
+    Членство в организации не требуется: журнал принадлежит установке, а
+    не организации, и администратор может не состоять ни в одной.
+    """
+    if identity.email.lower() not in settings.installation_admins:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Операция доступна только администратору установки",
+        )
+    return identity
+
+
 def tenant_unit_of_work(
     request: Request,
     member: Annotated[UserAccount, Depends(current_member)],
@@ -143,6 +161,7 @@ IdentityDependency = Annotated[VerifiedIdentity, Depends(authenticated_identity)
 SignedInUserDependency = Annotated[SignedInUser, Depends(signed_in_user)]
 MemberDependency = Annotated[UserAccount, Depends(current_member)]
 OwnerDependency = Annotated[UserAccount, Depends(current_owner)]
+InstallationAdminDependency = Annotated[VerifiedIdentity, Depends(installation_admin)]
 
 
 WS_UNAUTHENTICATED = 4401

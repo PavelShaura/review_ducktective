@@ -15,6 +15,8 @@ import type {
   Investigation,
   Invitation,
   IssuedInvitation,
+  LogFilter,
+  LogTail,
   Member,
   ModelPreset,
   Organization,
@@ -269,6 +271,14 @@ export const api = {
     ),
 
   getCurrentUser: () => request<CurrentUser>("/auth/me"),
+
+  tailLogs: (filter: LogFilter) => {
+    const params = new URLSearchParams({ limit: String(filter.limit) });
+    if (filter.level) params.set("level", filter.level);
+    if (filter.logger.trim()) params.set("logger", filter.logger.trim());
+    if (filter.q.trim()) params.set("q", filter.q.trim());
+    return request<LogTail>(`/admin/logs?${params.toString()}`);
+  },
 
   listConnections: () => request<ProviderConnection[]>("/organization/models"),
 

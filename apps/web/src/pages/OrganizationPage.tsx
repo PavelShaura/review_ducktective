@@ -32,7 +32,10 @@ export default function OrganizationPage() {
         <h1 className="font-display text-3xl font-semibold text-paper">
           {user.organization?.name ?? "Организация"}
         </h1>
-        <p className="case-label mt-2">{user.organization?.slug}</p>
+        <p className="case-label mt-2">
+          {user.organization?.slug}
+          {user.member ? ` · вы ${ROLE_LABEL[user.member.role]}` : ""}
+        </p>
       </header>
 
       <MemberTable members={members.data} currentUserId={user.member?.id} isOwner={isOwner} />

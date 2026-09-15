@@ -1146,56 +1146,6 @@
     }
   }
 
-  /* Организация — не пункт меню, а подпись на папке: чьё это дело.
-     Поэтому у неё две строки и вид корешка, а не кнопки. */
-  .nav-org {
-    display: inline-flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.1rem;
-    padding: 0.3rem 0.7rem;
-    border-radius: var(--radius-case);
-    border: 1px solid var(--color-tweed-dim);
-    border-left: 3px solid var(--color-brass-dim);
-    background: color-mix(in srgb, var(--color-paper) 4%, transparent);
-    max-width: 13rem;
-    flex-shrink: 1;
-    transition:
-      border-color 140ms ease,
-      background-color 140ms ease;
-  }
-
-  .nav-org:hover {
-    border-color: var(--color-brass-dim);
-    border-left-color: var(--color-brass);
-    background: color-mix(in srgb, var(--color-brass) 10%, transparent);
-  }
-
-  .nav-org[aria-current="page"] {
-    border-color: var(--color-brass-dim);
-    border-left-color: var(--color-brass);
-    background: color-mix(in srgb, var(--color-brass) 14%, transparent);
-  }
-
-  .nav-org-name {
-    font-family: var(--font-display);
-    font-size: 14px;
-    line-height: 1.15;
-    color: var(--color-paper);
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .nav-org-meta {
-    font-family: var(--font-mono);
-    font-size: 11px;
-    letter-spacing: 0.08em;
-    color: var(--color-paper-dim);
-    white-space: nowrap;
-  }
-
   /* Выход — действие с последствием, поэтому обрамление есть всегда,
      а тревожный тон появляется только при наведении. */
   .menu-signout {

@@ -10,6 +10,7 @@ from fastapi import (
 
 from ducktective.api.dependencies import (
     EventPublisherDependency,
+    SettingsDependency,
     UnitOfWorkDependency,
 )
 from ducktective.api.schemas.organization import (
@@ -72,12 +73,15 @@ router = APIRouter(tags=["organization"])
 async def read_current_user(
     user: SignedInUserDependency,
     unit_of_work: UnitOfWorkDependency,
+    settings: SettingsDependency,
 ) -> CurrentUserResponse:
     """Кто вошёл и есть ли у него организация."""
+    is_admin = user.identity.email.lower() in settings.installation_admins
     if user.account is None:
         return CurrentUserResponse(
             email=user.identity.email,
             subject=user.identity.subject,
+            is_installation_admin=is_admin,
         )
 
     async with unit_of_work:
@@ -88,6 +92,7 @@ async def read_current_user(
         subject=user.identity.subject,
         organization=OrganizationResponse.from_domain(tenant),
         member=MemberResponse.from_domain(user.account),
+        is_installation_admin=is_admin,
     )
 
 

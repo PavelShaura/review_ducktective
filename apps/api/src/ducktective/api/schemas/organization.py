@@ -74,6 +74,8 @@ class CurrentUserResponse(BaseModel):
     subject: str
     organization: OrganizationResponse | None = None
     member: MemberResponse | None = None
+    is_installation_admin: bool = False
+    """Показывать ли раздел журнала: право не зависит от организации."""
 
 
 class InviteMemberRequest(BaseModel):

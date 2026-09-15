@@ -24,6 +24,7 @@ from ducktective.api.routers import (
     chat_stream,
     health,
     investigation_stream,
+    logs,
     models,
     organization,
     repositories,
@@ -112,6 +113,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(health.router)
     app.include_router(organization.router)
+    app.include_router(logs.router)
     app.include_router(models.router)
     app.include_router(repositories.router)
     app.include_router(reviews.router)
