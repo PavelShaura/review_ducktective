@@ -47,6 +47,7 @@ from ducktective.config.settings import (
 )
 from ducktective.core.exceptions import (
     DomainError,
+    EntityNotFoundError,
 )
 from ducktective.core.types import (
     ReviewRunId,
@@ -297,9 +298,18 @@ async def run_review_task(
     ставит задание, пока прежняя попытка ещё не узнала об отмене, и без
     блокировки на одном деле оказались бы две попытки — с общим сохранённым
     ходом и двойным счётом токенов.
+
+    Дело, удалённое пока задача ждала очереди или сборки индекса, снимается
+    одной строкой в журнале: делать по нему нечего, повторять — тоже, а без
+    этого каждая отложенная попытка заканчивалась traceback на весь экран.
     """
     tenant = TenantId(UUID(tenant_id))
-    if await _index_in_progress(ctx, tenant, ReviewRunId(UUID(run_id))):
+    try:
+        waits = await _index_in_progress(ctx, tenant, ReviewRunId(UUID(run_id)))
+    except EntityNotFoundError as error:
+        logger.warning("review.run_gone", run_id=run_id, error=str(error))
+        return {"run_id": run_id, "status": "gone"}
+    if waits:
         logger.info("review.waits_for_index", run_id=run_id)
         raise Retry(defer=INDEX_WAIT_SECONDS)
 
