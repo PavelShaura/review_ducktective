@@ -6,6 +6,7 @@ import { BrowserRouter } from "react-router";
 
 import { App } from "@/App";
 import { oidcConfig } from "@/auth/config";
+import "@/i18n";
 import "@/styles/index.css";
 
 const queryClient = new QueryClient({
@@ -20,7 +21,7 @@ const queryClient = new QueryClient({
 
 const container = document.getElementById("root");
 if (!container) {
-  throw new Error("Не найден корневой элемент");
+  throw new Error("Root element not found");
 }
 
 createRoot(container).render(

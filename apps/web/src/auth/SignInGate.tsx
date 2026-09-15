@@ -1,5 +1,8 @@
 import { useAuth } from "react-oidc-context";
+import { useTranslation } from "react-i18next";
 import type { ReactNode } from "react";
+
+import { LanguageSwitch } from "@/components/LanguageSwitch";
 
 /**
  * Порог входа: до подтверждения личности дальше не пускает.
@@ -10,17 +13,21 @@ import type { ReactNode } from "react";
  */
 export function SignInGate({ children }: { children: ReactNode }) {
   const auth = useAuth();
+  const { t } = useTranslation();
 
   if (auth.isLoading) {
-    return <Notice>проверяю пропуск…</Notice>;
+    return <Notice>{t("signIn.checking")}</Notice>;
   }
 
   if (auth.error) {
     return (
       <div className="py-24 text-center">
-        <p className="font-display text-2xl text-paper">Провайдер личности не отвечает</p>
+        <div className="mb-8 flex justify-center">
+          <LanguageSwitch />
+        </div>
+        <p className="font-display text-2xl text-paper">{t("signIn.providerDown")}</p>
         <p className="mt-3 text-paper-dim">{auth.error.message}</p>
-        <SignInButton label="попробовать снова" />
+        <SignInButton label={t("signIn.retry")} />
       </div>
     );
   }
@@ -28,12 +35,12 @@ export function SignInGate({ children }: { children: ReactNode }) {
   if (!auth.isAuthenticated) {
     return (
       <div className="py-24 text-center">
-        <p className="font-display text-3xl text-paper">Дела выдаются по пропуску</p>
-        <p className="mx-auto mt-3 max-w-lg text-paper-dim">
-          Вход подтверждается провайдером личности. Пароль остаётся у него —
-          приложение его не видит и не хранит.
-        </p>
-        <SignInButton label="войти" />
+        <div className="mb-8 flex justify-center">
+          <LanguageSwitch />
+        </div>
+        <p className="font-display text-3xl text-paper">{t("signIn.title")}</p>
+        <p className="mx-auto mt-3 max-w-lg text-paper-dim">{t("signIn.body")}</p>
+        <SignInButton label={t("signIn.signIn")} />
       </div>
     );
   }

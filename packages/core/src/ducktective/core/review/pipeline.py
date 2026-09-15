@@ -17,6 +17,9 @@ from ducktective.core.review.entities import (
     Finding,
     ReviewFile,
 )
+from ducktective.core.review.value_objects import (
+    ReviewLanguage,
+)
 from ducktective.core.types import (
     CommitSha,
     RepositoryId,
@@ -43,6 +46,8 @@ class PipelineRequest:
     repository_id: RepositoryId
     files: tuple[ReviewFile, ...]
     requirements: ModelRequirements
+    language: ReviewLanguage = ReviewLanguage.RU
+    """На каком языке писать находки. Русский — для прогонов, заведённых раньше."""
 
     head_sha: CommitSha | None = None
     """Ревизия, которую читают инструменты навигации.

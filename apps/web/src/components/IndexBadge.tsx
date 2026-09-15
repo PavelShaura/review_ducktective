@@ -1,7 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
 import { api } from "@/api/client";
 import type { IndexState } from "@/api/types";
+import { stageTitle } from "@/lib/stage";
 
 interface Props {
   repositoryId: string;
@@ -21,6 +24,7 @@ interface Props {
  */
 export function IndexBadge({ repositoryId }: Props) {
   const state = useIndexState(repositoryId);
+  const { t } = useTranslation();
 
   if (state.isPending || state.isError) {
     return null;
@@ -32,7 +36,7 @@ export function IndexBadge({ repositoryId }: Props) {
   return (
     <span className={`status-badge ${value.context_ready || busy ? "status-live" : "status-off"}`}>
       <span className="status-dot" aria-hidden />
-      {label(value, busy)}
+      {label(t, value, busy)}
     </span>
   );
 }
@@ -47,6 +51,7 @@ export function IndexBadge({ repositoryId }: Props) {
 export function IndexAction({ repositoryId }: Props) {
   const queryClient = useQueryClient();
   const state = useIndexState(repositoryId);
+  const { t } = useTranslation();
 
   const start = useMutation({
     mutationFn: () => api.startIndexing(repositoryId),
@@ -68,7 +73,7 @@ export function IndexAction({ repositoryId }: Props) {
       onClick={() => start.mutate()}
       className={`card-action card-action-primary ${start.isPending ? "card-action-busy" : ""}`}
     >
-      {start.isPending ? "ставлю в очередь…" : "собрать индекс"}
+      {start.isPending ? t("indexBadge.queueing") : t("indexBadge.build")}
     </button>
   );
 }
@@ -86,13 +91,14 @@ function isBusy(state?: IndexState): boolean {
   return state?.status === "running" || state?.status === "pending";
 }
 
-function label(state: IndexState, busy: boolean): string {
+function label(t: TFunction, state: IndexState, busy: boolean): string {
   if (busy) {
-    return state.stage_title ? `индексирую · ${state.stage_title}` : "индексирую";
+    const stage = stageTitle(t, state);
+    return stage ? t("indexBadge.indexingStage", { stage }) : t("indexBadge.indexing");
   }
   if (state.context_ready) {
     const files = state.totals.files;
-    return files ? `индекс готов · ${files} файлов` : "индекс готов";
+    return files ? t("indexBadge.readyFiles", { count: files }) : t("indexBadge.ready");
   }
-  return "индекса нет";
+  return t("indexBadge.none");
 }

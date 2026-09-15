@@ -42,7 +42,14 @@ def _database_url() -> str:
 
     Файл не перекрывает окружение: заданный снаружи адрес — это осознанный
     выбор развёртывания, и локальный `.env` не должен его молча отменять.
+
+    Адрес из конфигурации alembic старше обоих: его задаёт служба, катящая
+    миграции при старте, — она уже знает свою базу и не ходит за ней в файл.
     """
+    configured = config.get_main_option("sqlalchemy.url")
+    if configured:
+        return configured
+
     load_dotenv(find_dotenv(usecwd=True))
 
     url = os.environ.get("DATABASE_URL")

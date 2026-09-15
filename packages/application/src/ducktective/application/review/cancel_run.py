@@ -17,6 +17,12 @@ class CancelReviewRun(TransactionalUseCase):
     это перед следующим файлом и выходит. Файл, который модель читает прямо
     сейчас, дочитывается — прерывать запрос к модели на середине незачем,
     результат всё равно не сохранится.
+
+    Вместе с прогоном отменяется и сборка индекса на его ревизии, если она
+    ещё не закончена: её поставил сам запуск дела, и без дела она только
+    занимает воркер — следующая сборка в очереди ждала бы её полчаса
+    ради индекса, который никому не нужен. Готовый снапшот не трогается,
+    как и сборка на другой ревизии.
     """
 
     async def execute(self, tenant_id: TenantId, run_id: ReviewRunId) -> bool:
@@ -28,5 +34,14 @@ class CancelReviewRun(TransactionalUseCase):
                 return False
 
             run.cancel()
+
+            snapshot = await self._unit_of_work.index_snapshots.find_latest(run.repository_id)
+            if (
+                snapshot is not None
+                and not snapshot.is_finished
+                and snapshot.commit_sha == run.head_sha
+            ):
+                snapshot.cancel()
+
             await self._commit_and_publish()
             return True

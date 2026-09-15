@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Link, useParams } from "react-router";
 
 import { api } from "@/api/client";
@@ -8,7 +9,7 @@ import { FileDiff } from "@/components/FileDiff";
 import { FindingCard } from "@/components/FindingCard";
 import { ContextMark } from "@/components/ContextMark";
 import { InvestigationLog } from "@/components/InvestigationLog";
-import { SEVERITY_LABEL, SEVERITY_ORDER, SEVERITY_TEXT } from "@/components/SeverityMark";
+import { SEVERITY_ORDER, SEVERITY_TEXT } from "@/components/SeverityMark";
 import {
   ReviewCancelled,
   ReviewDegraded,
@@ -16,11 +17,12 @@ import {
   ReviewProgress,
 } from "@/components/ReviewProgress";
 import { isInProgress, StatusMark } from "@/components/StatusMark";
-import { VERDICT_LABEL, VERDICT_ORDER, VERDICT_TEXT } from "@/components/VerdictStamp";
+import { VERDICT_ORDER, VERDICT_TEXT } from "@/components/VerdictStamp";
 import { formatDateTime, shortSha } from "@/lib/format";
 
 export default function CasePage() {
   const { runId = "" } = useParams();
+  const { t } = useTranslation();
   const [severityFilter, setSeverityFilter] = useState<Severity | null>(null);
   const [verdictFilter, setVerdictFilter] = useState<FeedbackVerdict | null>(null);
 
@@ -34,18 +36,16 @@ export default function CasePage() {
   const findingsByPath = useMemo(() => groupByPath(run.data?.findings ?? []), [run.data]);
 
   if (run.isPending) {
-    return <p className="case-label py-16 text-center">поднимаю материалы дела…</p>;
+    return <p className="case-label py-16 text-center">{t("case.loading")}</p>;
   }
 
   if (run.isError) {
     return (
       <div className="py-20 text-center">
-        <h2 className="font-display text-3xl text-paper">Дело не открывается</h2>
-        <p className="mt-3 text-paper-dim">
-          Проверьте, что сервис запущен и идентификатор дела верен.
-        </p>
+        <h2 className="font-display text-3xl text-paper">{t("case.notOpenTitle")}</h2>
+        <p className="mt-3 text-paper-dim">{t("case.notOpenBody")}</p>
         <Link to="/" className="case-label mt-5 inline-block hover:text-brass">
-          к списку дел
+          {t("case.toList")}
         </Link>
       </div>
     );
@@ -104,7 +104,7 @@ export default function CasePage() {
         ))}
         {visibleFiles.length === 0 ? (
           <p className="py-10 text-center text-paper-dim">
-            Под этот фильтр не попал ни один файл.
+            {t("case.noFileMatches")}
           </p>
         ) : null}
       </div>
@@ -124,6 +124,7 @@ interface UnmatchedProps {
 
 /** Замечания, чей файл отсутствует в диффе: показываем, а не теряем. */
 function UnmatchedFindings({ runId, findings }: UnmatchedProps) {
+  const { t } = useTranslation();
   if (findings.length === 0) {
     return null;
   }
@@ -131,7 +132,7 @@ function UnmatchedFindings({ runId, findings }: UnmatchedProps) {
   return (
     <section className="border border-tweed-dim bg-ink-raised">
       <p className="case-label border-b border-tweed-dim px-5 py-3">
-        замечания без файла в диффе · {findings.length}
+        {t("case.orphans", { count: findings.length })}
       </p>
       <div className="space-y-3 px-5 py-4">
         {findings.map((finding) => (
@@ -153,10 +154,11 @@ function findWithoutFiles(
 }
 
 function CaseHeader({ run }: { run: ReviewRun }) {
+  const { t } = useTranslation();
   return (
     <header className="case-file px-5 py-4">
       <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-        <span className="case-label">дело</span>
+        <span className="case-label">{t("case.label")}</span>
         <h1 className="font-display text-3xl font-semibold tracking-tight text-brass">
           {shortSha(run.id)}
         </h1>
@@ -169,10 +171,13 @@ function CaseHeader({ run }: { run: ReviewRun }) {
       {run.head_subject ? <p className="case-subject mt-3">{run.head_subject}</p> : null}
 
       <dl className="mt-3 grid grid-cols-2 gap-x-8 gap-y-1.5 sm:grid-cols-4">
-        <Fact label="ревизии" value={`${shortSha(run.base_sha)} → ${shortSha(run.head_sha)}`} />
-        <Fact label="файлов" value={String(run.files.length)} />
-        <Fact label="находок" value={String(run.findings.length)} />
-        <Fact label="заведено" value={formatDateTime(run.created_at)} />
+        <Fact
+          label={t("case.revisions")}
+          value={`${shortSha(run.base_sha)} → ${shortSha(run.head_sha)}`}
+        />
+        <Fact label={t("case.files")} value={String(run.files.length)} />
+        <Fact label={t("case.findings")} value={String(run.findings.length)} />
+        <Fact label={t("case.createdAt")} value={formatDateTime(run.created_at)} />
       </dl>
     </header>
   );
@@ -207,6 +212,7 @@ function SeverityFilter({
   verdictFilter,
   onVerdictChange,
 }: FilterProps) {
+  const { t } = useTranslation();
   const counts = countBySeverity(findings);
   const present = SEVERITY_ORDER.filter((severity) => counts[severity] > 0);
   const verdictCounts = countByVerdict(findings);
@@ -215,7 +221,7 @@ function SeverityFilter({
   if (present.length === 0) {
     return (
       <p className="border border-confirmed/30 bg-confirmed/5 px-5 py-5 text-[16px] text-paper">
-        Замечаний нет — в изменённых строках проблем не найдено.
+        {t("case.noFindings")}
       </p>
     );
   }
@@ -223,14 +229,14 @@ function SeverityFilter({
   return (
     <div className="flex flex-wrap items-center gap-2">
       <FilterButton
-        label={`все ${findings.length}`}
+        label={t("case.all", { count: findings.length })}
         active={active === null}
         onClick={() => onChange(null)}
       />
       {present.map((severity) => (
         <FilterButton
           key={severity}
-          label={`${SEVERITY_LABEL[severity]} ${counts[severity]}`}
+          label={`${t(`severity.${severity}`)} ${counts[severity]}`}
           active={active === severity}
           className={SEVERITY_TEXT[severity]}
           onClick={() => onChange(active === severity ? null : severity)}
@@ -243,7 +249,7 @@ function SeverityFilter({
       {markedVerdicts.map((verdict) => (
         <FilterButton
           key={verdict}
-          label={`${VERDICT_LABEL[verdict]} ${verdictCounts[verdict]}`}
+          label={`${t(`verdict.${verdict}`)} ${verdictCounts[verdict]}`}
           active={verdictFilter === verdict}
           className={VERDICT_TEXT[verdict]}
           onClick={() => onVerdictChange(verdictFilter === verdict ? null : verdict)}

@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { lazy, Suspense, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useAuth } from "react-oidc-context";
 import { Link, NavLink, Route, Routes } from "react-router";
 
@@ -7,6 +8,9 @@ import { api } from "@/api/client";
 import { provideAccessToken } from "@/api/token";
 import type { CurrentUser } from "@/api/types";
 import { SignInGate } from "@/auth/SignInGate";
+import { LanguageSwitch } from "@/components/LanguageSwitch";
+import { SectionIcon } from "@/components/SectionIcon";
+import type { SectionKey } from "@/components/SectionIcon";
 
 const CaseListPage = lazy(() => import("@/pages/CaseListPage"));
 const ChatPage = lazy(() => import("@/pages/ChatPage"));
@@ -86,81 +90,80 @@ function Workspace() {
 
 /**
  * Разделы по порядку работы: сначала дела, потом то, на чём они держатся —
- * индекс и модели, — затем накопленные отметки и в конце — кто всем этим
- * занимается.
+ * индекс и модели, — и в конце накопленные отметки.
  *
- * Разговор помечен живым огоньком: это единственный раздел, где что-то
- * происходит в реальном времени.
- *
- * Слева только разделы, справа только действия: пока имя организации стояло
- * справа карточкой, она единственная умела сжиматься и первой теряла текст
- * при каждом новом пункте. Имя и роль показывает сама страница состава.
+ * Слева только разделы, справа только действия. Организация — не раздел
+ * и не действие, а подпись на папке: чьё это дело. Она стоит под названием
+ * приложения, на месте слогана, и ведёт на страницу состава; слоган
+ * остаётся тому, у кого организации ещё нет.
  *
  * Журнала здесь нет: он виден не всем и добавляется после общих разделов.
- * На ширине `xl` у него один глиф — подпись не помещается вместе с остальными.
+ * На ширине `xl` у него один значок — подпись не помещается вместе с остальными.
  */
-const SECTIONS: {
-  to: string;
-  label: string;
-  title: string;
-  glyph?: string;
-  isLive?: boolean;
-}[] = [
-  { to: "/", label: "список ревью", title: "Все прогоны ревью", glyph: "§" },
-  { to: "/chat", label: "чат", title: "Спросить о коде своими словами", isLive: true },
-  { to: "/indexes", label: "индексы", title: "Что разобрано, когда и чем собрать заново", glyph: "≡" },
-  { to: "/models", label: "модели", title: "Подключения к провайдерам моделей", glyph: "◈" },
-  { to: "/marks", label: "отметки", title: "Картотека вердиктов по находкам", glyph: "✓" },
-  {
-    to: "/organization",
-    label: "состав",
-    title: "Состав организации: участники, роли и приглашения",
-    glyph: "⌂",
-  },
+const SECTIONS: { to: string; key: Exclude<SectionKey, "logs"> }[] = [
+  { to: "/", key: "cases" },
+  { to: "/chat", key: "chat" },
+  { to: "/indexes", key: "indexes" },
+  { to: "/models", key: "models" },
+  { to: "/marks", key: "marks" },
 ];
 
 function Header({ user }: { user?: CurrentUser }) {
   const auth = useAuth();
   const isLifted = useLifted();
+  const { t } = useTranslation();
 
   return (
     <header className={`topbar sticky top-0 z-20 backdrop-blur ${isLifted ? "topbar-lifted" : ""}`}>
       <div className="menu-scroll mx-auto flex w-full max-w-7xl flex-nowrap items-center gap-3 overflow-x-auto px-5 py-3">
-        <Link to="/" className="brand-link flex shrink-0 items-center gap-3">
-          <img
-            src="/mascot.webp"
-            alt=""
-            width={36}
-            height={36}
-            className="brand-mascot rounded-full"
-          />
+        <span className="flex shrink-0 items-center gap-3">
+          <Link to="/" className="brand-link shrink-0">
+            <img
+              src="/mascot.webp"
+              alt=""
+              width={36}
+              height={36}
+              className="brand-mascot rounded-full"
+            />
+          </Link>
           <span className="brand">
-            <span className="font-display text-xl font-semibold tracking-tight text-paper">
+            <Link
+              to="/"
+              className="brand-link font-display text-xl font-semibold tracking-tight text-paper"
+            >
               review<span className="text-brass">_ducktective</span>
-            </span>
-            <span className="brand-tagline hidden sm:block">дела о качестве кода</span>
+            </Link>
+            {user?.organization ? (
+              <NavLink
+                to="/organization"
+                className="brand-org hidden sm:block"
+                title={t("app.nav.organizationTitle")}
+              >
+                <span className="brand-org-name">{user.organization.name}</span>
+                <span className="brand-org-meta">
+                  {" · "}
+                  {user.member
+                    ? t(`organization.role.${user.member.role}`)
+                    : t("app.nav.organization")}
+                </span>
+              </NavLink>
+            ) : (
+              <span className="brand-tagline hidden sm:block">{t("app.tagline")}</span>
+            )}
           </span>
-        </Link>
+        </span>
 
-        <span className="menu-divider hidden lg:block" aria-hidden />
-
-        <nav className="flex shrink-0 items-center gap-1">
+        <nav className="menu-tray flex shrink-0 items-center gap-0.5">
           {SECTIONS.map((section) => (
             <NavLink
               key={section.to}
               to={section.to}
               end={section.to === "/"}
-              title={section.title}
+              title={t(`app.nav.${section.key}Title`)}
               className="menu-link"
             >
-              {section.isLive ? (
-                <span className="menu-live" aria-hidden />
-              ) : (
-                <span className="menu-glyph" aria-hidden>
-                  {section.glyph}
-                </span>
-              )}
-              {section.label}
+              <SectionIcon section={section.key} />
+              {t(`app.nav.${section.key}`)}
             </NavLink>
           ))}
 
@@ -168,32 +171,37 @@ function Header({ user }: { user?: CurrentUser }) {
             <NavLink
               to="/logs"
               className="menu-link"
-              title="Журнал установки: api и воркеры, только для администратора"
-              aria-label="журнал"
+              title={t("app.nav.logsTitle")}
+              aria-label={t("app.nav.logs")}
             >
-              <span className="menu-glyph" aria-hidden>
-                ¶
-              </span>
-              <span className="hidden 2xl:inline">журнал</span>
+              <SectionIcon section="logs" />
+              <span className="hidden 2xl:inline">{t("app.nav.logs")}</span>
             </NavLink>
           ) : null}
         </nav>
 
         <span className="ml-auto flex min-w-0 items-center gap-3">
-          <NavLink to="/cases/new" className="menu-action shrink-0" title="Запустить ревью диффа">
-            + новое ревью
+          <NavLink to="/cases/new" className="menu-action shrink-0" title={t("app.newReviewTitle")}>
+            {t("app.newReview")}
           </NavLink>
+
+          <LanguageSwitch />
 
           <button
             type="button"
             onClick={() => void auth.signoutRedirect()}
             className="menu-signout shrink-0"
-            title={user?.email ? `Выйти из учётной записи ${user.email}` : "Выйти"}
+            aria-label={t("app.signOut")}
+            title={
+              user?.email
+                ? t("app.signOutTitle", { email: user.email })
+                : t("app.signOutTitleShort")
+            }
           >
             <span className="menu-signout-glyph" aria-hidden>
               →
             </span>
-            выйти
+            <span className="hidden 2xl:inline">{t("app.signOut")}</span>
           </button>
         </span>
       </div>
@@ -221,15 +229,17 @@ function useLifted(): boolean {
 }
 
 function Loading() {
-  return <p className="case-label py-16 text-center">открываю папку…</p>;
+  const { t } = useTranslation();
+  return <p className="case-label py-16 text-center">{t("app.loading")}</p>;
 }
 
 function NotFound() {
+  const { t } = useTranslation();
   return (
     <div className="py-24 text-center">
-      <p className="font-display text-3xl text-paper">Такого дела нет в архиве</p>
+      <p className="font-display text-3xl text-paper">{t("app.notFoundTitle")}</p>
       <Link to="/" className="case-label mt-3 inline-block hover:text-brass">
-        вернуться к списку
+        {t("app.notFoundBack")}
       </Link>
     </div>
   );

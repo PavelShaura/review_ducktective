@@ -1,11 +1,6 @@
-import type { Severity } from "@/api/types";
+import { useTranslation } from "react-i18next";
 
-export const SEVERITY_LABEL: Record<Severity, string> = {
-  critical: "критично",
-  major: "важно",
-  minor: "мелочь",
-  nitpick: "придирка",
-};
+import type { Severity } from "@/api/types";
 
 export const SEVERITY_TEXT: Record<Severity, string> = {
   critical: "text-critical",
@@ -38,10 +33,11 @@ interface Props {
 
 /** Метка уровня: засечка цвета и подпись, без иконок и бейджей. */
 export function SeverityMark({ severity, count }: Props) {
+  const { t } = useTranslation();
   return (
     <span className={`case-label inline-flex items-center gap-1.5 ${SEVERITY_TEXT[severity]}`}>
       <span aria-hidden className="inline-block h-2.5 w-0.5 bg-current" />
-      {SEVERITY_LABEL[severity]}
+      {t(`severity.${severity}`)}
       {count === undefined ? null : <span className="tabular-nums">{count}</span>}
     </span>
   );

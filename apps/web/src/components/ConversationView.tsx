@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { api } from "@/api/client";
 import type { ChatEvent, ChatMessage } from "@/api/types";
@@ -38,6 +39,7 @@ type LiveItem = ({ tool: LiveTool } & { kind: "tool" }) | ({ kind: LivePiece["ki
  */
 export function ConversationView({ conversationId, repositoryName, isIndexReady }: Props) {
   const queryClient = useQueryClient();
+  const { t } = useTranslation();
   const [live, setLive] = useState<LiveItem[]>([]);
   const [asked, setAsked] = useState<string>("");
   const [isAnswering, setIsAnswering] = useState(false);
@@ -119,13 +121,15 @@ export function ConversationView({ conversationId, repositoryName, isIndexReady 
           ),
         )}
 
-        {isAnswering && live.length === 0 ? <p className="case-label">думаю над ответом…</p> : null}
+        {isAnswering && live.length === 0 ? (
+          <p className="case-label">{t("conversation.thinking")}</p>
+        ) : null}
 
         {isEmpty ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 py-12 text-center">
-            <p className="font-display text-lg text-paper">Разговор пуст</p>
+            <p className="font-display text-lg text-paper">{t("conversation.emptyTitle")}</p>
             <p className="max-w-md text-[13px] text-paper-dim">
-              Спросите о коде {repositoryName}.
+              {t("conversation.emptyBody", { repository: repositoryName })}
             </p>
           </div>
         ) : null}
@@ -310,6 +314,7 @@ function closeDraft(items: LiveItem[]): LiveItem[] {
  * и рисовать их второй раз здесь значило бы показывать каждое дважды.
  */
 function StoredMessage({ message }: { message: ChatMessage }) {
+  const { t } = useTranslation();
   if (message.role === "user") {
     return <Bubble side="user">{message.content}</Bubble>;
   }
@@ -325,7 +330,11 @@ function StoredMessage({ message }: { message: ChatMessage }) {
   return (
     <Bubble
       side="agent"
-      footer={message.model ? `${message.model} · ${message.tokens_output} т.` : ""}
+      footer={
+        message.model
+          ? t("conversation.tokens", { model: message.model, count: message.tokens_output })
+          : ""
+      }
     >
       <Answer text={message.content} />
     </Bubble>
@@ -420,6 +429,7 @@ function Composer({
   onAsk,
 }: ComposerProps) {
   const [text, setText] = useState("");
+  const { t } = useTranslation();
 
   const send = () => {
     const question = text.trim();
@@ -440,13 +450,12 @@ function Composer({
     >
       {isIndexReady ? null : (
         <p className="border-l-2 border-critical bg-critical/5 px-3 py-2 text-[13px] text-paper">
-          Репозиторий не проиндексирован — разговор идёт по индексу, и смотреть в код агенту нечем.
-          Нажмите «проиндексировать» в блоке индекса выше.
+          {t("conversation.notIndexed")}
         </p>
       )}
 
       {isReconnecting ? (
-        <p className="case-label text-brass">связь восстанавливается — вопрос уйдёт следом</p>
+        <p className="case-label text-brass">{t("conversation.reconnecting")}</p>
       ) : null}
       <div className="flex items-end gap-3">
         <textarea
@@ -459,7 +468,7 @@ function Composer({
             }
           }}
           rows={2}
-          placeholder={`вопрос о коде ${repositoryName}`}
+          placeholder={t("conversation.placeholder", { repository: repositoryName })}
           className="composer-input flex-1 resize-none rounded-case border border-tweed bg-transparent px-3 py-2 text-[14px] text-paper focus:border-brass focus:outline-none"
         />
         <button
@@ -467,7 +476,7 @@ function Composer({
           disabled={isAnswering || !isIndexReady || !text.trim()}
           className="action-brass"
         >
-          {isAnswering ? "отвечает…" : "спросить"}
+          {isAnswering ? t("conversation.answering") : t("conversation.ask")}
         </button>
       </div>
     </form>

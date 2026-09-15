@@ -235,6 +235,15 @@ export interface IndexState {
   vectors: VectorCoverage;
   totals: IndexTotals;
   stats: IndexStats | null;
+  /** Только пока снапшот в очереди; `null` при ожидании — воркер не запущен. */
+  queue: IndexQueue | null;
+}
+
+/** За кем стоит сборка: воркер берёт по одной. */
+export interface IndexQueue {
+  position: number;
+  busy_with: string | null;
+  busy_since: string | null;
 }
 
 export interface EmbedderChoice {

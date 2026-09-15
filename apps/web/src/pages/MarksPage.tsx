@@ -1,48 +1,38 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
 import { api } from "@/api/client";
 import type { FeedbackDigest, FeedbackVerdict, MarkedFinding, Repository } from "@/api/types";
-import { SEVERITY_LABEL, SEVERITY_TEXT } from "@/components/SeverityMark";
-import { VERDICT_LABEL, VERDICT_ORDER, VERDICT_TEXT } from "@/components/VerdictStamp";
+import { SEVERITY_TEXT } from "@/components/SeverityMark";
+import { VERDICT_ORDER, VERDICT_TEXT } from "@/components/VerdictStamp";
 import { formatDateTime, shortSha } from "@/lib/format";
 
 export default function MarksPage() {
+  const { t } = useTranslation();
   const repositories = useQuery({
     queryKey: ["repositories"],
     queryFn: api.listRepositories,
   });
 
   if (repositories.isPending) {
-    return <p className="case-label py-16 text-center">поднимаю картотеку…</p>;
+    return <p className="case-label py-16 text-center">{t("marks.loading")}</p>;
   }
 
   if (repositories.isError) {
-    return (
-      <p className="py-20 text-center text-paper-dim">
-        Сервис не отвечает — картотека отметок недоступна.
-      </p>
-    );
+    return <p className="py-20 text-center text-paper-dim">{t("marks.unavailable")}</p>;
   }
 
   if (repositories.data.length === 0) {
-    return (
-      <p className="py-20 text-center text-paper-dim">
-        Отмечать пока нечего: ни одного репозитория не заведено.
-      </p>
-    );
+    return <p className="py-20 text-center text-paper-dim">{t("marks.nothing")}</p>;
   }
 
   return (
     <div className="space-y-14">
       <header>
-        <h1 className="font-display text-3xl font-semibold text-paper">Картотека отметок</h1>
-        <p className="mt-2 max-w-2xl text-[15px] text-paper-dim">
-          Всё, что вы пометили на карточках находок. Из этих отметок собирается набор
-          для оценки качества: доля подтверждённых — та самая precision, с которой будут
-          сравниваться следующие версии ревьюера.
-        </p>
+        <h1 className="font-display text-3xl font-semibold text-paper">{t("marks.title")}</h1>
+        <p className="mt-2 max-w-2xl text-[15px] text-paper-dim">{t("marks.intro")}</p>
       </header>
 
       {repositories.data.map((repository) => (
@@ -53,6 +43,7 @@ export default function MarksPage() {
 }
 
 function RepositoryMarks({ repository }: { repository: Repository }) {
+  const { t } = useTranslation();
   const [verdictFilter, setVerdictFilter] = useState<FeedbackVerdict | null>(null);
 
   const digest = useQuery({
@@ -76,8 +67,7 @@ function RepositoryMarks({ repository }: { repository: Repository }) {
 
       {digest.data.marked.length === 0 ? (
         <p className="mt-4 border border-tweed-dim bg-ink-raised px-5 py-6 text-[15px] text-paper-dim">
-          Ни одна находка по этому репозиторию ещё не размечена. Отметки ставятся кнопками
-          на карточке находки внутри дела.
+          {t("marks.noneMarked")}
         </p>
       ) : (
         <ol className="mt-4 space-y-2">
@@ -97,11 +87,12 @@ interface SummaryProps {
 }
 
 function Summary({ digest, active, onChange }: SummaryProps) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border border-tweed-dim bg-ink-raised px-5 py-4">
       <span className="case-label">
-        размечено <span className="tabular-nums text-paper">{digest.marked_count}</span> из{" "}
-        <span className="tabular-nums">{digest.total_findings}</span>
+        {t("marks.marked")} <span className="tabular-nums text-paper">{digest.marked_count}</span>{" "}
+        {t("marks.of")} <span className="tabular-nums">{digest.total_findings}</span>
       </span>
 
       <span aria-hidden className="mx-1 h-5 w-px bg-tweed-dim" />
@@ -118,7 +109,7 @@ function Summary({ digest, active, onChange }: SummaryProps) {
 
       {digest.useful_share === null ? null : (
         <span className="case-label ml-auto">
-          доля подтверждённых{" "}
+          {t("marks.usefulShare")}{" "}
           <span className="tabular-nums text-brass">
             {(digest.useful_share * 100).toFixed(0)}%
           </span>
@@ -136,6 +127,7 @@ interface VerdictFilterProps {
 }
 
 function VerdictFilter({ verdict, count, active, onClick }: VerdictFilterProps) {
+  const { t } = useTranslation();
   return (
     <button
       type="button"
@@ -148,21 +140,22 @@ function VerdictFilter({ verdict, count, active, onClick }: VerdictFilterProps) 
           : `border-tweed-dim hover:border-tweed ${VERDICT_TEXT[verdict]}`
       }`}
     >
-      {VERDICT_LABEL[verdict]} <span className="tabular-nums">{count}</span>
+      {t(`verdict.${verdict}`)} <span className="tabular-nums">{count}</span>
     </button>
   );
 }
 
 function MarkRow({ mark }: { mark: MarkedFinding }) {
+  const { t } = useTranslation();
   return (
     <li className="rounded-case border border-tweed-dim bg-ink-raised transition-colors hover:border-brass">
       <Link to={`/cases/${mark.run_id}`} className="block px-5 py-3.5">
         <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
           <span className={`case-label ${VERDICT_TEXT[mark.verdict]}`}>
-            {VERDICT_LABEL[mark.verdict]}
+            {t(`verdict.${mark.verdict}`)}
           </span>
           <span className={`case-label ${SEVERITY_TEXT[mark.severity]}`}>
-            {SEVERITY_LABEL[mark.severity]}
+            {t(`severity.${mark.severity}`)}
           </span>
           <span className="min-w-0 flex-1 truncate text-[15px] text-paper">{mark.title}</span>
           <span className="case-label shrink-0">{formatDateTime(mark.marked_at)}</span>
@@ -173,7 +166,7 @@ function MarkRow({ mark }: { mark: MarkedFinding }) {
             {mark.file_path}:{mark.line_start}
           </span>
           <span className="opacity-40">·</span>
-          <span>дело {shortSha(mark.run_id)}</span>
+          <span>{t("marks.caseLabel", { sha: shortSha(mark.run_id) })}</span>
         </div>
 
         {mark.comment ? (

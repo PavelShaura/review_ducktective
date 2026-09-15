@@ -50,8 +50,12 @@ from ducktective.core.review.reviewers import (
     ReviewMode,
     reviewer_name,
 )
+from ducktective.core.review.trace import (
+    trace,
+)
 from ducktective.core.review.value_objects import (
     FindingCategory,
+    ReviewLanguage,
     Severity,
 )
 from ducktective.llm.schemas import (
@@ -74,6 +78,8 @@ COMMON_PROMPT_FILE = "review_common.md"
 REVIEWER_PROMPT_FILE = "reviewer.md"
 AGENT_PROMPT_FILE = "reviewer_agent.md"
 PROMPT_SET_NAME = "reviewer-v1"
+
+LANGUAGE_PLACEHOLDER = "{{language}}"
 JSON_BLOCK_PATTERN = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
 
 
@@ -83,7 +89,11 @@ def load_prompt(file_name: str) -> str:
 
 
 @cache
-def system_prompt(*, with_tools: bool = False) -> str:
+def system_prompt(
+    *,
+    with_tools: bool = False,
+    language: ReviewLanguage = ReviewLanguage.RU,
+) -> str:
     """Подсказка ревьюера: что искать, как расследовать, как ответить.
 
     Части три и склеиваются они в одном месте. Перечень того, что искать, —
@@ -91,11 +101,17 @@ def system_prompt(*, with_tools: bool = False) -> str:
     добывать сведения, а не то, что они ищут. Правила доказательств, рубрика
     severity и формат ответа тоже общие — копия этого текста разъехалась бы
     на первой правке, и разница в результатах перестала бы быть объяснимой.
+
+    Язык находок подставляется в общую часть: подсказка одна, а дело читают
+    на языке того, кто его завёл. Подстановка строкой, а не `format` —
+    в тексте есть пример JSON с фигурными скобками.
     """
     parts = [load_prompt(REVIEWER_PROMPT_FILE)]
     if with_tools:
         parts.append(load_prompt(AGENT_PROMPT_FILE))
-    parts.append(load_prompt(COMMON_PROMPT_FILE))
+    parts.append(
+        load_prompt(COMMON_PROMPT_FILE).replace(LANGUAGE_PLACEHOLDER, language.prompt_name)
+    )
     return "\n\n".join(parts)
 
 
@@ -165,12 +181,13 @@ class LlmCodeReviewer:
         одноразовом режиме лента пуста весь прогон, а по ней человек и судит,
         идёт работа или встала.
         """
+        language = support.language if support else ReviewLanguage.RU
         messages = [
-            LlmMessage(role=LlmRole.SYSTEM, content=system_prompt()),
+            LlmMessage(role=LlmRole.SYSTEM, content=system_prompt(language=language)),
             LlmMessage(role=LlmRole.USER, content=build_user_message(file, patch_text, context)),
         ]
         response, payload = await self._ask(messages, requirements)
-        await _report(support, file, describe_findings(payload))
+        await _report(support, file, describe_findings(payload, language))
 
         return FileReviewResult(
             drafts=[to_draft(finding, file.path) for finding in payload.findings],
@@ -208,7 +225,7 @@ def _correction(error: LlmOutputError | None) -> LlmMessage:
     )
 
 
-def describe_findings(payload: ReviewPayload) -> str:
+def describe_findings(payload: ReviewPayload, language: ReviewLanguage = ReviewLanguage.RU) -> str:
     """Что ревьюер сказал по файлу — строкой на каждое замечание.
 
     Номера строк здесь не украшение: половина замечаний отбраковывается
@@ -216,11 +233,17 @@ def describe_findings(payload: ReviewPayload) -> str:
     можно только рядом с самим замечанием.
     """
     if not payload.findings:
-        return "Файл прочитан, замечаний нет"
+        return trace(language, "file_clean")
 
-    lines = [f"Файл прочитан, замечаний: {len(payload.findings)}"]
+    lines = [trace(language, "file_findings", count=len(payload.findings))]
     lines.extend(
-        f"· строка {finding.line_start} [{finding.severity}] {finding.title}"
+        trace(
+            language,
+            "finding_line",
+            line=finding.line_start,
+            severity=finding.severity,
+            title=finding.title,
+        )
         for finding in payload.findings
     )
     return "\n".join(lines)

@@ -1,26 +1,23 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { ApiError, api } from "@/api/client";
 import type { CurrentUser, Invitation, IssuedInvitation, Member, TenantRole } from "@/api/types";
 import { formatDateTime } from "@/lib/format";
 
-const ROLE_LABEL: Record<TenantRole, string> = {
-  owner: "владелец",
-  member: "участник",
-};
-
 /** Состав организации: кто в ней есть и кого позвали. */
 export default function OrganizationPage() {
+  const { t } = useTranslation();
   const currentUser = useQuery({ queryKey: ["current-user"], queryFn: api.getCurrentUser });
   const members = useQuery({ queryKey: ["members"], queryFn: api.listMembers });
 
   if (currentUser.isPending || members.isPending) {
-    return <p className="case-label py-16 text-center">поднимаю дело организации…</p>;
+    return <p className="case-label py-16 text-center">{t("organization.loading")}</p>;
   }
 
   if (currentUser.isError || members.isError) {
-    return <p className="py-20 text-center text-paper-dim">Сервис не отвечает.</p>;
+    return <p className="py-20 text-center text-paper-dim">{t("common.serviceDown")}</p>;
   }
 
   const user: CurrentUser = currentUser.data;
@@ -30,11 +27,13 @@ export default function OrganizationPage() {
     <div className="space-y-12">
       <header>
         <h1 className="font-display text-3xl font-semibold text-paper">
-          {user.organization?.name ?? "Организация"}
+          {user.organization?.name ?? t("organization.fallbackName")}
         </h1>
         <p className="case-label mt-2">
           {user.organization?.slug}
-          {user.member ? ` · вы ${ROLE_LABEL[user.member.role]}` : ""}
+          {user.member
+            ? t("organization.youAre", { role: t(`organization.role.${user.member.role}`) })
+            : ""}
         </p>
       </header>
 
@@ -54,6 +53,7 @@ function MemberTable({
   isOwner: boolean;
 }) {
   const queryClient = useQueryClient();
+  const { t } = useTranslation();
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["members"] });
 
   const changeRole = useMutation({
@@ -68,15 +68,17 @@ function MemberTable({
 
   return (
     <section className="space-y-4">
-      <h2 className="font-display text-xl text-paper">Участники</h2>
+      <h2 className="font-display text-xl text-paper">{t("organization.members")}</h2>
       <ul className="divide-y divide-tweed-dim rounded-case border border-tweed-dim bg-ink-raised">
         {members.map((member) => (
           <li key={member.id} className="flex items-center justify-between gap-4 px-5 py-3">
             <span className="min-w-0">
               <span className="block truncate text-paper">{member.email}</span>
               <span className="case-label">
-                {ROLE_LABEL[member.role]}
-                {member.last_seen_at ? ` · был ${formatDateTime(member.last_seen_at)}` : ""}
+                {t(`organization.role.${member.role}`)}
+                {member.last_seen_at
+                  ? t("organization.lastSeen", { date: formatDateTime(member.last_seen_at) })
+                  : ""}
               </span>
             </span>
             {isOwner && member.id !== currentUserId ? (
@@ -91,14 +93,16 @@ function MemberTable({
                   }
                   className="case-label text-paper-dim hover:text-brass"
                 >
-                  {member.role === "owner" ? "сделать участником" : "сделать владельцем"}
+                  {member.role === "owner"
+                    ? t("organization.makeMember")
+                    : t("organization.makeOwner")}
                 </button>
                 <button
                   type="button"
                   onClick={() => remove.mutate(member.id)}
                   className="case-label text-paper-dim hover:text-critical"
                 >
-                  исключить
+                  {t("organization.exclude")}
                 </button>
               </span>
             ) : null}
@@ -112,6 +116,7 @@ function MemberTable({
 
 function Invitations() {
   const queryClient = useQueryClient();
+  const { t } = useTranslation();
   const invitations = useQuery({ queryKey: ["invitations"], queryFn: api.listInvitations });
   const [email, setEmail] = useState("");
   const [issued, setIssued] = useState<IssuedInvitation | null>(null);
@@ -131,11 +136,11 @@ function Invitations() {
 
   return (
     <section className="space-y-4">
-      <h2 className="font-display text-xl text-paper">Приглашения</h2>
+      <h2 className="font-display text-xl text-paper">{t("organization.invitations")}</h2>
 
       <div className="flex flex-wrap items-end gap-3">
         <label className="min-w-64 flex-1 space-y-2">
-          <span className="case-label">почтовый адрес</span>
+          <span className="case-label">{t("organization.email")}</span>
           <input
             value={email}
             onChange={(event) => setEmail(event.target.value)}
@@ -150,7 +155,7 @@ function Invitations() {
           onClick={() => invite.mutate()}
           className="case-label rounded-case border border-tweed-dim px-4 py-2 text-paper hover:text-brass disabled:opacity-40"
         >
-          {invite.isPending ? "выписываю…" : "пригласить"}
+          {invite.isPending ? t("organization.issuing") : t("organization.invite")}
         </button>
       </div>
 
@@ -164,7 +169,7 @@ function Invitations() {
               <span className="min-w-0">
                 <span className="block truncate text-paper">{invitation.email}</span>
                 <span className="case-label">
-                  действует до {formatDateTime(invitation.expires_at)}
+                  {t("organization.validUntil", { date: formatDateTime(invitation.expires_at) })}
                 </span>
               </span>
               <button
@@ -172,13 +177,13 @@ function Invitations() {
                 onClick={() => revoke.mutate(invitation.id)}
                 className="case-label shrink-0 text-paper-dim hover:text-critical"
               >
-                отозвать
+                {t("organization.revoke")}
               </button>
             </li>
           ))}
         </ul>
       ) : (
-        <p className="text-paper-dim">Никого не ждём.</p>
+        <p className="text-paper-dim">{t("organization.nobody")}</p>
       )}
     </section>
   );
@@ -191,19 +196,18 @@ function Invitations() {
  * и об этом надо сказать прямо, пока код на экране.
  */
 function IssuedToken({ invitation }: { invitation: IssuedInvitation }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-2 rounded-case border border-brass/50 bg-ink-sunken p-4">
-      <p className="case-label">код для {invitation.email} — виден только сейчас</p>
+      <p className="case-label">{t("organization.tokenFor", { email: invitation.email })}</p>
       <code className="block break-all font-mono text-[13px] text-brass">{invitation.token}</code>
-      <p className="text-paper-dim">
-        Передайте его вместе со ссылкой на вход. Второй раз показать не получится —
-        в базе хранится только отпечаток.
-      </p>
+      <p className="text-paper-dim">{t("organization.tokenBody")}</p>
     </div>
   );
 }
 
 function Failure({ error }: { error: unknown }) {
+  const { t } = useTranslation();
   if (!error) {
     return null;
   }
@@ -211,8 +215,8 @@ function Failure({ error }: { error: unknown }) {
   const message =
     error instanceof ApiError
       ? error.status === 409
-        ? "Так организация останется без владельца — или приглашение уже выписано."
+        ? t("organization.conflict")
         : error.message
-      : "Сервис не отвечает.";
+      : t("common.serviceDown");
   return <p className="text-critical">{message}</p>;
 }

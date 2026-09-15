@@ -46,6 +46,12 @@ from ducktective.core.diff.value_objects import (
 from ducktective.core.exceptions import (
     VcsOperationError,
 )
+from ducktective.core.indexing.entities import (
+    IndexSnapshot,
+)
+from ducktective.core.indexing.value_objects import (
+    SnapshotStatus,
+)
 from ducktective.core.retrieval.context import (
     ContextOrigin,
     ContextPiece,
@@ -571,6 +577,29 @@ async def test_queued_run_can_be_cancelled() -> None:
 
     assert cancelled is True
     assert run.status is ReviewStatus.CANCELLED
+
+
+async def test_cancelling_a_run_cancels_the_index_build_it_queued() -> None:
+    """Сборка на ревизии дела ставится запуском; без дела она только занимает воркер."""
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, run = prepare(unit_of_work)
+    queued = IndexSnapshot.create(repository_id=run.repository_id, commit_sha=run.head_sha)
+    unit_of_work.index_snapshots.add(queued)
+
+    await CancelReviewRun(unit_of_work, FakeEventPublisher()).execute(tenant_id, run.id)
+
+    assert queued.status is SnapshotStatus.CANCELLED
+
+
+async def test_cancelling_a_run_leaves_a_build_of_another_revision_alone() -> None:
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, run = prepare(unit_of_work)
+    other = IndexSnapshot.create(repository_id=run.repository_id, commit_sha=CommitSha("c" * 40))
+    unit_of_work.index_snapshots.add(other)
+
+    await CancelReviewRun(unit_of_work, FakeEventPublisher()).execute(tenant_id, run.id)
+
+    assert other.status is SnapshotStatus.PENDING
 
 
 async def test_cancelling_finished_run_changes_nothing() -> None:

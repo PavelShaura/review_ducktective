@@ -32,6 +32,14 @@
   --color-diff-add: #46c85c;
   --color-diff-del: #f8564b;
 
+  /* Цвета значков разделов: каждому — свой, чтобы ряд читался по цвету. */
+  --color-icon-cases: #f2a03f;
+  --color-icon-chat: #5fc177;
+  --color-icon-indexes: #8fb8d4;
+  --color-icon-models: #c9a0e6;
+  --color-icon-marks: #f2b44e;
+  --color-icon-logs: #d9c9a8;
+
   --font-display: "IBM Plex Serif", Georgia, serif;
   --font-body: "IBM Plex Sans Variable", system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
@@ -928,99 +936,96 @@
     display: none;
   }
 
+  /* Разделы лежат на светлой подложке — на лотке, как папки на столе:
+     на тёмной шапке кнопки сливались с фоном, и ряд читался как текст,
+     а не как переключатель. Активный раздел залит, а не подчёркнут —
+     на лотке заливка виднее линии. */
+  .menu-tray {
+    padding: 0.2rem;
+    border-radius: 4px;
+    border: 1px solid var(--color-tweed-dim);
+    background: color-mix(in srgb, var(--color-paper) 7%, transparent);
+  }
+
+  /* До широкого экрана пункты стоят плотнее: с шестью разделами и двумя
+     языками подписи в шапке иначе не умещаются, а прятать их — хуже. */
   .menu-link {
-    position: relative;
     display: inline-flex;
     align-items: center;
     gap: 0.45rem;
-    padding: 0.5rem 0.75rem 0.55rem;
+    padding: 0.4rem 0.55rem;
+    border-radius: 3px;
     font-family: var(--font-mono);
     font-size: 13px;
     letter-spacing: 0.06em;
     color: var(--color-paper-dim);
     white-space: nowrap;
-    transition: color 160ms ease;
+    transition:
+      color 160ms ease,
+      background-color 160ms ease;
   }
 
-  .menu-link::after {
-    content: "";
-    position: absolute;
-    left: 0.6rem;
-    right: 0.6rem;
-    bottom: 0.15rem;
-    height: 2px;
-    background: var(--color-brass);
-    border-radius: 1px;
-    transform: scaleX(0);
-    transform-origin: left center;
-    transition: transform 200ms ease;
+  @media (min-width: 96rem) {
+    .menu-link {
+      padding-inline: 0.75rem;
+    }
   }
 
   .menu-link:hover {
     color: var(--color-paper);
-  }
-
-  .menu-link:hover::after {
-    transform: scaleX(1);
+    background: color-mix(in srgb, var(--color-paper) 8%, transparent);
   }
 
   .menu-link[aria-current="page"] {
-    color: var(--color-brass);
+    color: var(--color-paper);
+    background: color-mix(in srgb, var(--color-paper) 14%, transparent);
+    box-shadow: inset 0 -2px 0 var(--color-brass);
   }
 
-  .menu-link[aria-current="page"]::after {
-    transform: scaleX(1);
-    box-shadow: 0 0 10px -2px var(--color-brass);
-  }
-
-  /* Знак раздела — моноширинный глиф в рамке, как пометка на папке.
-     Он же держит ширину: без него пункты прыгали бы при смене шрифта. */
-  .menu-glyph {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 16px;
-    height: 16px;
-    border: 1px solid currentColor;
-    border-radius: 2px;
-    font-size: 9px;
-    line-height: 1;
-    opacity: 0.7;
+  /* Значок раздела держит свой цвет всегда, но в покое приглушён:
+     полная яркость — у наведённого и текущего. */
+  .section-icon {
+    flex-shrink: 0;
+    opacity: 0.75;
     transition:
       opacity 160ms ease,
       transform 160ms ease;
   }
 
-  .menu-link:hover .menu-glyph,
-  .menu-link[aria-current="page"] .menu-glyph {
+  .menu-link:hover .section-icon,
+  .menu-link[aria-current="page"] .section-icon {
     opacity: 1;
     transform: translateY(-1px);
   }
 
-  /* Разговор — единственное место, где что-то происходит прямо сейчас,
-     поэтому у него живой огонёк вместо глифа. */
-  .menu-live {
-    width: 7px;
-    height: 7px;
-    margin: 0 4px;
-    border-radius: 50%;
-    background: currentColor;
-    animation: nav-live-pulse 2.4s ease-out infinite;
+  .section-icon-cases {
+    color: var(--color-icon-cases);
   }
 
-  @keyframes nav-live-pulse {
-    0% {
-      box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-brass) 65%, transparent);
-      opacity: 1;
-    }
-    70% {
-      box-shadow: 0 0 0 7px transparent;
-      opacity: 0.55;
-    }
-    100% {
-      box-shadow: 0 0 0 0 transparent;
-      opacity: 1;
-    }
+  .section-icon-chat {
+    color: var(--color-icon-chat);
+  }
+
+  .section-icon-indexes {
+    color: var(--color-icon-indexes);
+  }
+
+  .section-icon-models {
+    color: var(--color-icon-models);
+  }
+
+  .section-icon-marks {
+    color: var(--color-icon-marks);
+  }
+
+  .section-icon-logs {
+    color: var(--color-icon-logs);
+  }
+
+  /* Лента расследования — пять строк, дальше прокрутка: она вспомогательная
+     и не должна отодвигать дифф. Высота считается от строки шага. */
+  .investigation-steps {
+    max-height: calc(5 * 1.45rem + 1.5rem);
   }
 
   /* Единственное действие в шапке, которое что-то заводит: залито латунью
@@ -1118,12 +1123,8 @@
       animation: none;
     }
 
-    .menu-live {
-      animation: none;
-    }
-
-    .menu-link::after,
-    .menu-glyph,
+    .menu-link,
+    .section-icon,
     .menu-action,
     .menu-signout-glyph,
     .brand-mascot {
@@ -1144,6 +1145,38 @@
     .status-live .status-dot {
       animation: none;
     }
+  }
+
+  /* Язык — две буквы в одной рамке, как штамп «RU / EN» на папке.
+     Выбранная половина залита латунью: переключатель должен читаться
+     как состояние, а не как две одинаковые кнопки. */
+  .language-switch {
+    display: inline-flex;
+    border-radius: var(--radius-case);
+    border: 1px solid var(--color-tweed-dim);
+    overflow: hidden;
+  }
+
+  .language-option {
+    padding: 0.45rem 0.55rem;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    color: var(--color-paper-dim);
+    cursor: pointer;
+    transition:
+      background-color 160ms ease,
+      color 160ms ease;
+  }
+
+  .language-option:hover {
+    color: var(--color-paper);
+  }
+
+  .language-option[aria-pressed="true"] {
+    background: var(--color-brass);
+    color: var(--color-ink);
+    font-weight: 600;
   }
 
   /* Выход — действие с последствием, поэтому обрамление есть всегда,
@@ -1197,11 +1230,39 @@
     line-height: 1.1;
   }
 
-  @media (prefers-reduced-motion: reduce) {
-    .menu-live {
-      animation: none;
-    }
+  /* Организация на месте слогана — подпись на папке: чьё это дело.
+     Ведёт на состав; имя обрезается по ширине названия приложения,
+     чтобы бренд не расползался под длинной организацией. */
+  .brand-org {
+    display: inline-flex;
+    align-items: baseline;
+    max-width: 100%;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.1;
+    color: var(--color-paper-dim);
+    transition: color 160ms ease;
+  }
 
+  .brand-org:hover,
+  .brand-org[aria-current="page"] {
+    color: var(--color-brass);
+  }
+
+  .brand-org-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .brand-org-meta {
+    flex-shrink: 0;
+    white-space: nowrap;
+    text-transform: lowercase;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
     .menu-action:hover {
       transform: none;
     }

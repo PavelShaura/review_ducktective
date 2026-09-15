@@ -1,39 +1,38 @@
 import { useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
 import { api } from "@/api/client";
 import { DeleteCaseButton } from "@/components/DeleteCaseButton";
 import { DeleteRepositoryButton } from "@/components/DeleteRepositoryButton";
 import type { Repository, ReviewRunSummary, Severity } from "@/api/types";
-import { SEVERITY_ORDER, SEVERITY_TEXT, SEVERITY_LABEL } from "@/components/SeverityMark";
+import { SEVERITY_ORDER, SEVERITY_TEXT } from "@/components/SeverityMark";
 import { StatusMark } from "@/components/StatusMark";
 import { shortSha } from "@/lib/format";
 
 export default function CaseListPage() {
+  const { t } = useTranslation();
   const repositories = useQuery({
     queryKey: ["repositories"],
     queryFn: api.listRepositories,
   });
 
   if (repositories.isPending) {
-    return <p className="case-label py-16 text-center">просматриваю архив…</p>;
+    return <p className="case-label py-16 text-center">{t("caseList.loading")}</p>;
   }
 
   if (repositories.isError) {
     return (
-      <Notice
-        title="Архив недоступен"
-        body="Сервис не отвечает. Запустите API командой ducktective serve и обновите страницу."
-      />
+      <Notice title={t("caseList.unavailableTitle")} body={t("caseList.unavailableBody")} />
     );
   }
 
   if (repositories.data.length === 0) {
     return (
       <Notice
-        title="В архиве пусто"
-        body="Ни одного репозитория пока не заведено. Заведите дело — укажите путь к репозиторию и ревизии."
-        action={{ to: "/cases/new", label: "завести дело" }}
+        title={t("caseList.emptyTitle")}
+        body={t("caseList.emptyBody")}
+        action={{ to: "/cases/new", label: t("caseList.newCase") }}
       />
     );
   }
@@ -48,6 +47,7 @@ export default function CaseListPage() {
 }
 
 function RepositorySection({ repository }: { repository: Repository }) {
+  const { t } = useTranslation();
   const runs = useQuery({
     queryKey: ["runs", repository.id],
     queryFn: () => api.listRuns(repository.id),
@@ -60,7 +60,9 @@ function RepositorySection({ repository }: { repository: Repository }) {
         <span className="case-label truncate">
           {repository.local_path}
           <span className="mx-2 opacity-40">·</span>
-          {repository.egress_policy === "local_only" ? "только локально" : "облако разрешено"}
+          {repository.egress_policy === "local_only"
+            ? t("caseList.localOnly")
+            : t("caseList.cloudAllowed")}
         </span>
 
         <DeleteRepositoryButton repositoryId={repository.id} name={repository.name} />
@@ -68,8 +70,7 @@ function RepositorySection({ repository }: { repository: Repository }) {
 
       {runs.isError ? (
         <p className="border border-critical/50 bg-ink-raised px-5 py-6 text-[15px] text-critical">
-          Дела этого репозитория не читаются: сервис ответил ошибкой. Загляните в журнал
-          API — заведённые дела никуда не делись.
+          {t("caseList.runsError")}
         </p>
       ) : runs.data && runs.data.length > 0 ? (
         <ol className="space-y-3">
@@ -79,7 +80,7 @@ function RepositorySection({ repository }: { repository: Repository }) {
         </ol>
       ) : (
         <p className="border border-tweed-dim bg-ink-raised px-5 py-6 text-[15px] text-paper-dim">
-          По этому репозиторию дел ещё нет.
+          {t("caseList.noRuns")}
         </p>
       )}
     </section>
@@ -87,6 +88,7 @@ function RepositorySection({ repository }: { repository: Repository }) {
 }
 
 function CaseRow({ run }: { run: ReviewRunSummary }) {
+  const { t } = useTranslation();
   const counts = run.severity_counts;
 
   return (
@@ -111,13 +113,13 @@ function CaseRow({ run }: { run: ReviewRunSummary }) {
 
           <span className="ml-auto flex flex-wrap items-center gap-3">
             {run.findings_total === 0 ? (
-              <span className="case-label">чисто</span>
+              <span className="case-label">{t("caseList.clean")}</span>
             ) : (
               SEVERITY_ORDER.filter((severity) => counts[severity]).map((severity) => (
                 <SeverityCount key={severity} severity={severity} count={counts[severity] ?? 0} />
               ))
             )}
-            <span className="case-label">файлов {run.changed_files}</span>
+            <span className="case-label">{t("caseList.files", { count: run.changed_files })}</span>
           </span>
         </span>
       </Link>
@@ -128,9 +130,10 @@ function CaseRow({ run }: { run: ReviewRunSummary }) {
 }
 
 function SeverityCount({ severity, count }: { severity: Severity; count: number }) {
+  const { t } = useTranslation();
   return (
     <span className={`case-label ${SEVERITY_TEXT[severity]}`}>
-      {SEVERITY_LABEL[severity]} <span className="tabular-nums">{count}</span>
+      {t(`severity.${severity}`)} <span className="tabular-nums">{count}</span>
     </span>
   );
 }

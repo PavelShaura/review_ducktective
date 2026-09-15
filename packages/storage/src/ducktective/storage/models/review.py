@@ -45,6 +45,7 @@ from ducktective.core.review.value_objects import (
     FindingCategory,
     FindingProducer,
     FindingStatus,
+    ReviewLanguage,
     ReviewSource,
     ReviewStatus,
     Severity,
@@ -93,6 +94,11 @@ class ReviewRunModel(Base):
         server_default=text("0"),
     )
     preferred_model: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    language: Mapped[ReviewLanguage] = mapped_column(
+        Enum(ReviewLanguage, name="review_language", values_callable=enum_values),
+        default=ReviewLanguage.RU,
+        server_default=text("'ru'"),
+    )
     created_by: Mapped[UUID | None] = mapped_column(
         ForeignKey("user_account.id", ondelete="SET NULL"),
         nullable=True,

@@ -34,6 +34,7 @@ from ducktective.core.review.pipeline import (
 )
 from ducktective.core.review.value_objects import (
     FeedbackVerdict,
+    ReviewLanguage,
     Severity,
 )
 from ducktective.core.types import (
@@ -141,6 +142,8 @@ class ReviewSupport:
 
     repository_id: RepositoryId | None = None
     """Чей это код. Нужен истории: отметки принадлежат репозиторию, не прогону."""
+    language: ReviewLanguage = ReviewLanguage.RU
+    """На каком языке писать находки — язык интерфейса на момент запуска."""
     """Остальные файлы прогона.
 
     Приходит сюда, а не в состояние графа: дифф один на прогон, а задач

@@ -1,5 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
 import { ApiError, api } from "@/api/client";
 
@@ -12,16 +14,14 @@ import { ApiError, api } from "@/api/client";
  */
 export default function OnboardingPage() {
   const queryClient = useQueryClient();
+  const { t } = useTranslation();
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["current-user"] });
 
   return (
     <div className="mx-auto max-w-2xl space-y-12 py-10">
       <header>
-        <h1 className="font-display text-3xl font-semibold text-paper">Заведите папку дела</h1>
-        <p className="mt-3 text-paper-dim">
-          Репозитории, индексы и находки принадлежат организации. Создайте свою
-          или примите приглашение в чужую.
-        </p>
+        <h1 className="font-display text-3xl font-semibold text-paper">{t("onboarding.title")}</h1>
+        <p className="mt-3 text-paper-dim">{t("onboarding.intro")}</p>
       </header>
 
       <CreateOrganization onDone={refresh} />
@@ -31,6 +31,7 @@ export default function OnboardingPage() {
 }
 
 function CreateOrganization({ onDone }: { onDone: () => void }) {
+  const { t } = useTranslation();
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
 
@@ -41,11 +42,11 @@ function CreateOrganization({ onDone }: { onDone: () => void }) {
 
   return (
     <section className="space-y-4 rounded-case border border-tweed-dim bg-ink-raised p-6">
-      <h2 className="font-display text-xl text-paper">Своя организация</h2>
-      <Field label="название">
-        <TextInput value={name} onChange={setName} placeholder="Отдел разработки" />
+      <h2 className="font-display text-xl text-paper">{t("onboarding.ownTitle")}</h2>
+      <Field label={t("onboarding.name")}>
+        <TextInput value={name} onChange={setName} placeholder={t("onboarding.namePlaceholder")} />
       </Field>
-      <Field label="короткое имя">
+      <Field label={t("onboarding.slug")}>
         <TextInput value={slug} onChange={setSlug} placeholder="dev-team" />
       </Field>
       <button
@@ -54,7 +55,7 @@ function CreateOrganization({ onDone }: { onDone: () => void }) {
         onClick={() => create.mutate()}
         className="case-label rounded-case border border-tweed-dim px-4 py-2 text-paper hover:text-brass disabled:opacity-40"
       >
-        {create.isPending ? "завожу…" : "создать"}
+        {create.isPending ? t("onboarding.creating") : t("onboarding.create")}
       </button>
       <Failure error={create.error} />
     </section>
@@ -62,6 +63,7 @@ function CreateOrganization({ onDone }: { onDone: () => void }) {
 }
 
 function AcceptInvitation({ onDone }: { onDone: () => void }) {
+  const { t } = useTranslation();
   const [token, setToken] = useState("");
 
   const accept = useMutation({
@@ -71,12 +73,14 @@ function AcceptInvitation({ onDone }: { onDone: () => void }) {
 
   return (
     <section className="space-y-4 rounded-case border border-tweed-dim bg-ink-raised p-6">
-      <h2 className="font-display text-xl text-paper">Приглашение</h2>
-      <p className="text-paper-dim">
-        Ссылка выписывается на ваш почтовый адрес и действует неделю.
-      </p>
-      <Field label="код приглашения">
-        <TextInput value={token} onChange={setToken} placeholder="вставьте код из ссылки" />
+      <h2 className="font-display text-xl text-paper">{t("onboarding.invitationTitle")}</h2>
+      <p className="text-paper-dim">{t("onboarding.invitationBody")}</p>
+      <Field label={t("onboarding.code")}>
+        <TextInput
+          value={token}
+          onChange={setToken}
+          placeholder={t("onboarding.codePlaceholder")}
+        />
       </Field>
       <button
         type="button"
@@ -84,7 +88,7 @@ function AcceptInvitation({ onDone }: { onDone: () => void }) {
         onClick={() => accept.mutate()}
         className="case-label rounded-case border border-tweed-dim px-4 py-2 text-paper hover:text-brass disabled:opacity-40"
       >
-        {accept.isPending ? "проверяю…" : "принять"}
+        {accept.isPending ? t("onboarding.checking") : t("onboarding.accept")}
       </button>
       <Failure error={accept.error} />
     </section>
@@ -121,22 +125,23 @@ function TextInput({
 }
 
 function Failure({ error }: { error: unknown }) {
+  const { t } = useTranslation();
   if (!error) {
     return null;
   }
 
-  return <p className="text-critical">{describe(error)}</p>;
+  return <p className="text-critical">{describe(t, error)}</p>;
 }
 
-function describe(error: unknown): string {
+function describe(t: TFunction, error: unknown): string {
   if (!(error instanceof ApiError)) {
-    return "Сервис не отвечает.";
+    return t("common.serviceDown");
   }
   if (error.status === 404) {
-    return "Приглашение не найдено или больше не действует.";
+    return t("onboarding.notFound");
   }
   if (error.status === 403) {
-    return "Приглашение выписано на другой почтовый адрес.";
+    return t("onboarding.wrongEmail");
   }
   return error.message;
 }

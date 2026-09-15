@@ -149,6 +149,22 @@ async def test_task_returns_summary(monkeypatch: Any) -> None:
     assert result["findings"] == 0
 
 
+async def test_deleted_run_is_dropped_with_one_log_line(monkeypatch: Any) -> None:
+    """Дело удалили, пока задача ждала очереди: воркер не падает и не повторяет.
+
+    Раньше чтение дела шло до обработки ошибок, и каждая отложенная
+    попытка заканчивалась traceback на весь экран.
+    """
+    unit_of_work = FakeUnitOfWork()
+    tenant_id, run = prepare(unit_of_work)
+    await unit_of_work.review_runs.remove(run)
+    context = build_context(unit_of_work, FakeCodeReviewer(), monkeypatch)
+
+    result = await run_review_task(context, str(run.id), str(tenant_id))
+
+    assert result == {"run_id": str(run.id), "status": "gone"}
+
+
 async def test_run_held_by_the_previous_attempt_does_not_start_twice(monkeypatch: Any) -> None:
     """Занятое дело не расследуется вторым заданием и не остаётся «в очереди».
 

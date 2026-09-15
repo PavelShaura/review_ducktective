@@ -2,6 +2,9 @@ from uuid import (
     UUID,
 )
 
+from arq import (
+    ArqRedis,
+)
 from fastapi import (
     APIRouter,
     HTTPException,
@@ -29,6 +32,7 @@ from ducktective.api.schemas.indexing import (
     CancelIndexingResponse,
     DeleteIndexResponse,
     EmbedderChoiceResponse,
+    IndexQueueResponse,
     IndexStateResponse,
     StartIndexingRequest,
     StartIndexingResponse,
@@ -78,11 +82,21 @@ from ducktective.core.exceptions import (
     InvariantViolationError,
     VcsOperationError,
 )
+from ducktective.core.indexing.value_objects import (
+    SnapshotStatus,
+)
+from ducktective.core.ports import (
+    UnitOfWork,
+)
 from ducktective.core.types import (
+    IndexSnapshotId,
     RepositoryId,
 )
 from ducktective.llm.factory import (
     build_model_router,
+)
+from ducktective.storage.index_queue import (
+    ArqIndexQueue,
 )
 
 
@@ -192,6 +206,7 @@ async def get_index_state(
     member: MemberDependency,
     unit_of_work: TenantUnitOfWorkDependency,
     settings: SettingsDependency,
+    task_queue: TaskQueueDependency,
 ) -> IndexStateResponse:
     use_case = GetIndexState(unit_of_work, embedders=embedder_catalogue(settings))
 
@@ -202,7 +217,48 @@ async def get_index_state(
     except PermissionDeniedError as error:
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(error)) from error
 
-    return IndexStateResponse.from_view(view)
+    queue = None
+    if view.status is SnapshotStatus.PENDING and view.snapshot_id is not None:
+        queue = await _queue_position(view.snapshot_id, unit_of_work, task_queue)
+
+    return IndexStateResponse.from_view(view, queue=queue)
+
+
+async def _queue_position(
+    snapshot_id: IndexSnapshotId,
+    unit_of_work: UnitOfWork,
+    task_queue: ArqRedis,
+) -> IndexQueueResponse | None:
+    """За кем стоит эта сборка.
+
+    Очередь одна на установку, а видит человек только свою организацию:
+    чужой репозиторий не называется — остаётся «занят другим», — и это
+    честнее, чем молчать о том, что воркер вообще работает.
+    """
+    builds = await ArqIndexQueue(task_queue).builds()
+    waiting = [build for build in builds if not build.is_running]
+    position = next(
+        (index for index, build in enumerate(waiting, 1) if build.snapshot_id == snapshot_id),
+        None,
+    )
+    if position is None:
+        return None
+
+    running = next((build for build in builds if build.is_running), None)
+    busy_with = None
+    busy_since = None
+    if running is not None:
+        async with unit_of_work:
+            try:
+                repository = await unit_of_work.code_repositories.get(running.repository_id)
+            except EntityNotFoundError:
+                repository = None
+            if repository is not None:
+                busy_with = repository.name
+                current = await unit_of_work.index_snapshots.find_latest(running.repository_id)
+                busy_since = current.started_at if current is not None else None
+
+    return IndexQueueResponse(position=position, busy_with=busy_with, busy_since=busy_since)
 
 
 @router.get("/{repository_id}/revision", response_model=ResolvedRevisionResponse)

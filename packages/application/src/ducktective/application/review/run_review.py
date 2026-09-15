@@ -149,6 +149,7 @@ class RunReview(TransactionalUseCase):
                     max_output_tokens=self._max_output_tokens,
                     session_key=str(run.id),
                 ),
+                language=run.language,
                 head_sha=run.head_sha,
                 repository_path=repository.local_path,
                 index_revision=snapshot.commit_sha if snapshot is not None else None,

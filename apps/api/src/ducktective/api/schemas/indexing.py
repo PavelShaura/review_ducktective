@@ -50,6 +50,21 @@ class DeleteIndexResponse(BaseModel):
     removed_snapshots: int
 
 
+class IndexQueueResponse(BaseModel):
+    """За кем стоит сборка, пока снапшот ждёт воркера.
+
+    Воркер берёт по одной сборке, и «ждёт» чаще всего означает «занят
+    соседним репозиторием»; без этой сводки ожидание читалось как
+    незапущенный воркер.
+    """
+
+    position: int
+    """Место среди ожидающих: 1 — следующая после идущей."""
+    busy_with: str | None = None
+    """Репозиторий, который собирается сейчас, если он этой организации."""
+    busy_since: datetime | None = None
+
+
 class IndexStateResponse(BaseModel):
     """Состояние индекса репозитория.
 
@@ -74,10 +89,18 @@ class IndexStateResponse(BaseModel):
     vectors: VectorCoverageResponse = VectorCoverageResponse()
     totals: IndexTotalsResponse = IndexTotalsResponse()
     stats: IndexStatsResponse | None = None
+    queue: IndexQueueResponse | None = None
+    """Только пока снапшот в очереди; пустая очередь при ожидании — воркер не запущен."""
 
     @classmethod
-    def from_view(cls, view: IndexStateView) -> "IndexStateResponse":
+    def from_view(
+        cls,
+        view: IndexStateView,
+        *,
+        queue: IndexQueueResponse | None = None,
+    ) -> "IndexStateResponse":
         return cls(
+            queue=queue,
             snapshot_id=view.snapshot_id,
             status=view.status,
             stage=view.stage,

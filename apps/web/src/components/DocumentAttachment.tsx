@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { api } from "@/api/client";
 import type { AttachedDocument } from "@/api/types";
@@ -27,6 +28,7 @@ export function DocumentAttachment({ conversationId, document }: Props) {
   const queryClient = useQueryClient();
   const input = useRef<HTMLInputElement | null>(null);
   const [problem, setProblem] = useState("");
+  const { t } = useTranslation();
 
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] });
@@ -48,7 +50,7 @@ export function DocumentAttachment({ conversationId, document }: Props) {
   const read = async (file: File) => {
     setProblem("");
     if (file.size > MAX_BYTES) {
-      setProblem("Файл больше 400 КБ — похоже, приложен не тот.");
+      setProblem(t("document.tooLarge"));
       return;
     }
     attach.mutate({ name: file.name, text: await file.text() });
@@ -58,9 +60,11 @@ export function DocumentAttachment({ conversationId, document }: Props) {
     return (
       <div className="flex flex-wrap items-center gap-2">
         <span className="attachment-chip">
-          <span className="text-brass">документ</span>
+          <span className="text-brass">{t("document.label")}</span>
           <span className="truncate">{document.name}</span>
-          <span className="case-label">{Math.round(document.size / 1024)} КБ</span>
+          <span className="case-label">
+            {t("document.size", { size: Math.round(document.size / 1024) })}
+          </span>
         </span>
         <button
           type="button"
@@ -68,9 +72,9 @@ export function DocumentAttachment({ conversationId, document }: Props) {
           disabled={detach.isPending}
           className="action-quiet"
         >
-          отцепить
+          {t("document.detach")}
         </button>
-        <span className="case-label">разговор идёт только через локальную модель</span>
+        <span className="case-label">{t("document.localOnly")}</span>
       </div>
     );
   }
@@ -96,9 +100,9 @@ export function DocumentAttachment({ conversationId, document }: Props) {
         disabled={attach.isPending}
         className="action-quiet"
       >
-        {attach.isPending ? "прикладываю…" : "+ приложить документ"}
+        {attach.isPending ? t("document.attaching") : t("document.attach")}
       </button>
-      <span className="case-label"> - md, txt, html</span>
+      <span className="case-label">{t("document.formats")}</span>
       {problem ? <span className="text-[13px] text-critical">{problem}</span> : null}
     </div>
   );

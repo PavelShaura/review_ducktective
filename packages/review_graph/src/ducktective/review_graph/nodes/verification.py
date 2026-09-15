@@ -7,6 +7,12 @@ from langgraph.runtime import (
     Runtime,
 )
 
+from ducktective.core.review.trace import (
+    trace,
+)
+from ducktective.core.review.value_objects import (
+    ReviewLanguage,
+)
 from ducktective.core.review.verification import (
     build_verified_finding,
     collect_evidence,
@@ -92,6 +98,7 @@ async def verify(
     await report_stage(
         runtime,
         _describe_verification(
+            runtime.context.language,
             confirmed=len(findings),
             outside_diff=outside_diff,
             without_evidence=without_evidence,
@@ -109,6 +116,7 @@ async def verify(
 
 
 def _describe_verification(
+    language: ReviewLanguage,
     *,
     confirmed: int,
     outside_diff: int,
@@ -122,15 +130,15 @@ def _describe_verification(
     промптом, находка вне диффа — привязкой строк, дубли не лечатся вовсе.
     """
     reasons = [
-        (outside_diff, "вне диффа"),
-        (without_evidence, "без цитаты"),
-        (unproven_claim, "без проверки чужого кода"),
-        (duplicates, "дубли"),
+        (outside_diff, "reason_outside_diff"),
+        (without_evidence, "reason_no_evidence"),
+        (unproven_claim, "reason_unproven"),
+        (duplicates, "reason_duplicates"),
     ]
-    named = ", ".join(f"{name} {count}" for count, name in reasons if count)
+    named = ", ".join(f"{trace(language, key)} {count}" for count, key in reasons if count)
     if not named:
-        return f"Проверяю доказательства: подтверждено {confirmed}, отброшенных нет"
-    return f"Проверяю доказательства: подтверждено {confirmed}, отброшено — {named}"
+        return trace(language, "verify_clean", confirmed=confirmed)
+    return trace(language, "verify_dropped", confirmed=confirmed, named=named)
 
 
 def _covers_changed_lines(item: MergedDraft) -> bool:
