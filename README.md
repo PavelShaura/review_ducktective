@@ -64,9 +64,29 @@ per-run choice, not a global switch.
 
 ## The LLM engineering inside
 
-The project is an end-to-end application of the techniques that make an LLM
-system dependable, not a wrapper around one prompt. Each row names the technique,
-where it works in this codebase, and the reason it is there.
+At a glance — the techniques, one line each. Every one of them is running code in
+this repository, not a plan.
+
+- **Agents** — agentic loop with tool calling (13 tools over the code graph) ·
+  LangGraph state graph with per-file fan-out and Postgres checkpoints ·
+  structured output against a JSON schema · context-window budgeting ·
+  self-correction nudges · MCP server for external agents
+- **RAG over code** — tree-sitter AST parsing · symbol and call graph ·
+  nomic embeddings served locally · pgvector · hybrid search with reciprocal rank
+  fusion · query expansion · diff-first retrieval · incremental indexing by content hash
+- **Grounding** — evidence gate on every finding · deduplication by defect ·
+  human verdicts fed back to the model · evaluation harness (recall, false alarms,
+  run-to-run spread)
+- **Model operations** — LiteLLM gateway · routing by requirements and trust level ·
+  fallbacks, cooldowns, exponential back-off · Redis response cache with prompt
+  versions · encrypted provider connections · local inference on Ollama / LM Studio
+  with a quantised embedding model
+- **Platform** — token streaming over WebSocket via Redis pub/sub · arq workers with
+  deferral and time limits · Keycloak OpenID Connect and PostgreSQL row-level
+  security · layered DDD with an explicit Unit of Work, `import-linter`, 660+ tests
+
+<details>
+<summary><b>Where each technique lives in the code, and why it is there</b></summary>
 
 ### Agents and tool use
 
@@ -121,6 +141,8 @@ where it works in this codebase, and the reason it is there.
 | **Background workers** on arq with separate queues for indexing and review, deferral while an index builds, time limits that mark the run failed instead of leaving it running | `apps/indexer`, `apps/reviewer` | indexing and review have different load profiles; a stuck run must say why |
 | **Multi-tenancy** — Keycloak OpenID Connect, organizations and invitations, PostgreSQL row-level security on every organization-scoped table | `packages/auth`, migration `0022` | a forgotten filter in code must not leak another team's findings |
 | **Layered DDD** with aggregates, ports, an explicit Unit of Work and eleven `import-linter` contracts; strict `mypy`; 660+ tests with testcontainers | `packages/core` → `application` → `apps` | the domain rules — evidence, egress, verdicts — stay readable and testable apart from any framework |
+
+</details>
 
 ## Why it is different
 
