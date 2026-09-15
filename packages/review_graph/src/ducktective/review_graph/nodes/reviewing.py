@@ -27,6 +27,12 @@ from ducktective.core.review.reviewers import (
     ReviewMode,
     review_mode_of,
 )
+from ducktective.core.review.trace import (
+    trace,
+)
+from ducktective.core.review.value_objects import (
+    ReviewLanguage,
+)
 from ducktective.review_graph.nodes.cancellation import (
     is_cancelled,
 )
@@ -72,7 +78,7 @@ def review_node(
 
         await report_stage(
             runtime,
-            f"{_reading(state.reviewer_name)}: {state.file.path}",
+            f"{_reading(state.reviewer_name, runtime.context.language)}: {state.file.path}",
             file_path=state.file.path,
         )
 
@@ -89,6 +95,7 @@ def review_node(
                     diff=runtime.context.diff,
                     history=runtime.context.history,
                     repository_id=runtime.context.repository_id,
+                    language=runtime.context.language,
                 ),
             )
         except DomainError as error:
@@ -118,15 +125,15 @@ def review_node(
     return review
 
 
-def _reading(reviewer_name: str) -> str:
+def _reading(reviewer_name: str, language: ReviewLanguage) -> str:
     """Как назвать чтение файла в ленте.
 
     Режим важен человеку: расследование с инструментами идёт минутами
     и показывает шаги, одноразовый проход молчит до самого ответа.
     """
     if review_mode_of(reviewer_name) is ReviewMode.AGENTIC:
-        return "Расследую"
-    return "Читаю одним проходом"
+        return trace(language, "reading_agentic")
+    return trace(language, "reading_plain")
 
 
 def _common(task: FileReviewTask) -> dict[str, Any]:

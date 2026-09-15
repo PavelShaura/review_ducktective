@@ -65,6 +65,7 @@ def to_domain(model: ReviewRunModel) -> ReviewRun:
         cost_usd=model.cost_usd,
         files_with_context=model.files_with_context,
         preferred_model=model.preferred_model,
+        language=model.language,
         files=[_file_to_domain(file_model) for file_model in model.files],
         findings=[_finding_to_domain(finding_model) for finding_model in model.findings],
         degradations=_degradations_to_domain(model.config),
@@ -96,6 +97,7 @@ def to_model(run: ReviewRun) -> ReviewRunModel:
         cost_usd=run.cost_usd,
         files_with_context=run.files_with_context,
         preferred_model=run.preferred_model,
+        language=run.language,
         files=[_file_to_model(file) for file in run.files],
         findings=[_finding_to_model(finding) for finding in run.findings],
     )

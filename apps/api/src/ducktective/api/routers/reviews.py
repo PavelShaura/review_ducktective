@@ -143,6 +143,7 @@ async def start_review(
         source=payload.source,
         external_pull_request_id=payload.external_pull_request_id,
         preferred_model=payload.model,
+        language=payload.language,
     )
 
     try:

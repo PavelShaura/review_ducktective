@@ -24,6 +24,7 @@ from ducktective.core.review.entities import (
     ReviewRun,
 )
 from ducktective.core.review.value_objects import (
+    ReviewLanguage,
     ReviewSource,
 )
 from ducktective.core.types import (
@@ -46,6 +47,7 @@ class PrepareReviewRunCommand:
     external_pull_request_id: str | None = None
     created_by: UserId | None = None
     preferred_model: str | None = None
+    language: ReviewLanguage = ReviewLanguage.RU
 
 
 class EmptyDiffError(ApplicationError):
@@ -123,6 +125,7 @@ class PrepareReviewRun(TransactionalUseCase):
                 diff=diff,
                 head_subject=head_subject,
                 preferred_model=command.preferred_model,
+                language=command.language,
                 created_by=command.created_by,
                 external_pull_request_id=command.external_pull_request_id,
             )

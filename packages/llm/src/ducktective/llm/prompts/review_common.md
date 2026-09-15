@@ -36,7 +36,7 @@ Return JSON only, no prose, matching this shape:
       "severity": "major",
       "category": "performance",
       "title": "short title",
-      "body": "what breaks and why, in Russian",
+      "body": "what breaks and why, in {{language}}",
       "code_fragment": "the exact line from the patch",
       "anchor_symbol": "ClassName.method_name",
       "suggested_patch": "optional replacement code",
@@ -48,7 +48,7 @@ Return JSON only, no prose, matching this shape:
 ```
 
 Line numbers refer to the new version of the file.
-The `title` and `body` fields must be written in Russian; everything else stays as is.
+The `title` and `body` fields must be written in {{language}}; everything else stays as is.
 
 Write `body` as plain prose. Do not use LaTeX (`$N$`), HTML, or headings. Inline code
 may be wrapped in single backticks. Keep it under four sentences.

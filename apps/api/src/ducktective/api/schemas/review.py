@@ -43,6 +43,7 @@ from ducktective.core.review.value_objects import (
     FeedbackVerdict,
     FindingCategory,
     FindingStatus,
+    ReviewLanguage,
     ReviewSource,
     ReviewStatus,
     Severity,
@@ -57,6 +58,8 @@ class StartReviewRequest(BaseModel):
     source: ReviewSource = ReviewSource.LOCAL_DIFF
     external_pull_request_id: str | None = None
     model: str | None = Field(default=None, max_length=64)
+    language: ReviewLanguage = ReviewLanguage.RU
+    """На каком языке модель пишет находки — интерфейс присылает свой текущий."""
 
 
 class HunkResponse(BaseModel):

@@ -28,6 +28,7 @@ import type {
   ReviewRunSummary,
 } from "@/api/types";
 import { accessToken } from "@/api/token";
+import { currentLanguage } from "@/i18n";
 
 /** Разговор, в который попал человек, и завели ли его сейчас. */
 export interface StartedConversation {
@@ -216,10 +217,11 @@ export const api = {
   getFeedbackDigest: (repositoryId: string) =>
     request<FeedbackDigest>(`/repositories/${repositoryId}/feedback`),
 
+  /** Язык интерфейса уходит вместе с делом: находки пишутся на нём. */
   startReview: (repositoryId: string, base: string, head: string, model?: string) =>
     request<ReviewRun>(`/repositories/${repositoryId}/reviews`, {
       method: "POST",
-      body: JSON.stringify({ base, head, model: model ?? null }),
+      body: JSON.stringify({ base, head, model: model ?? null, language: currentLanguage() }),
     }),
 
   enqueueReview: (runId: string) =>

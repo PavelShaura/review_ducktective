@@ -46,6 +46,12 @@ from ducktective.core.review.reviewers import (
     ReviewMode,
     reviewer_name,
 )
+from ducktective.core.review.trace import (
+    trace,
+)
+from ducktective.core.review.value_objects import (
+    ReviewLanguage,
+)
 from ducktective.core.review.verification import (
     mentions_external_code,
 )
@@ -210,7 +216,8 @@ class AgenticCodeReviewer:
                 requirements=requirements,
                 context=context,
                 listener=listener,
-                reason="инструменты навигации недоступны",
+                reason=trace(run.language, "fallback_no_tools"),
+                language=run.language,
             )
 
         try:
@@ -230,7 +237,8 @@ class AgenticCodeReviewer:
                 requirements=requirements,
                 context=context,
                 listener=listener,
-                reason=f"диалог не поместился в окно модели: {error}",
+                reason=trace(run.language, "fallback_window", error=error),
+                language=run.language,
             )
         except LlmOutputError as error:
             return await self._fall_back(
@@ -239,7 +247,8 @@ class AgenticCodeReviewer:
                 requirements=requirements,
                 context=context,
                 listener=listener,
-                reason=f"итог расследования не разобрался: {error}",
+                reason=trace(run.language, "fallback_unparsed", error=error),
+                language=run.language,
             )
 
     async def _investigate(
@@ -262,7 +271,10 @@ class AgenticCodeReviewer:
         )
         tool_requirements = _with_tool_calling(requirements)
         messages = [
-            LlmMessage(role=LlmRole.SYSTEM, content=system_prompt(with_tools=True)),
+            LlmMessage(
+                role=LlmRole.SYSTEM,
+                content=system_prompt(with_tools=True, language=support.language),
+            ),
             LlmMessage(role=LlmRole.USER, content=build_user_message(file, patch_text, context)),
         ]
 
@@ -283,7 +295,7 @@ class AgenticCodeReviewer:
                 file,
                 step,
                 StepKind.STAGE,
-                f"Спрашиваю модель, обращение {attempt}",
+                trace(support.language, "asking_model", attempt=attempt),
             )
             response = await self._llm_client.complete(
                 messages,
@@ -310,7 +322,7 @@ class AgenticCodeReviewer:
                     file,
                     step,
                     StepKind.STAGE,
-                    "Ответ модели оборвался на лимите — прошу повторить вызов",
+                    trace(support.language, "answer_cut"),
                 )
                 continue
 
@@ -338,6 +350,7 @@ class AgenticCodeReviewer:
                     step,
                     shown,
                     listener,
+                    support.language,
                 )
 
             await self._record(listener, file, step, StepKind.THOUGHT, response.content)
@@ -360,8 +373,12 @@ class AgenticCodeReviewer:
                     file,
                     step,
                     StepKind.STAGE,
-                    f"Диалог заполнил окно модели: около {dialogue_tokens} токенов "
-                    f"из {response.context_window}",
+                    trace(
+                        support.language,
+                        "window_full",
+                        tokens=dialogue_tokens,
+                        window=response.context_window,
+                    ),
                 )
                 break
         else:
@@ -370,7 +387,7 @@ class AgenticCodeReviewer:
                 file,
                 step,
                 StepKind.STAGE,
-                f"Достигнут потолок обращений: {self._max_steps}",
+                trace(support.language, "call_ceiling", limit=self._max_steps),
             )
 
         return await self._conclude(
@@ -382,6 +399,7 @@ class AgenticCodeReviewer:
             step=step,
             shown=shown,
             listener=listener,
+            language=support.language,
         )
 
     async def _run_tool(
@@ -449,6 +467,7 @@ class AgenticCodeReviewer:
         step: int,
         shown: list[CodeFragment],
         listener: InvestigationSink,
+        language: ReviewLanguage,
     ) -> FileReviewResult:
         """Вынуждает структурированный ответ, когда цикл кончился.
 
@@ -509,6 +528,7 @@ class AgenticCodeReviewer:
             step,
             shown,
             listener,
+            language,
         )
 
     async def _complete_closing(
@@ -531,13 +551,14 @@ class AgenticCodeReviewer:
         step: int,
         shown: list[CodeFragment],
         listener: InvestigationSink,
+        language: ReviewLanguage,
     ) -> FileReviewResult:
         await self._record(
             listener,
             file,
             step,
             StepKind.ANSWER,
-            describe_findings(payload),
+            describe_findings(payload, language),
         )
         return FileReviewResult(
             drafts=[to_draft(finding, file.path) for finding in payload.findings],
@@ -555,8 +576,12 @@ class AgenticCodeReviewer:
         context: DiffContext | None,
         listener: InvestigationSink,
         reason: str,
+        language: ReviewLanguage,
     ) -> FileReviewResult:
         """Уходит на проход без инструментов, назвав причину.
+
+        Язык уходит вместе с файлом: запасной путь пишет те же находки,
+        и на другом языке они читались бы как чужое дело.
 
         Причина попадает в трассу, а не только в лог: расследование, которого
         не было, и расследование, где агент ничего не нашёл, — разные события,
@@ -568,6 +593,7 @@ class AgenticCodeReviewer:
             patch_text=patch_text,
             requirements=requirements,
             context=context,
+            support=ReviewSupport(language=language),
         )
 
     def _out_of_budget(self, usage: LlmUsage) -> bool:

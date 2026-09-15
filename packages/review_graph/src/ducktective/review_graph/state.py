@@ -44,6 +44,9 @@ from ducktective.core.review.ports import (
     CancellationCheck,
     FindingHistory,
 )
+from ducktective.core.review.value_objects import (
+    ReviewLanguage,
+)
 from ducktective.core.types import (
     RepositoryId,
 )
@@ -65,6 +68,7 @@ class ReviewRuntimeContext:
     diff: RunDiff = field(default_factory=RunDiff)
     history: FindingHistory | None = None
     repository_id: RepositoryId | None = None
+    language: ReviewLanguage = ReviewLanguage.RU
 
 
 class FileReviewTask(BaseModel):

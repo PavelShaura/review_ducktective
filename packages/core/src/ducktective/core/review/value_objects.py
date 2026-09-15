@@ -9,6 +9,24 @@ class ReviewSource(StrEnum):
     UPLOAD = "upload"
 
 
+class ReviewLanguage(StrEnum):
+    """Язык, на котором модель пишет находки.
+
+    Хранится у прогона, а не берётся из настроек: дело читают на том языке,
+    на котором его завели, и смена языка интерфейса не должна переписывать
+    уже закрытые дела. Русский по умолчанию — на нём интерфейс и промпты
+    написаны изначально, и старые прогоны без поля ему и принадлежат.
+    """
+
+    RU = "ru"
+    EN = "en"
+
+    @property
+    def prompt_name(self) -> str:
+        """Как язык называется в подсказке модели: подсказка написана по-английски."""
+        return {ReviewLanguage.RU: "Russian", ReviewLanguage.EN: "English"}[self]
+
+
 class ReviewStatus(StrEnum):
     QUEUED = "queued"
     INDEXING = "indexing"

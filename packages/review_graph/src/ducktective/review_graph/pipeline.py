@@ -121,6 +121,7 @@ class LangGraphReviewPipeline:
                     diff=RunDiff(request.files),
                     history=self._history,
                     repository_id=request.repository_id,
+                    language=request.language,
                 ),
                 config=self._config(request),
             )

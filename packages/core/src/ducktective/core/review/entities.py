@@ -60,6 +60,7 @@ from ducktective.core.review.value_objects import (
     FindingCategory,
     FindingProducer,
     FindingStatus,
+    ReviewLanguage,
     ReviewSource,
     ReviewStatus,
     Severity,
@@ -352,6 +353,8 @@ class ReviewRun(AggregateRoot):
     репозитория и по требованиям узла. Хранится на прогоне, потому что
     сравнивать находки между собой имеет смысл только зная, кто их сделал.
     """
+    language: ReviewLanguage = ReviewLanguage.RU
+    """На каком языке модель пишет находки — язык интерфейса на момент запуска."""
 
     files: list[ReviewFile] = field(default_factory=list)
     findings: list[Finding] = field(default_factory=list)
@@ -367,6 +370,7 @@ class ReviewRun(AggregateRoot):
         diff: Diff,
         head_subject: str | None = None,
         preferred_model: str | None = None,
+        language: ReviewLanguage = ReviewLanguage.RU,
         created_by: UserId | None = None,
         external_pull_request_id: str | None = None,
     ) -> Self:
@@ -384,6 +388,7 @@ class ReviewRun(AggregateRoot):
             created_at=datetime.now(UTC),
             head_subject=head_subject,
             preferred_model=preferred_model,
+            language=language,
             created_by=created_by,
             external_pull_request_id=external_pull_request_id,
             files=[_build_file(diff_file) for diff_file in diff.files],

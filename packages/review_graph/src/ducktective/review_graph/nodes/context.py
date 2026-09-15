@@ -28,6 +28,9 @@ from ducktective.core.review.reviewers import (
     ReviewMode,
     review_mode_of,
 )
+from ducktective.core.review.trace import (
+    trace,
+)
 from ducktective.core.types import (
     RepositoryId,
 )
@@ -84,7 +87,13 @@ def build_context_node(
 
             await report_stage(
                 runtime,
-                f"Окружение {position} из {total}: {file.path}",
+                trace(
+                    runtime.context.language,
+                    "context_of",
+                    position=position,
+                    total=total,
+                    path=file.path,
+                ),
                 file_path=file.path,
                 number=position,
             )
