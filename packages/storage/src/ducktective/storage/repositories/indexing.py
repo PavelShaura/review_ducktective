@@ -5,6 +5,9 @@ from sqlalchemy import (
     text,
     update,
 )
+from sqlalchemy.dialects.postgresql import (
+    aggregate_order_by,
+)
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
 )
@@ -338,7 +341,7 @@ class SqlAlchemySymbolEdgeRepository:
     async def resolve_pending(self, repository_id: RepositoryId) -> int:
         """Замыкает висящие рёбра.
 
-        Два прохода. Первый — по полному имени: надёжно и точно. Второй —
+        Два прохода. Первый — по полному имени, если оно в одном файле. Второй —
         по последнему сегменту имени, и только когда такой символ в проекте
         ровно один.
 
@@ -353,34 +356,32 @@ class SqlAlchemySymbolEdgeRepository:
         )
 
     async def _resolve_by_full_name(self, repository_id: RepositoryId) -> int:
-        earliest = (
+        """Замыкает рёбра по полному имени.
+
+        Имя, встречающееся в нескольких файлах, целью не становится:
+        какой из файлов имеется в виду, по имени не узнать. Внутри одного
+        файла имя может повторяться — тогда берётся первое определение.
+        """
+        unambiguous = (
             select(
                 CodeSymbolModel.qualified_name.label("qualified_name"),
-                func.min(CodeSymbolModel.start_line).label("start_line"),
+                func.array_agg(aggregate_order_by(CodeSymbolModel.id, CodeSymbolModel.start_line))[
+                    1
+                ].label("id"),
             )
             .where(CodeSymbolModel.repository_id == repository_id)
             .group_by(CodeSymbolModel.qualified_name)
-            .subquery()
+            .having(func.count(func.distinct(CodeSymbolModel.file_id)) == 1)
+            .cte("unambiguous")
         )
-        target = (
-            select(CodeSymbolModel.id, CodeSymbolModel.qualified_name)
-            .join(
-                earliest,
-                (CodeSymbolModel.qualified_name == earliest.c.qualified_name)
-                & (CodeSymbolModel.start_line == earliest.c.start_line),
-            )
-            .where(CodeSymbolModel.repository_id == repository_id)
-            .subquery()
-        )
-
         result = await self._session.execute(
             update(SymbolEdgeModel)
             .where(
                 SymbolEdgeModel.repository_id == repository_id,
                 SymbolEdgeModel.is_resolved.is_(False),
-                SymbolEdgeModel.target_qualified_name == target.c.qualified_name,
+                SymbolEdgeModel.target_qualified_name == unambiguous.c.qualified_name,
             )
-            .values(target_symbol_id=target.c.id, is_resolved=True)
+            .values(target_symbol_id=unambiguous.c.id, is_resolved=True)
             .returning(SymbolEdgeModel.id)
         )
         return len(result.all())

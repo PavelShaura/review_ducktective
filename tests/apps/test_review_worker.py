@@ -230,6 +230,11 @@ async def test_shutdown_closes_the_database_even_if_something_else_fails() -> No
     assert engine.disposed is True
 
 
+async def test_shutdown_after_failed_startup_skips_what_was_never_opened() -> None:
+    """Упавший `startup` оставляет контекст пустым, и остановка не должна падать следом."""
+    await shutdown({})
+
+
 class RecordingPipeline:
     """Конвейер, от которого нужен только вызов уборки."""
 
