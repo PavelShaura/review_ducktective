@@ -198,11 +198,17 @@ async def shutdown(ctx: dict[str, Any]) -> None:
     соединений переживает процесс и достаётся сборщику мусора уже после
     того, как цикл событий разобран, — оттуда и берутся жалобы на
     невозвращённые в пул соединения при остановке.
+
+    Ресурсы, которых нет в контексте, пропускаются: `startup` мог упасть
+    раньше, чем открыл их.
     """
     async with AsyncExitStack() as closing:
-        closing.push_async_callback(ctx["engine"].dispose)
-        closing.push_async_callback(ctx["redis"].aclose)
-        closing.push_async_callback(ctx["resources"].aclose)
+        if (engine := ctx.get("engine")) is not None:
+            closing.push_async_callback(engine.dispose)
+        if (redis := ctx.get("redis")) is not None:
+            closing.push_async_callback(redis.aclose)
+        if (resources := ctx.get("resources")) is not None:
+            closing.push_async_callback(resources.aclose)
 
 
 async def build_pipeline(ctx: dict[str, Any], tenant_id: TenantId) -> LangGraphReviewPipeline:

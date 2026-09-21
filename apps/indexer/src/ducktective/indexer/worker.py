@@ -112,10 +112,15 @@ async def shutdown(ctx: dict[str, Any]) -> None:
 
     Незакрытый пул соединений достаётся сборщику мусора уже после разбора
     цикла событий, и процесс уходит с жалобами на невозвращённые соединения.
+
+    Ресурсы, которых нет в контексте, пропускаются: `startup` мог упасть
+    раньше, чем открыл их.
     """
     async with AsyncExitStack() as closing:
-        closing.push_async_callback(ctx["engine"].dispose)
-        closing.push_async_callback(ctx["redis"].aclose)
+        if (engine := ctx.get("engine")) is not None:
+            closing.push_async_callback(engine.dispose)
+        if (redis := ctx.get("redis")) is not None:
+            closing.push_async_callback(redis.aclose)
 
 
 async def build_index_task(

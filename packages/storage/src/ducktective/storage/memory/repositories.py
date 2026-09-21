@@ -57,6 +57,7 @@ from ducktective.core.types import (
     QualifiedName,
     RepositoryId,
     ReviewRunId,
+    SourceFileId,
     TenantId,
     UserId,
 )
@@ -351,10 +352,10 @@ class InMemorySourceFileRepository:
             if source_file.repository_id == repository_id and not source_file.is_deleted
         ]
 
-    def symbols_of(self, repository_id: RepositoryId) -> list[CodeSymbol]:
-        """Все символы репозитория. Нужны рёбрам для разрешения имён."""
+    def symbols_of(self, repository_id: RepositoryId) -> list[tuple[SourceFile, CodeSymbol]]:
+        """Все символы репозитория вместе с файлом. Нужны рёбрам для разрешения имён."""
         return [
-            symbol
+            (source_file, symbol)
             for source_file in self._tracked()
             if source_file.repository_id == repository_id
             for symbol in source_file.symbols
@@ -427,10 +428,13 @@ class InMemorySymbolEdgeRepository:
         return resolved
 
     def _known_symbols(self, repository_id: RepositoryId) -> dict[QualifiedName, CodeSymbolId]:
+        """Имя, встречающееся в нескольких файлах, целью не становится."""
         known: dict[QualifiedName, CodeSymbolId] = {}
-        for symbol in self._source_files.symbols_of(repository_id):
+        homes: dict[QualifiedName, set[SourceFileId]] = {}
+        for source_file, symbol in self._source_files.symbols_of(repository_id):
             known.setdefault(symbol.qualified_name, symbol.id)
-        return known
+            homes.setdefault(symbol.qualified_name, set()).add(source_file.id)
+        return {name: known[name] for name, files in homes.items() if len(files) == 1}
 
     async def list_incoming(self, symbol_id: CodeSymbolId) -> list[SymbolEdge]:
         return [edge for edge in self._edges if edge.target_symbol_id == symbol_id]
